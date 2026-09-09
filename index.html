@@ -782,7 +782,7 @@ function renderEdit() {
     <form onsubmit="return saveSong(event, ${song ? `'${s.id}'` : 'null'})">
       <div class="row">
         <div><label>Title</label><input type="text" id="f_title" value="${escapeHtml(s.title)}" required></div>
-        <div><label>Title (Hebrew, optional)</label><input type="text" id="f_title_hebrew" value="${escapeHtml(s.title_hebrew||'')}"></div>
+        <div><label>Title (Hebrew, optional)</label><input type="text" id="f_title_hebrew" dir="auto" value="${escapeHtml(s.title_hebrew||'')}"></div>
       </div>
       <div class="row">
         <div><label>Artist</label><input type="text" id="f_artist" value="${escapeHtml(s.artist)}"></div>
@@ -804,8 +804,8 @@ function renderEdit() {
       </div>
       <div id="simpleHint" class="muted" style="margin:4px 0 6px;font-size:13px;" ${editChordMode==='simple'?'':'hidden'}>Type the chord line, then the lyric line right below it — just like on paper. Leave a blank line between sections. (No coloring or special formatting needed — this box is plain text.)</div>
       <div id="rawHint" class="muted" style="margin:4px 0 6px;font-size:13px;" ${editChordMode==='raw'?'':'hidden'}>Put each chord in brackets right before the word it plays over, e.g. <code>[D]ארבעים [G]יום</code> — or paste in HTML chord-chart markup directly.</div>
-      <textarea id="f_chords_simple" oninput="updatePreview()" ${editChordMode==='simple'?'':'hidden'}>${escapeHtml(simpleText)}</textarea>
-      <textarea id="f_chords_raw" oninput="updatePreview()" ${editChordMode==='raw'?'':'hidden'}>${escapeHtml(rawText)}</textarea>
+      <textarea id="f_chords_simple" dir="auto" oninput="updatePreview()" ${editChordMode==='simple'?'':'hidden'}>${escapeHtml(simpleText)}</textarea>
+      <textarea id="f_chords_raw" dir="auto" oninput="updatePreview()" ${editChordMode==='raw'?'':'hidden'}>${escapeHtml(rawText)}</textarea>
       <div class="card preview-box"><div class="muted" style="margin-bottom:6px">Live preview</div><div id="previewChart">${renderChart(stored, 0)}</div></div>
       <div style="margin-top:14px;display:flex;gap:10px;align-items:center;">
         <button class="btn" type="submit">${song ? 'Save Changes' : 'Add Song'}</button>
