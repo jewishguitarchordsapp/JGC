@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chord Chart App</title>
+<title>Jewish Guitar Chords App</title>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
   @font-face{
@@ -102,21 +102,43 @@
   .thread-list-item.active{border-color:var(--teal);background:#eef4f4;}
   .signin-gate{text-align:center;padding:30px;color:var(--muted);}
   nav button img{width:15px;height:15px;vertical-align:middle;margin-right:5px;opacity:0.9;}
+  nav button svg{width:17px;height:17px;vertical-align:-3px;margin-right:5px;stroke:#fff;}
   .html-chord-row{font-family:"CustomCourier",'Courier New',monospace;color:var(--chord);font-weight:700;white-space:pre-wrap;line-height:1.35;font-size:14px;}
   .html-lyric-row{font-family:"CustomCourier",'Courier New',monospace;white-space:pre-wrap;line-height:1.35;font-size:14px;margin-bottom:5px;}
   .title-hebrew{color:var(--muted);font-size:13px;direction:rtl;}
-  .home-tile{display:flex;align-items:center;gap:14px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:10px;cursor:pointer;}
-  .home-tile:hover{border-color:var(--teal);}
-  .home-tile-icon{flex:0 0 auto;width:38px;height:38px;display:flex;align-items:center;justify-content:center;font-size:22px;}
-  .home-tile-icon img{width:32px;height:32px;}
-  .home-tile-title{font-weight:600;font-size:15px;}
-  .home-tile-desc{color:var(--muted);font-size:13px;margin-top:2px;}
+  .home-tile{display:flex;align-items:flex-start;gap:14px;background:#f2f4f5;border:none;border-radius:14px;padding:16px 18px;margin-bottom:12px;cursor:pointer;transition:background .15s ease;}
+  .home-tile:hover{background:#e9edee;}
+  .home-tile:active{background:#e1e6e7;}
+  .home-tile-icon{flex:0 0 auto;width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;background:var(--tile-bg,#e3f0f0);}
+  .home-tile-icon svg{width:24px;height:24px;stroke:var(--tile-fg,var(--teal));}
+  .home-tile-icon img{width:26px;height:26px;}
+  .home-tile-title{font-weight:700;font-size:16px;color:#181a1b;}
+  .home-tile-desc{color:var(--muted);font-size:13.5px;margin-top:2px;line-height:1.4;}
+  .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  @media (max-width:640px){
+    header{padding:10px 12px;gap:8px;}
+    header h1{font-size:15px;}
+    header h1 img{width:20px;height:20px;}
+    nav{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;}
+    nav button{flex:0 0 auto;padding:7px 9px;font-size:12.5px;}
+    nav button svg{width:15px;height:15px;margin-right:4px;}
+    main{padding:12px;}
+    .card{padding:12px;}
+    .home-tile{padding:13px 14px;gap:11px;}
+    .home-tile-icon{width:40px;height:40px;border-radius:11px;}
+    .home-tile-icon svg{width:21px;height:21px;}
+    .home-tile-title{font-size:15px;}
+    form .row > div{min-width:100%;}
+    table{font-size:12.5px;}
+    .song-row{padding:11px 12px;}
+    .btn{padding:10px 14px;}
+  }
 </style>
 </head>
 <body>
 
 <header>
-  <h1 style="cursor:pointer;" onclick="goTo('home')"><img id="logoImg" alt="" style="width:24px;height:24px;vertical-align:middle;border-radius:6px;margin-right:6px;">Chord Chart App</h1>
+  <h1 style="cursor:pointer;" onclick="goTo('home')"><img id="logoImg" alt="" style="width:24px;height:24px;vertical-align:middle;border-radius:6px;margin-right:6px;">Jewish Guitar Chords App</h1>
   <nav id="mainNav"></nav>
   <div class="spacer"></div>
   <button id="shareBtn" class="btn secondary" style="padding:6px 10px;" title="Share this app"><img id="shareIcon" alt="Share" style="width:16px;height:16px;vertical-align:middle;"></button>
@@ -152,6 +174,20 @@ const ICONS = {
 };
 
 /* ============================================================
+   SVG_ICONS — inline stroke-based icons shared by the top nav and
+   the matching Home tiles, so the two use exactly the same glyphs.
+   Recolor via CSS `stroke` (nav = white, home tiles = tinted).
+   ============================================================ */
+const SVG_ICONS = {
+  list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>',
+  artists: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+  categories: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>',
+  playlists: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>',
+  contact: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>',
+  admin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+};
+
+/* ============================================================
    STATE — kept in memory only (no localStorage/sessionStorage).
    Returning sign-in relies on Google's own "auto_select"; a hard
    refresh may ask you to click "Sign in with Google" again.
@@ -170,6 +206,14 @@ let filters = { q: '', artist: '', language: '', tag: '' };
 let songTab = 'all';       // 'all' | 'favorites' | 'known'
 let adminTab = 'requests'; // 'requests' | 'messages' | 'errors'
 let editChordMode = 'simple'; // 'simple' | 'raw' — which chords+lyrics textarea is active on the Add/Edit Song form
+// Manual controls for the chords+lyrics textareas. Chord symbols (Em, C7...)
+// are always English even in a Hebrew/Yiddish song, so auto-detecting text
+// direction from the box's content doesn't work here — the person editing
+// needs to set this themselves. 'dir' controls which way typing/the cursor
+// flows (handy when typing a Hebrew lyric line); 'align' controls which
+// edge the box's lines hug (handy for previewing how it'll sit once
+// rendered - see the final chord-chart display, which right-aligns
+// Hebrew/Yiddish lines but always keeps chord rows themselves direction:ltr).
 let editChordDir = 'ltr';   // 'ltr' | 'rtl'
 let editChordAlign = 'left'; // 'left' | 'right'
 let chatTarget = null;     // {email,name} admin is viewing/replying to
@@ -501,13 +545,12 @@ const COMMON_CHORDS = ['C','C#','D','Eb','E','F','F#','G','Ab','A','Bb','B','Cm'
    ============================================================ */
 function goTo(name, extra) { view = Object.assign({ name }, extra || {}); render(); window.scrollTo(0,0); }
 
-const NAV_ICONS = { artists: 'artists', playlists: 'playlists', contact: 'contact', admin: 'admin' };
 function renderNav() {
   const nav = document.getElementById('mainNav');
   const tabs = [['home','Home'],['list','Songs'],['artists','Artists'],['categories','Categories'],['playlists','Playlists'],['contact','Contact']];
   if (currentUser && currentUser.isAdmin) tabs.push(['admin','Admin']);
   nav.innerHTML = tabs.map(([name,label]) => {
-    const icon = NAV_ICONS[name] ? `<img src="${ICONS[NAV_ICONS[name]]}" alt="">` : '';
+    const icon = SVG_ICONS[name] || '';
     return `<button class="${view.name===name?'active':''}" onclick="goTo('${name}')">${icon}${label}</button>`;
   }).join('');
 }
@@ -515,20 +558,33 @@ function renderNav() {
 /* ============================================================
    HOME — the landing page with a tile for each section
    ============================================================ */
+// Icon + accent tint per tile. Icons match the nav bar's SVG_ICONS 1:1 so the
+// two feel like one consistent set; `tint` picks the tile's badge colors —
+// Songs gets a distinct blue accent, everything else uses the app's teal.
+const TILE_TINTS = { blue: { bg: '#eaf1fd', fg: '#3b6fd6' } };
 const HOME_TILES = [
-  { name: 'list', icon: null, emoji: '🎵', title: 'Songs', desc: 'Browse a full database of all the songs in the app.' },
+  { name: 'list', icon: 'list', tint: 'blue', title: 'Songs', desc: 'Browse a full database of all the songs in the app.' },
   { name: 'artists', icon: 'artists', title: 'Artists', desc: 'Explore a complete list of all featured artists.' },
-  { name: 'categories', icon: null, emoji: '🗂️', title: 'Categories', desc: 'Explore songs by language and other content tags.' },
+  { name: 'categories', icon: 'categories', title: 'Categories', desc: 'Explore songs by language and other content tags.' },
   { name: 'playlists', icon: 'playlists', title: 'Playlists', desc: 'Create, share, and view your favorite playlists.' },
   { name: 'contact', icon: 'contact', title: 'Contact', desc: 'Request songs, report issues, or reach out to your teacher.' },
   { name: 'knownChords', icon: null, emoji: '🎸', title: 'My Chords & Favorites', desc: 'Set your known chords and jump to your favorite songs.' },
 ];
+function tileIconHtml(t) {
+  if (t.icon && SVG_ICONS[t.icon]) return SVG_ICONS[t.icon];
+  if (t.icon && ICONS[t.icon]) return `<img src="${ICONS[t.icon]}" alt="">`;
+  return t.emoji || '';
+}
+function tileBadgeStyle(t) {
+  const tint = TILE_TINTS[t.tint];
+  return tint ? ` style="--tile-bg:${tint.bg};--tile-fg:${tint.fg};"` : '';
+}
 function renderHome() {
   const tiles = HOME_TILES.slice();
   if (currentUser && currentUser.isAdmin) tiles.push({ name: 'admin', icon: 'admin', title: 'Admin', desc: 'Manage song requests, messages, and error reports.' });
   let html = tiles.map(t => `
     <div class="home-tile" onclick="goTo('${t.name}')">
-      <div class="home-tile-icon">${t.icon ? `<img src="${ICONS[t.icon]}" alt="">` : t.emoji}</div>
+      <div class="home-tile-icon"${tileBadgeStyle(t)}>${tileIconHtml(t)}</div>
       <div><div class="home-tile-title">${t.title}</div><div class="home-tile-desc">${t.desc}</div></div>
     </div>`).join('');
   html += `
@@ -620,7 +676,7 @@ function goRandomSong() {
 
 function shareApp() {
   const url = window.location.href;
-  if (navigator.share) { navigator.share({ title: 'Chord Chart App', url }).catch(()=>{}); return; }
+  if (navigator.share) { navigator.share({ title: 'Jewish Guitar Chords App', url }).catch(()=>{}); return; }
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(url).then(() => alert('Link copied — paste it to share the app!')).catch(() => prompt('Copy this link to share the app:', url));
   } else {
@@ -1019,9 +1075,9 @@ function renderContact() {
       <label>Note (optional)</label><input type="text" id="req_note">
       <div style="margin-top:8px"><button class="btn" onclick="submitRequest()">Request Song</button> <span id="reqStatus" class="status"></span></div>
       <h2 style="margin-top:24px">My Song Requests</h2>
-      <table><tr><th>Status</th><th>Song</th><th>Artist</th></tr>
+      <div class="table-wrap"><table><tr><th>Status</th><th>Song</th><th>Artist</th></tr>
       ${requestsCache.map(r => `<tr><td><span class="badge ${r.status}">${r.status}</span></td><td>${escapeHtml(r.song_title)}</td><td>${escapeHtml(r.artist)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No requests yet.</td></tr>'}
-      </table>
+      </table></div>
       <h2 style="margin-top:24px">Message your teacher</h2>
       <div class="chat-thread" id="chatThread">${renderChatMessages(messagesCache)}</div>
       <div style="display:flex;gap:8px"><input type="text" id="chatInput" placeholder="Type a message…" style="flex:1"><button class="btn" onclick="sendChatMessage()">Send</button></div>`;
@@ -1068,12 +1124,12 @@ function loadAdminRequests() {
   api('getRequests', {}).then(data => {
     requestsCache = data.requests || [];
     const body = document.getElementById('adminBody');
-    body.innerHTML = `<table><tr><th>Status</th><th>Song</th><th>Artist</th><th>Requested by</th><th>Note</th><th></th></tr>` +
+    body.innerHTML = `<div class="table-wrap"><table><tr><th>Status</th><th>Song</th><th>Artist</th><th>Requested by</th><th>Note</th><th></th></tr>` +
       requestsCache.slice().sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).map(r => `<tr>
         <td><span class="badge ${r.status}">${r.status}</span></td><td>${escapeHtml(r.song_title)}</td><td>${escapeHtml(r.artist)}</td>
         <td>${escapeHtml(r.user_name)}<br><span class="muted">${escapeHtml(r.user_email)}</span></td><td>${escapeHtml(r.note)}</td>
         <td>${r.status==='pending' ? `<button class="btn secondary" onclick="setRequestStatus('${r.id}','added')">Mark added</button> <button class="btn danger" onclick="setRequestStatus('${r.id}','declined')">Decline</button>` : ''}</td>
-      </tr>`).join('') + `</table>`;
+      </tr>`).join('') + `</table></div>`;
   }).catch(err => { document.getElementById('adminBody').innerHTML = `<div class="error">${err.message}</div>`; });
 }
 function setRequestStatus(id, status) {
@@ -1111,14 +1167,14 @@ function sendAdminReply() {
 function loadAdminErrors() {
   api('getErrors', {}).then(data => {
     errorsCache = data.errors || [];
-    document.getElementById('adminBody').innerHTML = `<table><tr><th>Status</th><th>Song</th><th>Reported by</th><th>Description</th><th></th></tr>` +
+    document.getElementById('adminBody').innerHTML = `<div class="table-wrap"><table><tr><th>Status</th><th>Song</th><th>Reported by</th><th>Description</th><th></th></tr>` +
       errorsCache.slice().sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).map(e => `<tr>
         <td><span class="badge ${e.status}">${e.status}</span></td>
         <td>${escapeHtml(e.song_title)}<br><span class="muted">${escapeHtml(e.artist)}</span></td>
         <td>${escapeHtml(e.user_name)}<br><span class="muted">${escapeHtml(e.user_email)}</span></td>
         <td>${escapeHtml(e.description)}</td>
         <td>${e.status==='open' ? `<button class="btn secondary" onclick="setErrorStatus('${e.id}','resolved')">Mark resolved</button>` : ''}</td>
-      </tr>`).join('') + `</table>`;
+      </tr>`).join('') + `</table></div>`;
   }).catch(err => { document.getElementById('adminBody').innerHTML = `<div class="error">${err.message}</div>`; });
 }
 function setErrorStatus(id, status) { api('updateErrorReport', { id, status }).then(loadAdminErrors).catch(err => alert(err.message)); }
