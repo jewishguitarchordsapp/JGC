@@ -364,12 +364,23 @@ function renderChordHtmlBody(html, transposeSemitones) {
         if (texts[j] !== '') { rtl = isRtl[j]; break; }
       }
     }
-    const alignStyle = rtl ? 'direction:rtl;text-align:right;' : 'direction:ltr;text-align:left;';
     if (isChordRow) {
+      // A chord line is authored as a left-to-right run of chord symbols
+      // with runs of &nbsp; padding between them, positioning each chord
+      // over a specific word (e.g. "C     F     Em"). That padding only
+      // lines up correctly if the browser lays the line out strictly
+      // left-to-right - direction:rtl here would let the bidi algorithm
+      // reorder the separate chord symbols relative to each other and
+      // collapse the padding between them. So a chord row always stays
+      // direction:ltr; only which edge it hugs (text-align) follows the
+      // paired lyric line's language, keeping chords over Hebrew/Yiddish
+      // lyrics right-aligned and chords over English lyrics left-aligned.
       const inner = transposeSemitones ? transposeChordHtmlFragment(p.innerHTML, transposeSemitones) : p.innerHTML;
-      return `<div class="html-chord-row" style="${alignStyle}">${inner}</div>`;
+      const chordAlignStyle = 'direction:ltr;text-align:' + (rtl ? 'right' : 'left') + ';';
+      return `<div class="html-chord-row" style="${chordAlignStyle}">${inner}</div>`;
     }
-    return `<div class="html-lyric-row" style="${alignStyle}">${p.innerHTML}</div>`;
+    const lyricAlignStyle = rtl ? 'direction:rtl;text-align:right;' : 'direction:ltr;text-align:left;';
+    return `<div class="html-lyric-row" style="${lyricAlignStyle}">${p.innerHTML}</div>`;
   }).join('');
 }
 
