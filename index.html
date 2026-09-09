@@ -132,7 +132,7 @@
    CONFIG — fill these in (see SETUP.md)
    ============================================================ */
 const CONFIG = {
-  SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbzrDMvutkLExX_8iZwSIM1T81Ter5iWF-Q687z-1R-VoqT5azW_T4-zcAI6jEwGotYT/exec',
+  SCRIPT_URL: 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE',
   CLIENT_ID: 'PASTE_YOUR_GOOGLE_OAUTH_CLIENT_ID_HERE',
   AUTO_REFRESH_SECONDS: 60
 };
@@ -522,7 +522,7 @@ function filteredSongs() {
   });
   if (songTab === 'favorites') list = list.filter(s => favorites.includes(s.id));
   if (songTab === 'known') list = list.filter(songKnown);
-  return list.sort((a,b) => (a.title||'').localeCompare(b.title||''));
+  return list.sort((a,b) => String(a.title||'').localeCompare(String(b.title||'')));
 }
 
 function renderList() {
