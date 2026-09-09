@@ -170,6 +170,8 @@ let filters = { q: '', artist: '', language: '', tag: '' };
 let songTab = 'all';       // 'all' | 'favorites' | 'known'
 let adminTab = 'requests'; // 'requests' | 'messages' | 'errors'
 let editChordMode = 'simple'; // 'simple' | 'raw' — which chords+lyrics textarea is active on the Add/Edit Song form
+let editChordDir = 'ltr';   // 'ltr' | 'rtl'
+let editChordAlign = 'left'; // 'left' | 'right'
 let chatTarget = null;     // {email,name} admin is viewing/replying to
 let refreshTimer = null;
 
@@ -784,6 +786,8 @@ function renderEdit() {
   const stored = s.chords_lyrics || '';
   const storedIsHtml = isHtmlChordFormat(stored);
   editChordMode = (stored === '' || storedIsHtml) ? 'simple' : 'raw';
+  editChordDir = 'ltr';
+  editChordAlign = 'left';
   const simpleText = storedIsHtml ? htmlChordFormatToPlainText(stored) : (editChordMode === 'simple' ? stored : '');
   const rawText = stored;
   const html = `<span class="backlink" onclick="goTo(${song ? `'detail',{id:'${s.id}'}` : `'list'`})">‹ Cancel</span>
@@ -804,17 +808,33 @@ function renderEdit() {
       <div class="row">
         <div><label>Capo (fret the chords below assume)</label><input type="number" id="f_capo" value="${s.capo||0}" min="0" max="11"></div>
       </div>
-      <div class="row" style="align-items:center;">
+      <div class="row" style="align-items:center;flex-wrap:wrap;gap:8px 16px;">
         <label style="margin:0;">Chords + Lyrics</label>
         <div class="subtabs" style="margin:0;">
           <button type="button" id="modeSimpleBtn" class="${editChordMode==='simple'?'active':''}" onclick="setEditChordMode('simple')">Simple</button>
           <button type="button" id="modeRawBtn" class="${editChordMode==='raw'?'active':''}" onclick="setEditChordMode('raw')">Advanced</button>
         </div>
+        <div style="margin-left:auto;display:flex;gap:16px;flex-wrap:wrap;">
+          <div title="Which way typing/the cursor flows in the box below — switch to RTL while typing a Hebrew/Yiddish lyric line, back to LTR for a chord line.">
+            <span class="muted" style="font-size:12px;margin-right:4px;">Typing direction:</span>
+            <div class="subtabs" style="margin:0;display:inline-flex;">
+              <button type="button" id="dirLtrBtn" class="${editChordDir==='ltr'?'active':''}" onclick="setChordTextDir('ltr')">LTR</button>
+              <button type="button" id="dirRtlBtn" class="${editChordDir==='rtl'?'active':''}" onclick="setChordTextDir('rtl')">RTL</button>
+            </div>
+          </div>
+          <div title="Which edge the lines in the box hug — the final song page always right-aligns Hebrew/Yiddish lines, so switch this to Right to preview chord spacing the way it'll actually look.">
+            <span class="muted" style="font-size:12px;margin-right:4px;">Align:</span>
+            <div class="subtabs" style="margin:0;display:inline-flex;">
+              <button type="button" id="alignLeftBtn" class="${editChordAlign==='left'?'active':''}" onclick="setChordTextAlign('left')">Left</button>
+              <button type="button" id="alignRightBtn" class="${editChordAlign==='right'?'active':''}" onclick="setChordTextAlign('right')">Right</button>
+            </div>
+          </div>
+        </div>
       </div>
-      <div id="simpleHint" class="muted" style="margin:4px 0 6px;font-size:13px;" ${editChordMode==='simple'?'':'hidden'}>Type the chord line, then the lyric line right below it — just like on paper. Leave a blank line between sections. (No coloring or special formatting needed — this box is plain text.)</div>
+      <div id="simpleHint" class="muted" style="margin:4px 0 6px;font-size:13px;" ${editChordMode==='simple'?'':'hidden'}>Type the chord line, then the lyric line right below it — just like on paper. Leave a blank line between sections. (No coloring or special formatting needed — this box is plain text.) Chord names are always English, so for a Hebrew/Yiddish song use the Typing direction / Align controls above to switch back and forth as you go.</div>
       <div id="rawHint" class="muted" style="margin:4px 0 6px;font-size:13px;" ${editChordMode==='raw'?'':'hidden'}>Put each chord in brackets right before the word it plays over, e.g. <code>[D]ארבעים [G]יום</code> — or paste in HTML chord-chart markup directly.</div>
-      <textarea id="f_chords_simple" dir="auto" oninput="updatePreview()" ${editChordMode==='simple'?'':'hidden'}>${escapeHtml(simpleText)}</textarea>
-      <textarea id="f_chords_raw" dir="auto" oninput="updatePreview()" ${editChordMode==='raw'?'':'hidden'}>${escapeHtml(rawText)}</textarea>
+      <textarea id="f_chords_simple" dir="${editChordDir}" style="text-align:${editChordAlign};" oninput="updatePreview()" ${editChordMode==='simple'?'':'hidden'}>${escapeHtml(simpleText)}</textarea>
+      <textarea id="f_chords_raw" dir="${editChordDir}" style="text-align:${editChordAlign};" oninput="updatePreview()" ${editChordMode==='raw'?'':'hidden'}>${escapeHtml(rawText)}</textarea>
       <div class="card preview-box"><div class="muted" style="margin-bottom:6px">Live preview</div><div id="previewChart">${renderChart(stored, 0)}</div></div>
       <div style="margin-top:14px;display:flex;gap:10px;align-items:center;">
         <button class="btn" type="submit">${song ? 'Save Changes' : 'Add Song'}</button>
@@ -845,6 +865,24 @@ function setEditChordMode(mode) {
   document.getElementById('modeSimpleBtn').classList.toggle('active', mode === 'simple');
   document.getElementById('modeRawBtn').classList.toggle('active', mode === 'raw');
   updatePreview();
+}
+// Manual typing-direction / alignment controls for the chords+lyrics boxes
+// (see the comment on editChordDir/editChordAlign above for why this isn't
+// auto-detected). Applied to both textareas so the setting sticks across
+// Simple/Advanced switches, not just re-rendered HTML.
+function setChordTextDir(dir) {
+  editChordDir = dir;
+  document.getElementById('f_chords_simple').dir = dir;
+  document.getElementById('f_chords_raw').dir = dir;
+  document.getElementById('dirLtrBtn').classList.toggle('active', dir === 'ltr');
+  document.getElementById('dirRtlBtn').classList.toggle('active', dir === 'rtl');
+}
+function setChordTextAlign(align) {
+  editChordAlign = align;
+  document.getElementById('f_chords_simple').style.textAlign = align;
+  document.getElementById('f_chords_raw').style.textAlign = align;
+  document.getElementById('alignLeftBtn').classList.toggle('active', align === 'left');
+  document.getElementById('alignRightBtn').classList.toggle('active', align === 'right');
 }
 function updatePreview() { document.getElementById('previewChart').innerHTML = renderChart(currentChordsLyricsValue(), 0); }
 function saveSong(evt, id) {
