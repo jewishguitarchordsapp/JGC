@@ -478,6 +478,14 @@ function splitCategories(cats) {
   return { language, tags };
 }
 
+// A song's "artist" field is stored as one string, but can list more than
+// one artist separated by commas (e.g. "Artist A, Artist B") - split that
+// into individual names so each artist can be browsed/filtered on its own,
+// with the song showing up under every one of them.
+function splitArtists(artist) {
+  return String(artist || '').split(',').map(a => a.trim()).filter(Boolean);
+}
+
 function extractYouTubeId(url) {
   if (!url) return null;
   const m = String(url).match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/))([\w-]{11})/);
@@ -541,7 +549,7 @@ function songKnown(song) {
 function filteredSongs() {
   let list = songs.filter(s => {
     const { language, tags } = splitCategories(s.categories);
-    if (filters.artist && s.artist !== filters.artist) return false;
+    if (filters.artist && !splitArtists(s.artist).includes(filters.artist)) return false;
     if (filters.language && language !== filters.language) return false;
     if (filters.tag && !tags.includes(filters.tag)) return false;
     if (filters.q) {
@@ -652,7 +660,8 @@ function saveKnownChords() {
    ARTISTS / CATEGORIES
    ============================================================ */
 function renderArtists() {
-  const counts = {}; songs.forEach(s => { if (s.artist) counts[s.artist] = (counts[s.artist]||0)+1; });
+  const counts = {};
+  songs.forEach(s => { splitArtists(s.artist).forEach(a => { counts[a] = (counts[a]||0)+1; }); });
   const artists = Object.keys(counts).sort((a,b)=>a.localeCompare(b));
   let html = '<h2>Artists</h2><div class="grid-cats">' +
     (artists.map(a => `<span class="chip" onclick="filters.artist='${a.replace(/'/g,"\\'")}';goTo('list')">${escapeHtml(a)} <span class="count">(${counts[a]})</span></span>`).join('') || '<span class="muted">No artists yet.</span>') + '</div>';
