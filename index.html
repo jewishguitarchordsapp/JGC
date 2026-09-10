@@ -84,6 +84,8 @@
   table{width:100%;border-collapse:collapse;font-size:14px;}
   table th{text-align:left;color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;padding:8px 6px;border-bottom:1px solid var(--border);}
   table td{padding:8px 6px;border-bottom:1px solid var(--border);}
+  .viewas-banner{background:#fff3cd;color:#7a5c00;padding:9px 16px;font-size:13.5px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-bottom:1px solid #f0d888;}
+  .viewas-banner .btn{padding:4px 10px;font-size:12px;}
   .badge{display:inline-block;padding:2px 9px;border-radius:12px;font-size:11px;font-weight:600;}
   .badge.pending{background:#fdf3d0;color:#8a6d00;}
   .badge.added{background:#dcf3e3;color:#1a7a3d;}
@@ -145,6 +147,7 @@
   <div id="userArea" class="userbox"></div>
 </header>
 
+<div id="viewAsBanner"></div>
 <main id="app"></main>
 
 <footer id="footerStatus"></footer>
@@ -218,6 +221,10 @@ let editChordDir = 'ltr';   // 'ltr' | 'rtl'
 let editChordAlign = 'left'; // 'left' | 'right'
 let chatTarget = null;     // {email,name} admin is viewing/replying to
 let refreshTimer = null;
+let viewAsUser = null;     // {email,name} — admin "View As" impersonation target (read-only), or null
+let viewAsData = null;     // {favorites,knownChords,playlists} snapshot for viewAsUser
+let usersCache = [];       // admin Users tab cache
+let userSearch = '';
 
 /* ============================================================
    GOOGLE SIGN-IN
@@ -294,7 +301,17 @@ async function api(action, fields) {
   if (currentUser) payload.idToken = currentUser.idToken;
   const res = await fetch(CONFIG.SCRIPT_URL, { method: 'POST', body: JSON.stringify(payload) });
   const data = await res.json();
-  if (!data.success) throw new Error(data.error || 'Request failed');
+  if (!data.success) {
+    // A sign-in error usually means the Google ID token has expired (it's
+    // only valid ~1 hour and this app doesn't silently refresh it) — clear
+    // the stale session so the UI cleanly asks to sign in again, instead of
+    // just showing a cryptic error while still looking "signed in".
+    if (data.error && data.error.indexOf('sign in with Google') >= 0 && currentUser) {
+      currentUser = null; favorites = []; knownChords = []; viewAsUser = null; viewAsData = null;
+      renderUserArea();
+    }
+    throw new Error(data.error || 'Request failed');
+  }
   return data;
 }
 
@@ -598,10 +615,17 @@ function renderHome() {
 /* ============================================================
    SONGS LIST (All / Favorites / Known Songs)
    ============================================================ */
+// While admin is "viewing as" another user, every favorites/known-chords
+// read in the app should reflect THAT user's data (read-only) instead of
+// the signed-in admin's own — these two helpers are the single place that
+// decides which set is "in effect" right now.
+function effectiveFavorites() { return viewAsUser ? (viewAsData.favorites || []) : favorites; }
+function effectiveKnownChords() { return viewAsUser ? (viewAsData.knownChords || []) : knownChords; }
+
 function songKnown(song) {
   const used = chordsUsedIn(song.chords_lyrics, 0);
   if (used.length === 0) return false;
-  return used.every(c => knownChords.includes(c));
+  return used.every(c => effectiveKnownChords().includes(c));
 }
 
 function filteredSongs() {
@@ -617,7 +641,7 @@ function filteredSongs() {
     }
     return true;
   });
-  if (songTab === 'favorites') list = list.filter(s => favorites.includes(s.id));
+  if (songTab === 'favorites') list = list.filter(s => effectiveFavorites().includes(s.id));
   if (songTab === 'known') list = list.filter(songKnown);
   return list.sort((a,b) => String(a.title||'').localeCompare(String(b.title||'')));
 }
@@ -647,7 +671,7 @@ function renderList() {
         <div style="display:flex;align-items:center;gap:10px;flex:1;cursor:pointer;" onclick="goTo('detail',{id:'${s.id}'})">
           <div><div class="title">${escapeHtml(s.title)}${s.title_hebrew ? ` <span class="title-hebrew">${escapeHtml(s.title_hebrew)}</span>` : ''}</div><div class="artist">${escapeHtml(s.artist||'')}</div></div>
         </div>
-        <span class="star ${favorites.includes(s.id)?'on':''}" onclick="event.stopPropagation();toggleFavoriteFor('${s.id}')">★</span>
+        <span class="star ${effectiveFavorites().includes(s.id)?'on':''}" onclick="event.stopPropagation();toggleFavoriteFor('${s.id}')">★</span>
       </div>`).join('');
   }
   document.getElementById('app').innerHTML = html;
@@ -662,7 +686,7 @@ function renderListRowsOnly() {
         <div style="display:flex;align-items:center;gap:10px;flex:1;cursor:pointer;" onclick="goTo('detail',{id:'${s.id}'})">
           <div><div class="title">${escapeHtml(s.title)}${s.title_hebrew ? ` <span class="title-hebrew">${escapeHtml(s.title_hebrew)}</span>` : ''}</div><div class="artist">${escapeHtml(s.artist||'')}</div></div>
         </div>
-        <span class="star ${favorites.includes(s.id)?'on':''}" onclick="event.stopPropagation();toggleFavoriteFor('${s.id}')">★</span>
+        <span class="star ${effectiveFavorites().includes(s.id)?'on':''}" onclick="event.stopPropagation();toggleFavoriteFor('${s.id}')">★</span>
       </div>`).join('');
   container.insertAdjacentHTML('beforeend', html);
 }
@@ -685,6 +709,7 @@ function shareApp() {
 }
 
 function toggleFavoriteFor(songId) {
+  if (viewAsUser) { alert('You\'re viewing ' + viewAsUser.name + ' as read-only. Exit "View As" to make changes.'); return; }
   if (!currentUser) { alert('Sign in with Google first to save favorites.'); return; }
   api('toggleFavorite', { song_id: songId }).then(r => {
     if (r.favorited) favorites.push(songId); else favorites = favorites.filter(id => id !== songId);
@@ -696,6 +721,7 @@ function toggleFavoriteFor(songId) {
    KNOWN CHORDS PICKER
    ============================================================ */
 function renderKnownChords() {
+  if (viewAsUser) { document.getElementById('app').innerHTML = `<span class="backlink" onclick="goTo('list')">‹ Back to Songs</span><h2>Chords ${escapeHtml(viewAsUser.name)} knows</h2><div class="grid-cats">` + (effectiveKnownChords().map(c => `<span class="chip toggle-on">${escapeHtml(c)}</span>`).join('') || '<span class="muted">None set.</span>') + `</div>`; return; }
   if (!currentUser) { document.getElementById('app').innerHTML = '<div class="empty">Sign in to set your known chords.</div>'; return; }
   let html = `<span class="backlink" onclick="goTo('list')">‹ Back to Songs</span>
     <h2>Chords you know</h2>
@@ -754,7 +780,7 @@ function renderDetail() {
   playerState.songId = song.id;
   const transpose = (song.capo||0) - playerState.capo;
   const ytId = extractYouTubeId(song.youtube_url);
-  const isFav = favorites.includes(song.id);
+  const isFav = effectiveFavorites().includes(song.id);
 
   const { language, tags } = splitCategories(song.categories);
   let html = `<span class="backlink" onclick="goTo('list')">‹ Back to Songs</span>
@@ -968,6 +994,14 @@ function saveSong(evt, id) {
    PLAYLISTS
    ============================================================ */
 function renderPlaylists() {
+  if (viewAsUser) {
+    const mine = viewAsData.playlists || [];
+    const pub = playlists.filter(p => p.visibility === 'public');
+    let html = `<h2>${escapeHtml(viewAsUser.name)}'s Playlists</h2>` + (mine.length? renderPlaylistCards(mine) : '<div class="muted">None yet.</div>');
+    html += `<h2>Public Playlists</h2>` + (pub.length? renderPlaylistCards(pub) : '<div class="muted">None yet.</div>');
+    document.getElementById('app').innerHTML = html;
+    return;
+  }
   if (!currentUser) {
     const pub = playlists.filter(p => p.visibility === 'public');
     document.getElementById('app').innerHTML = `<h2>Public Playlists</h2>` + renderPlaylistCards(pub) + `<div class="empty">Sign in with Google to make your own playlists.</div>`;
@@ -996,10 +1030,10 @@ function createPlaylistPrompt() {
     .catch(err => alert(err.message));
 }
 function renderPlaylistDetail() {
-  const p = playlists.find(pl => pl.id === view.id);
+  const p = playlists.find(pl => pl.id === view.id) || (viewAsUser && (viewAsData.playlists||[]).find(pl => pl.id === view.id));
   if (!p) { document.getElementById('app').innerHTML = '<div class="empty">Playlist not found.</div>'; return; }
-  const isOwner = currentUser && p.owner_email === currentUser.email;
-  const canEdit = isOwner || (currentUser && currentUser.isAdmin);
+  const isOwner = !viewAsUser && currentUser && p.owner_email === currentUser.email;
+  const canEdit = !viewAsUser && (isOwner || (currentUser && currentUser.isAdmin));
   const list = (p.song_ids||[]).map(id => songs.find(s => s.id === id)).filter(Boolean);
   let html = `<span class="backlink" onclick="goTo('playlists')">‹ Back to Playlists</span>
     <div class="song-header">
@@ -1114,11 +1148,13 @@ function renderAdmin() {
       <button class="${adminTab==='requests'?'active':''}" onclick="adminTab='requests';render()">Song Requests</button>
       <button class="${adminTab==='messages'?'active':''}" onclick="adminTab='messages';render()">Messages</button>
       <button class="${adminTab==='errors'?'active':''}" onclick="adminTab='errors';render()">Error Reports</button>
+      <button class="${adminTab==='users'?'active':''}" onclick="adminTab='users';render()">Users</button>
     </div><div id="adminBody">Loading…</div>`;
   document.getElementById('app').innerHTML = html;
   if (adminTab === 'requests') loadAdminRequests();
   else if (adminTab === 'messages') loadAdminMessages();
-  else loadAdminErrors();
+  else if (adminTab === 'errors') loadAdminErrors();
+  else loadAdminUsers();
 }
 function loadAdminRequests() {
   api('getRequests', {}).then(data => {
@@ -1180,10 +1216,64 @@ function loadAdminErrors() {
 function setErrorStatus(id, status) { api('updateErrorReport', { id, status }).then(loadAdminErrors).catch(err => alert(err.message)); }
 
 /* ============================================================
+   USERS (admin) + "View As" read-only impersonation
+   ============================================================ */
+function loadAdminUsers() {
+  api('getUsers', {}).then(data => {
+    usersCache = data.users || [];
+    renderUsersTable();
+  }).catch(err => { document.getElementById('adminBody').innerHTML = `<div class="error">${err.message}</div>`; });
+}
+function renderUsersTable() {
+  const body = document.getElementById('adminBody');
+  if (!body) return;
+  const q = userSearch.toLowerCase();
+  const list = usersCache.filter(u => !q || u.email.toLowerCase().includes(q) || (u.name||'').toLowerCase().includes(q));
+  body.innerHTML = `<div style="margin-bottom:10px"><input type="text" id="userSearchBox" placeholder="Search by name or email…" value="${escapeHtml(userSearch)}" style="max-width:320px"></div>
+    <div class="table-wrap"><table><tr><th>Name</th><th>Email</th><th>Favorites</th><th>Known Chords</th><th>Playlists</th><th>Requests</th><th>Messages</th><th>Errors</th><th>Last activity</th><th></th></tr>
+    ${list.map(u => `<tr>
+        <td>${escapeHtml(u.name||u.email)}</td>
+        <td>${escapeHtml(u.email)}</td>
+        <td>${u.favorites||0}</td>
+        <td>${u.knownChords ? '✓' : '—'}</td>
+        <td>${u.playlists||0}</td>
+        <td>${u.requests||0}</td>
+        <td>${u.messages||0}</td>
+        <td>${u.errors||0}</td>
+        <td class="muted">${u.lastActivity ? new Date(u.lastActivity).toLocaleDateString() : '—'}</td>
+        <td><button class="btn secondary" onclick='enterViewAs(${JSON.stringify(u.email)},${JSON.stringify(u.name||u.email)})'>View As</button></td>
+      </tr>`).join('') || `<tr><td colspan="10" class="muted">No users found.</td></tr>`}
+    </table></div>
+    <div class="muted" style="margin-top:8px">${list.length} user${list.length===1?'':'s'}${userSearch? ' matching "'+escapeHtml(userSearch)+'"':''} · ${usersCache.length} total</div>`;
+  const box = document.getElementById('userSearchBox');
+  if (box) box.addEventListener('input', e => { userSearch = e.target.value; renderUsersTable(); });
+}
+function enterViewAs(email, name) {
+  api('getUserSnapshot', { target_email: email }).then(data => {
+    viewAsUser = { email: data.email, name: name || data.email };
+    viewAsData = { favorites: data.favorites || [], knownChords: data.knownChords || [], playlists: data.playlists || [] };
+    songTab = 'all';
+    goTo('list');
+  }).catch(err => alert(err.message));
+}
+function exitViewAs() {
+  viewAsUser = null; viewAsData = null;
+  goTo('admin');
+}
+
+/* ============================================================
    MAIN RENDER
    ============================================================ */
+function renderViewAsBanner() {
+  const el = document.getElementById('viewAsBanner');
+  if (!el) return;
+  el.innerHTML = viewAsUser
+    ? `<div class="viewas-banner">👀 Viewing as <b>${escapeHtml(viewAsUser.name)}</b> <span class="muted">(${escapeHtml(viewAsUser.email)})</span> — read-only <button class="btn secondary" onclick="exitViewAs()">Exit</button></div>`
+    : '';
+}
 function render() {
   renderNav();
+  renderViewAsBanner();
   if (!CONFIG.SCRIPT_URL || CONFIG.SCRIPT_URL.indexOf('PASTE_YOUR') === 0) {
     document.getElementById('app').innerHTML = `<div class="card"><h2>One setup step left</h2>
       <p>Deploy the included <code>Code.gs</code> as an Apps Script Web App, then paste the Web App URL into
