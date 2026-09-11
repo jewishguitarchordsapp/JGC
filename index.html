@@ -206,6 +206,7 @@ let favorites = [];        // array of song ids the signed-in user favorited
 let knownChords = [];      // array of chord names the signed-in user knows
 let requestsCache = [];
 let messagesCache = [];
+let messagesLoaded = false; // set once messagesCache has been populated at least once this admin-panel visit, so we don't re-fetch it on every tab switch
 let errorsCache = [];
 let currentUser = null;    // {idToken, email, name, picture, isAdmin}
 let lastSynced = null;
@@ -1254,14 +1255,16 @@ function renderAdmin() {
   else if (adminTab === 'errors') loadAdminErrors();
   else loadAdminUsers();
   // Messages drive the badges on the Messages/Users tabs and the per-user
-  // dot in the Users list, so keep them loaded no matter which sub-tab is
-  // actually open — otherwise those badges would only ever appear after
-  // the admin had already clicked into Messages once.
-  if (adminTab !== 'messages') {
+  // dot in the Users list, so make sure they've been loaded at least once
+  // per admin-panel visit — but only once. The Messages tab and Users tab
+  // already load/refresh messagesCache themselves (Users gets it bundled
+  // into its getUsers response), so this extra fetch only ever runs when
+  // landing on Requests or Errors before either of those has been visited.
+  if (adminTab !== 'messages' && adminTab !== 'users' && !messagesLoaded) {
     api('getMessages', {}).then(data => {
       messagesCache = data.messages || [];
+      messagesLoaded = true;
       renderAdminNav();
-      if (adminTab === 'users') renderUsersTable();
     }).catch(() => {});
   }
 }
@@ -1315,6 +1318,7 @@ function setRequestArchived(id, archived) {
 function loadAdminMessages() {
   api('getMessages', {}).then(data => {
     messagesCache = data.messages || [];
+    messagesLoaded = true;
     renderAdminMessages();
     renderAdminNav();
   }).catch(err => { document.getElementById('adminBody').innerHTML = `<div class="error">${err.message}</div>`; });
@@ -1409,6 +1413,11 @@ function setErrorArchived(id, archived) { api('archiveError', { id, archived }).
 function loadAdminUsers() {
   api('getUsers', {}).then(data => {
     usersCache = data.users || [];
+    // getUsers already reads the whole Messages sheet server-side to tally
+    // per-user message counts, so it hands that same data back here — this
+    // fills messagesCache (for the unread dots/badges) without a second,
+    // separate getMessages round-trip every time the Users tab is opened.
+    if (data.messages) { messagesCache = data.messages; messagesLoaded = true; renderAdminNav(); }
     renderUsersTable();
   }).catch(err => { document.getElementById('adminBody').innerHTML = `<div class="error">${err.message}</div>`; });
 }
