@@ -92,6 +92,11 @@
   .badge.declined{background:#fbe0e0;color:#a33;}
   .badge.open{background:#fbe0e0;color:#a33;}
   .badge.resolved{background:#dcf3e3;color:#1a7a3d;}
+  .badge.archived{background:#eceff0;color:#666;}
+  .tab-badge{display:inline-block;min-width:16px;height:16px;padding:0 5px;border-radius:9px;background:#d93a3a;color:#fff;font-size:10.5px;font-weight:700;line-height:16px;text-align:center;vertical-align:2px;}
+  .tab-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#d93a3a;margin-inline-end:6px;vertical-align:1px;}
+  .admin-filter-row{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;}
+  .admin-filter-row select{padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:#fff;}
   .playlist-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:10px;cursor:pointer;}
   .playlist-card:hover{border-color:var(--teal);}
   .playlist-card .title{font-weight:600;}
@@ -231,6 +236,9 @@ let songContentLoaded = false; // true once the full-corpus background text fetc
 let songListPage = 0;
 let adminRequestsPage = 0;
 let adminErrorsPage = 0;
+let requestsFilter = 'all';  // 'all' | 'pending' | 'added' | 'declined' | 'archived'
+let errorsFilter = 'all';    // 'all' | 'open' | 'resolved' | 'archived'
+let messagesFilter = 'all';  // 'all' | 'unread' | 'archived'
 
 /* ============================================================
    PAGINATION — shared by the Songs list, Users tab, and the admin
@@ -1213,19 +1221,59 @@ function sendChatMessage() {
 /* ============================================================
    ADMIN PANEL — requests / messages / errors
    ============================================================ */
+// Groups the flat Messages rows into one entry per conversation (per
+// user_email), since that's the unit "archived" and "unread" apply to:
+// a conversation is archived if its most recent message is (a new message
+// from either side always arrives un-archived, see sendMessage in Code.gs),
+// and it's unread if the user has sent anything the admin hasn't opened yet.
+function computeThreads(list) {
+  const byUser = {};
+  list.forEach(m => { (byUser[m.user_email] = byUser[m.user_email] || []).push(m); });
+  return Object.keys(byUser).map(email => {
+    const msgs = byUser[email].slice().sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
+    const last = msgs[msgs.length - 1];
+    const nameMsg = msgs.slice().reverse().find(m => m.sender !== 'admin') || msgs[0];
+    return {
+      email, name: nameMsg.user_name || email, msgs,
+      archived: !!last && last.archived === 'true',
+      hasUnread: msgs.some(m => m.sender === 'user' && m.read_by_admin !== 'true'),
+      lastAt: last ? last.created_at : null
+    };
+  }).sort((a,b) => new Date(b.lastAt) - new Date(a.lastAt));
+}
+function unreadThreadCount() { return computeThreads(messagesCache).filter(t => !t.archived && t.hasUnread).length; }
+function userHasUnreadMessage(email) { return messagesCache.some(m => m.user_email === email && m.sender === 'user' && m.read_by_admin !== 'true'); }
+function tabBadgeHtml(count) { return count > 0 ? ` <span class="tab-badge">${count}</span>` : ''; }
+
 function renderAdmin() {
   if (!currentUser || !currentUser.isAdmin) { document.getElementById('app').innerHTML = '<div class="empty">Admin only.</div>'; return; }
-  let html = `<div class="subtabs">
-      <button class="${adminTab==='requests'?'active':''}" onclick="adminTab='requests';render()">Song Requests</button>
-      <button class="${adminTab==='messages'?'active':''}" onclick="adminTab='messages';render()">Messages</button>
-      <button class="${adminTab==='errors'?'active':''}" onclick="adminTab='errors';render()">Error Reports</button>
-      <button class="${adminTab==='users'?'active':''}" onclick="adminTab='users';render()">Users</button>
-    </div><div id="adminBody">Loading…</div>`;
-  document.getElementById('app').innerHTML = html;
+  document.getElementById('app').innerHTML = `<div class="subtabs" id="adminNav"></div><div id="adminBody">Loading…</div>`;
+  renderAdminNav();
   if (adminTab === 'requests') loadAdminRequests();
   else if (adminTab === 'messages') loadAdminMessages();
   else if (adminTab === 'errors') loadAdminErrors();
   else loadAdminUsers();
+  // Messages drive the badges on the Messages/Users tabs and the per-user
+  // dot in the Users list, so keep them loaded no matter which sub-tab is
+  // actually open — otherwise those badges would only ever appear after
+  // the admin had already clicked into Messages once.
+  if (adminTab !== 'messages') {
+    api('getMessages', {}).then(data => {
+      messagesCache = data.messages || [];
+      renderAdminNav();
+      if (adminTab === 'users') renderUsersTable();
+    }).catch(() => {});
+  }
+}
+function renderAdminNav() {
+  const nav = document.getElementById('adminNav');
+  if (!nav) return;
+  const unread = unreadThreadCount();
+  nav.innerHTML = `
+      <button class="${adminTab==='requests'?'active':''}" onclick="adminTab='requests';render()">Song Requests</button>
+      <button class="${adminTab==='messages'?'active':''}" onclick="adminTab='messages';render()">Messages${tabBadgeHtml(unread)}</button>
+      <button class="${adminTab==='errors'?'active':''}" onclick="adminTab='errors';render()">Error Reports</button>
+      <button class="${adminTab==='users'?'active':''}" onclick="adminTab='users';render()">Users${tabBadgeHtml(unread)}</button>`;
 }
 function loadAdminRequests() {
   api('getRequests', {}).then(data => {
@@ -1233,45 +1281,87 @@ function loadAdminRequests() {
     renderAdminRequests();
   }).catch(err => { document.getElementById('adminBody').innerHTML = `<div class="error">${err.message}</div>`; });
 }
+function filterRequests(list) {
+  if (requestsFilter === 'archived') return list.filter(r => r.archived === 'true');
+  const active = list.filter(r => r.archived !== 'true');
+  return requestsFilter === 'all' ? active : active.filter(r => r.status === requestsFilter);
+}
 function renderAdminRequests() {
   const body = document.getElementById('adminBody');
   if (!body) return;
-  const sorted = requestsCache.slice().sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
-  body.innerHTML = `<div class="table-wrap"><table><tr><th>Status</th><th>Song</th><th>Artist</th><th>Requested by</th><th>Note</th><th></th></tr>` +
-    (pageSlice(sorted, adminRequestsPage).map(r => `<tr>
+  const filtered = filterRequests(requestsCache).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+  const filterBar = `<div class="admin-filter-row"><label class="muted">Filter:</label><select onchange="requestsFilter=this.value;adminRequestsPage=0;renderAdminRequests()">
+      <option value="all" ${requestsFilter==='all'?'selected':''}>All</option>
+      <option value="pending" ${requestsFilter==='pending'?'selected':''}>Pending</option>
+      <option value="added" ${requestsFilter==='added'?'selected':''}>Added</option>
+      <option value="declined" ${requestsFilter==='declined'?'selected':''}>Declined</option>
+      <option value="archived" ${requestsFilter==='archived'?'selected':''}>Archived</option>
+    </select></div>`;
+  body.innerHTML = filterBar + `<div class="table-wrap"><table><tr><th>Status</th><th>Song</th><th>Artist</th><th>Requested by</th><th>Note</th><th></th></tr>` +
+    (pageSlice(filtered, adminRequestsPage).map(r => `<tr>
       <td><span class="badge ${r.status}">${r.status}</span></td><td>${escapeHtml(r.song_title)}</td><td>${escapeHtml(r.artist)}</td>
       <td>${escapeHtml(r.user_name)}<br><span class="muted">${escapeHtml(r.user_email)}</span></td><td>${escapeHtml(r.note)}</td>
-      <td>${r.status==='pending' ? `<button class="btn secondary" onclick="setRequestStatus('${r.id}','added')">Mark added</button> <button class="btn danger" onclick="setRequestStatus('${r.id}','declined')">Decline</button>` : ''}</td>
-    </tr>`).join('') || `<tr><td colspan="6" class="muted">No requests yet.</td></tr>`) + `</table></div>` +
-    pagerHtml(sorted.length, adminRequestsPage, 'changeAdminRequestsPage');
+      <td>${r.status==='pending' ? `<button class="btn secondary" onclick="setRequestStatus('${r.id}','added')">Mark added</button> <button class="btn danger" onclick="setRequestStatus('${r.id}','declined')">Decline</button> ` : ''}${r.archived==='true' ? `<button class="btn secondary" onclick="setRequestArchived('${r.id}',false)">Unarchive</button>` : `<button class="btn secondary" onclick="setRequestArchived('${r.id}',true)">Archive</button>`}</td>
+    </tr>`).join('') || `<tr><td colspan="6" class="muted">No requests${requestsFilter==='all'?' yet':''}.</td></tr>`) + `</table></div>` +
+    pagerHtml(filtered.length, adminRequestsPage, 'changeAdminRequestsPage');
 }
 function changeAdminRequestsPage(p) { adminRequestsPage = p; renderAdminRequests(); }
 function setRequestStatus(id, status) {
   api('updateRequestStatus', { id, status }).then(loadAdminRequests).catch(err => alert(err.message));
 }
+function setRequestArchived(id, archived) {
+  api('archiveRequest', { id, archived }).then(loadAdminRequests).catch(err => alert(err.message));
+}
 function loadAdminMessages() {
   api('getMessages', {}).then(data => {
     messagesCache = data.messages || [];
-    const byUser = {};
-    messagesCache.forEach(m => { (byUser[m.user_email] = byUser[m.user_email] || []).push(m); });
-    const emails = Object.keys(byUser).sort((a,b) => {
-      const la = byUser[a].map(m=>new Date(m.created_at)).sort().pop();
-      const lb = byUser[b].map(m=>new Date(m.created_at)).sort().pop();
-      return lb - la;
-    });
-    if (!chatTarget && emails.length) chatTarget = { email: emails[0], name: byUser[emails[0]][0].user_name };
-    const body = document.getElementById('adminBody');
-    body.innerHTML = `<div style="display:flex;gap:16px;flex-wrap:wrap;">
-      <div style="flex:1;min-width:220px;">${emails.map(e => `<div class="thread-list-item ${chatTarget && chatTarget.email===e?'active':''}" onclick='selectThread(${JSON.stringify(e)},${JSON.stringify(byUser[e][0].user_name)})'>
-          <span>${escapeHtml(byUser[e][0].user_name)}<br><span class="muted">${escapeHtml(e)}</span></span></div>`).join('') || '<div class="muted">No messages yet.</div>'}</div>
-      <div style="flex:2;min-width:260px;">
-        ${chatTarget ? `<div class="chat-thread" id="adminChatThread">${renderChatMessages(byUser[chatTarget.email]||[])}</div>
-        <div style="display:flex;gap:8px"><input type="text" id="adminChatInput" placeholder="Reply…" style="flex:1"><button class="btn" onclick="sendAdminReply()">Send</button></div>` : '<div class="muted">Select a conversation.</div>'}
-      </div></div>`;
-    const t = document.getElementById('adminChatThread'); if (t) t.scrollTop = t.scrollHeight;
+    renderAdminMessages();
+    renderAdminNav();
   }).catch(err => { document.getElementById('adminBody').innerHTML = `<div class="error">${err.message}</div>`; });
 }
-function selectThread(email, name) { chatTarget = { email, name }; loadAdminMessages(); }
+function filterThreads(threads) {
+  if (messagesFilter === 'archived') return threads.filter(t => t.archived);
+  const active = threads.filter(t => !t.archived);
+  return messagesFilter === 'unread' ? active.filter(t => t.hasUnread) : active;
+}
+function renderAdminMessages() {
+  const body = document.getElementById('adminBody');
+  if (!body) return;
+  const threads = computeThreads(messagesCache);
+  const filtered = filterThreads(threads);
+  if (chatTarget && !filtered.some(t => t.email === chatTarget.email)) chatTarget = null;
+  if (!chatTarget && filtered.length) chatTarget = { email: filtered[0].email, name: filtered[0].name };
+  const active = chatTarget ? threads.find(t => t.email === chatTarget.email) : null;
+  const filterBar = `<div class="admin-filter-row"><label class="muted">Filter:</label><select onchange="messagesFilter=this.value;renderAdminMessages()">
+      <option value="all" ${messagesFilter==='all'?'selected':''}>All</option>
+      <option value="unread" ${messagesFilter==='unread'?'selected':''}>Unread</option>
+      <option value="archived" ${messagesFilter==='archived'?'selected':''}>Archived</option>
+    </select></div>`;
+  body.innerHTML = filterBar + `<div style="display:flex;gap:16px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:220px;">${filtered.map(t => `<div class="thread-list-item ${chatTarget && chatTarget.email===t.email?'active':''}" onclick='selectThread(${JSON.stringify(t.email)},${JSON.stringify(t.name)})'>
+          <span>${t.hasUnread ? '<span class="tab-dot"></span>' : ''}${escapeHtml(t.name)}<br><span class="muted">${escapeHtml(t.email)}</span></span></div>`).join('') || `<div class="muted">No ${messagesFilter==='all'?'':messagesFilter+' '}conversations.</div>`}</div>
+      <div style="flex:2;min-width:260px;">
+        ${chatTarget ? `<div style="display:flex;justify-content:flex-end;margin-bottom:8px;"><button class="btn secondary" onclick="setThreadArchived(${JSON.stringify(chatTarget.email)},${active && active.archived ? 'false' : 'true'})">${active && active.archived ? 'Unarchive' : 'Archive'} conversation</button></div>
+        <div class="chat-thread" id="adminChatThread">${renderChatMessages(active ? active.msgs : [])}</div>
+        <div style="display:flex;gap:8px"><input type="text" id="adminChatInput" placeholder="Reply…" style="flex:1"><button class="btn" onclick="sendAdminReply()">Send</button></div>` : '<div class="muted">Select a conversation.</div>'}
+      </div></div>`;
+  const t = document.getElementById('adminChatThread'); if (t) t.scrollTop = t.scrollHeight;
+}
+function selectThread(email, name) {
+  chatTarget = { email, name };
+  renderAdminMessages();
+  api('markThreadRead', { user_email: email }).then(() => {
+    messagesCache.forEach(m => { if (m.user_email === email && m.sender === 'user') m.read_by_admin = 'true'; });
+    renderAdminMessages();
+    renderAdminNav();
+  }).catch(() => {});
+}
+function setThreadArchived(email, archived) {
+  api('archiveThread', { user_email: email, archived }).then(() => {
+    messagesCache.forEach(m => { if (m.user_email === email) m.archived = archived ? 'true' : 'false'; });
+    renderAdminMessages();
+  }).catch(err => alert(err.message));
+}
 function sendAdminReply() {
   const input = document.getElementById('adminChatInput');
   const text = input.value.trim(); if (!text || !chatTarget) return;
@@ -1284,22 +1374,34 @@ function loadAdminErrors() {
     renderAdminErrors();
   }).catch(err => { document.getElementById('adminBody').innerHTML = `<div class="error">${err.message}</div>`; });
 }
+function filterErrors(list) {
+  if (errorsFilter === 'archived') return list.filter(e => e.archived === 'true');
+  const active = list.filter(e => e.archived !== 'true');
+  return errorsFilter === 'all' ? active : active.filter(e => e.status === errorsFilter);
+}
 function renderAdminErrors() {
   const body = document.getElementById('adminBody');
   if (!body) return;
-  const sorted = errorsCache.slice().sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
-  body.innerHTML = `<div class="table-wrap"><table><tr><th>Status</th><th>Song</th><th>Reported by</th><th>Description</th><th></th></tr>` +
-    (pageSlice(sorted, adminErrorsPage).map(e => `<tr>
+  const filtered = filterErrors(errorsCache).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+  const filterBar = `<div class="admin-filter-row"><label class="muted">Filter:</label><select onchange="errorsFilter=this.value;adminErrorsPage=0;renderAdminErrors()">
+      <option value="all" ${errorsFilter==='all'?'selected':''}>All</option>
+      <option value="open" ${errorsFilter==='open'?'selected':''}>Open</option>
+      <option value="resolved" ${errorsFilter==='resolved'?'selected':''}>Resolved</option>
+      <option value="archived" ${errorsFilter==='archived'?'selected':''}>Archived</option>
+    </select></div>`;
+  body.innerHTML = filterBar + `<div class="table-wrap"><table><tr><th>Status</th><th>Song</th><th>Reported by</th><th>Description</th><th></th></tr>` +
+    (pageSlice(filtered, adminErrorsPage).map(e => `<tr>
       <td><span class="badge ${e.status}">${e.status}</span></td>
       <td>${escapeHtml(e.song_title)}<br><span class="muted">${escapeHtml(e.artist)}</span></td>
       <td>${escapeHtml(e.user_name)}<br><span class="muted">${escapeHtml(e.user_email)}</span></td>
       <td>${escapeHtml(e.description)}</td>
-      <td>${e.status==='open' ? `<button class="btn secondary" onclick="setErrorStatus('${e.id}','resolved')">Mark resolved</button>` : ''}</td>
-    </tr>`).join('') || `<tr><td colspan="5" class="muted">No error reports.</td></tr>`) + `</table></div>` +
-    pagerHtml(sorted.length, adminErrorsPage, 'changeAdminErrorsPage');
+      <td>${e.status==='open' ? `<button class="btn secondary" onclick="setErrorStatus('${e.id}','resolved')">Mark resolved</button> ` : ''}${e.archived==='true' ? `<button class="btn secondary" onclick="setErrorArchived('${e.id}',false)">Unarchive</button>` : `<button class="btn secondary" onclick="setErrorArchived('${e.id}',true)">Archive</button>`}</td>
+    </tr>`).join('') || `<tr><td colspan="5" class="muted">No error reports${errorsFilter==='all'?'':' in this view'}.</td></tr>`) + `</table></div>` +
+    pagerHtml(filtered.length, adminErrorsPage, 'changeAdminErrorsPage');
 }
 function changeAdminErrorsPage(p) { adminErrorsPage = p; renderAdminErrors(); }
 function setErrorStatus(id, status) { api('updateErrorReport', { id, status }).then(loadAdminErrors).catch(err => alert(err.message)); }
+function setErrorArchived(id, archived) { api('archiveError', { id, archived }).then(loadAdminErrors).catch(err => alert(err.message)); }
 
 /* ============================================================
    USERS (admin) + "View As" read-only impersonation
@@ -1322,7 +1424,7 @@ function renderUsersTable() {
     ${list.length === 0 ? `<div class="empty">No users found.</div>` : pageSlice(list, usersPage).map(u => `
       <div class="playlist-card" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
         <div>
-          <div class="title">${escapeHtml(u.name||u.email)}</div>
+          <div class="title">${userHasUnreadMessage(u.email) ? '<span class="tab-dot"></span>' : ''}${escapeHtml(u.name||u.email)}</div>
           <div class="muted">${escapeHtml(u.email)}</div>
           <div class="muted" style="margin-top:4px">★ ${u.favorites||0} favorites · ${u.knownChords ? 'chords set' : 'no chords set'} · ${u.playlists||0} playlists · ${u.requests||0} requests · ${u.messages||0} messages · ${u.errors||0} error reports${u.lastActivity ? ' · last active ' + new Date(u.lastActivity).toLocaleDateString() : ''}</div>
         </div>
