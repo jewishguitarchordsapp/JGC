@@ -829,10 +829,27 @@ function shareApp() {
 function toggleFavoriteFor(songId) {
   if (viewAsUser) { alert('You\'re viewing ' + viewAsUser.name + ' as read-only. Exit "View As" to make changes.'); return; }
   if (!currentUser) { alert('Sign in with Google first to save favorites.'); return; }
+  // Optimistic update: flip the heart and redraw immediately instead of
+  // waiting on the round trip to the Apps Script backend (which verifies
+  // the Google ID token and scans a sheet, so it can take a second or more
+  // and made the heart feel unresponsive). Reconcile with the server's
+  // answer when it arrives, and revert with a message if the request fails.
+  const wasFavorited = favorites.includes(songId);
+  if (wasFavorited) favorites = favorites.filter(id => id !== songId); else favorites.push(songId);
+  render();
   api('toggleFavorite', { song_id: songId }).then(r => {
-    if (r.favorited) favorites.push(songId); else favorites = favorites.filter(id => id !== songId);
+    const nowFavorited = favorites.includes(songId);
+    if (r.favorited !== nowFavorited) {
+      if (r.favorited) { if (!favorites.includes(songId)) favorites.push(songId); }
+      else favorites = favorites.filter(id => id !== songId);
+      render();
+    }
+  }).catch(err => {
+    if (wasFavorited) { if (!favorites.includes(songId)) favorites.push(songId); }
+    else favorites = favorites.filter(id => id !== songId);
     render();
-  }).catch(err => alert(err.message));
+    alert(err.message);
+  });
 }
 
 /* ============================================================
