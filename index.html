@@ -50,15 +50,18 @@
   .btn.secondary{background:#fff;color:var(--teal-dark);border:1px solid var(--teal);}
   .btn.danger{background:#fff;color:#b33;border:1px solid #d99;}
   .btn:disabled{opacity:0.5;cursor:not-allowed;}
-  .subtabs{display:flex;gap:4px;margin-bottom:14px;border-bottom:1px solid var(--border);}
-  .subtabs button{background:none;border:none;padding:9px 14px;cursor:pointer;font-size:14px;color:var(--muted);border-bottom:2px solid transparent;}
+  .subtabs{display:flex;gap:4px;margin-bottom:14px;border-bottom:1px solid var(--border);overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  .subtabs button{background:none;border:none;padding:9px 14px;cursor:pointer;font-size:14px;color:var(--muted);border-bottom:2px solid transparent;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;flex:0 0 auto;}
+  .subtabs button svg{width:15px;height:15px;stroke:currentColor;flex:0 0 auto;}
   .subtabs button.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:600;}
-  .song-row{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;background:var(--card);border:1px solid var(--border);border-radius:9px;margin-bottom:8px;cursor:pointer;}
-  .song-row:hover{border-color:var(--teal);}
+  .song-row{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;background:var(--card);border:none;border-bottom:1px solid var(--border);border-radius:0;margin-bottom:0;cursor:pointer;}
+  .song-row:hover{background:#f7f9f9;}
   .song-row .title{font-weight:600;}
   .song-row .artist{color:var(--muted);font-size:13px;}
   .song-row .star{font-size:18px;color:#ccc;cursor:pointer;padding:4px;}
   .song-row .star.on{color:#d9302f;}
+  .new-badge{display:inline-flex;align-items:center;gap:3px;background:#e8f5e9;color:#2e7d32;font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px;margin-left:7px;letter-spacing:.3px;vertical-align:middle;white-space:nowrap;}
+  .new-badge-age{font-weight:500;opacity:.85;}
   .chip{display:inline-block;background:#eef4f4;color:var(--accent);border-radius:20px;padding:5px 12px;font-size:13px;margin:3px;cursor:pointer;border:1px solid #d7e6e6;}
   .chip.active{background:var(--teal);color:#fff;border-color:var(--teal);}
   .chip.toggle-on{background:var(--accent);color:#fff;border-color:var(--accent);}
@@ -108,6 +111,11 @@
   .playlist-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:10px;cursor:pointer;}
   .playlist-card:hover{border-color:var(--teal);}
   .playlist-card .title{font-weight:600;}
+  .chat-card{display:flex;justify-content:space-between;align-items:center;gap:10px;background:#f2f4f5;border-radius:12px;padding:14px 16px;margin-top:24px;cursor:pointer;transition:background .15s ease;}
+  .chat-card:hover{background:#e9edee;}
+  .chat-card-title{font-weight:700;font-size:16px;color:#181a1b;}
+  .chat-card-preview{color:var(--muted);font-size:13.5px;margin-top:2px;}
+  .chat-card-arrow{color:var(--muted);font-size:18px;flex:0 0 auto;}
   .chat-thread{display:flex;flex-direction:column;gap:8px;max-height:340px;overflow-y:auto;padding:6px;margin-bottom:10px;}
   .msg{max-width:75%;padding:8px 12px;border-radius:12px;font-size:14px;}
   .msg.user{align-self:flex-start;background:#eef2f2;}
@@ -124,9 +132,9 @@
   .home-tile{display:flex;align-items:flex-start;gap:14px;background:#f2f4f5;border:none;border-radius:14px;padding:16px 18px;margin-bottom:12px;cursor:pointer;transition:background .15s ease;}
   .home-tile:hover{background:#e9edee;}
   .home-tile:active{background:#e1e6e7;}
-  .home-tile-icon{flex:0 0 auto;width:52px;height:52px;display:flex;align-items:center;justify-content:center;font-size:22px;}
+  .home-tile-icon{flex:0 0 auto;width:52px;height:52px;display:flex;align-items:center;justify-content:center;font-size:22px;border-radius:12px;border:1px solid rgba(0,0,0,.10);box-shadow:0 1px 3px rgba(0,0,0,.15);background:#fff;}
   .home-tile-icon svg{width:26px;height:26px;stroke:var(--teal);}
-  .home-tile-icon img{width:52px;height:52px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.18));}
+  .home-tile-icon img{width:44px;height:44px;object-fit:contain;}
   .home-tile-title{font-weight:700;font-size:16px;color:#181a1b;}
   .home-tile-desc{color:var(--muted);font-size:13.5px;margin-top:2px;line-height:1.4;}
   .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
@@ -161,12 +169,14 @@
     nav{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;}
     nav button{flex:0 0 auto;padding:7px 9px;font-size:12.5px;}
     nav button svg{width:15px;height:15px;margin-right:4px;}
+    .subtabs button{padding:8px 9px;font-size:12px;gap:4px;}
+    .subtabs button svg{width:13px;height:13px;}
     main{padding:12px;padding-bottom:78px;}
     .card{padding:12px;}
     .home-tile{padding:13px 14px;gap:11px;}
     .home-tile-icon{width:44px;height:44px;}
     .home-tile-icon svg{width:22px;height:22px;}
-    .home-tile-icon img{width:44px;height:44px;}
+    .home-tile-icon img{width:38px;height:38px;}
     .home-tile-title{font-size:15px;}
     form .row > div{min-width:100%;}
     table{font-size:12.5px;}
@@ -181,11 +191,10 @@
     footer{padding-bottom:80px;}
     .bottom-nav{display:flex;position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--border);z-index:20;padding:6px 2px calc(6px + env(safe-area-inset-bottom));justify-content:space-around;}
     .bottom-nav button{background:none;border:none;display:flex;flex-direction:column;align-items:center;gap:2px;color:var(--muted);font-size:10.5px;padding:4px 2px;flex:1;cursor:pointer;}
-    .bottom-nav button .nav-icon-wrap{width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:9px;border:1px solid rgba(0,0,0,.10);box-shadow:0 1px 3px rgba(0,0,0,.15);background:#fff;margin-bottom:1px;}
-    .bottom-nav button .nav-icon-wrap img{width:22px;height:22px;object-fit:contain;}
+    .bottom-nav button .nav-icon-wrap{width:30px;height:30px;display:flex;align-items:center;justify-content:center;margin-bottom:1px;}
+    .bottom-nav button .nav-icon-wrap img{width:24px;height:24px;object-fit:contain;}
     .bottom-nav button .nav-icon-wrap svg{width:18px;height:18px;stroke:var(--teal);}
     .bottom-nav button.active{color:var(--teal-dark);font-weight:600;}
-    .bottom-nav button.active .nav-icon-wrap{border-color:var(--teal-dark);box-shadow:0 2px 5px rgba(0,0,0,.22);}
   }
 </style>
 </head>
@@ -193,7 +202,7 @@
 
 <header>
   <button class="hamburger-btn" onclick="openMobileDrawer()" aria-label="Menu">☰</button>
-  <h1 style="cursor:pointer;" onclick="goTo('home')"><img id="logoImg" alt="" style="width:24px;height:24px;vertical-align:middle;border-radius:6px;margin-right:6px;">Jewish Guitar Chords App</h1>
+  <h1 style="cursor:pointer;" onclick="goTo('home')"><img id="logoImg" alt="" style="width:24px;height:24px;vertical-align:middle;border-radius:6px;margin-right:6px;"><span id="headerTitle">Welcome</span></h1>
   <nav id="mainNav"></nav>
   <div class="spacer"></div>
   <button id="shareBtn" class="btn secondary" style="padding:6px 10px;" title="Share this app"><img id="shareIcon" alt="Share" style="width:16px;height:16px;vertical-align:middle;"></button>
@@ -255,6 +264,14 @@ const ICONS = {
    the matching Home tiles, so the two use exactly the same glyphs.
    Recolor via CSS `stroke` (nav = white, home tiles = tinted).
    ============================================================ */
+// Icons for the Songs page's New/All/Favorites/Known sub-tabs — a separate
+// small set (not SVG_ICONS) so they can't collide with the nav bar's icons.
+const SONG_TAB_ICONS = {
+  new: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>',
+  all: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
+  favorites: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"/></svg>',
+  known: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+};
 const SVG_ICONS = {
   list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>',
   artists: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
@@ -305,6 +322,7 @@ let songContentById = {};  // {id: {chords_lyrics,lyrics_only}} — persists acr
 let songContentLoaded = false; // true once the full-corpus background text fetch has completed
 let songListPage = 0;
 let contactRequestsPage = 0; // paginates the Contact page's "My Song Requests" list, 10/page
+let contactChatOpen = false; // Contact page's "Message Admin" card starts collapsed; clicking it reveals the thread
 let adminRequestsPage = 0;
 let adminErrorsPage = 0;
 let requestsFilter = 'all';  // 'all' | 'pending' | 'added' | 'declined' | 'archived'
@@ -777,9 +795,10 @@ function renderNav() {
   }).join('');
 }
 // Bottom nav reuses the richer Home-tile artwork (ICONS.home_*) instead of
-// the plain-line SVG_ICONS, wrapped in a bordered/shadowed box (.nav-icon-wrap)
-// so it reads crisp at small mobile sizes — falls back to SVG_ICONS for any
-// tab with no matching artwork (e.g. Admin).
+// the plain-line SVG_ICONS so it reads crisp at small mobile sizes — no
+// border/shadow box here (that treatment is for the Home page tiles only,
+// see .home-tile-icon). Falls back to SVG_ICONS for any tab with no
+// matching artwork (e.g. Admin).
 const NAV_ICON_IMAGE = { list: 'home_songs', artists: 'home_artists', categories: 'home_categories', playlists: 'home_playlists', contact: 'home_contact' };
 function navIconHtml(name) {
   const key = NAV_ICON_IMAGE[name];
@@ -924,6 +943,21 @@ function songKnown(song) {
   return used.every(c => effectiveKnownChords().includes(c));
 }
 
+// "New" window shared by the New Songs tab filter and the NEW badge shown
+// on song rows everywhere else (All Songs, Favorites, Known Songs,
+// playlists, search) — one constant so both stay in sync.
+const NEW_SONG_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+function songAgeMs(s) { return s.date_added ? (Date.now() - new Date(s.date_added).getTime()) : null; }
+function isNewSong(s) { const age = songAgeMs(s); return age !== null && age >= 0 && age <= NEW_SONG_WINDOW_MS; }
+function songDaysAgoLabel(s) {
+  const age = songAgeMs(s);
+  if (age === null) return '';
+  const days = Math.floor(age / (24 * 60 * 60 * 1000));
+  if (days <= 0) return 'today';
+  if (days === 1) return '1 day ago';
+  return `${days} days ago`;
+}
+
 function filteredSongs() {
   let list = songs.filter(s => {
     const { language, tags } = splitCategories(s.categories);
@@ -940,8 +974,7 @@ function filteredSongs() {
   if (songTab === 'favorites') list = list.filter(s => effectiveFavorites().includes(s.id));
   if (songTab === 'known') list = list.filter(songKnown);
   if (songTab === 'new') {
-    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
-    list = list.filter(s => s.date_added && new Date(s.date_added).getTime() >= cutoff);
+    list = list.filter(isNewSong);
     return list.sort((a,b) => new Date(b.date_added) - new Date(a.date_added));
   }
   return list.sort((a,b) => String(a.title||'').localeCompare(String(b.title||'')));
@@ -958,9 +991,10 @@ function detailGoTo(songId, queueIds) {
   return `goTo('detail',{id:'${songId}',queue:${arr},queueIdx:${idx}})`;
 }
 function songRowHtml(s, queueIds) {
+  const newBadge = isNewSong(s) ? `<span class="new-badge">NEW <span class="new-badge-age">· ${songDaysAgoLabel(s)}</span></span>` : '';
   return `<div class="song-row">
         <div style="display:flex;align-items:center;gap:10px;flex:1;cursor:pointer;" onclick="${detailGoTo(s.id, queueIds)}">
-          <div><div class="title">${escapeHtml(s.title)}${s.title_hebrew ? ` <span class="title-hebrew">${escapeHtml(s.title_hebrew)}</span>` : ''}</div><div class="artist">${escapeHtml(s.artist||'')}</div></div>
+          <div><div class="title">${escapeHtml(s.title)}${s.title_hebrew ? ` <span class="title-hebrew">${escapeHtml(s.title_hebrew)}</span>` : ''}${newBadge}</div><div class="artist">${escapeHtml(s.artist||'')}</div></div>
         </div>
         <span class="star ${effectiveFavorites().includes(s.id)?'on':''}" onclick="event.stopPropagation();toggleFavoriteFor('${s.id}')">♥</span>
       </div>`;
@@ -969,10 +1003,10 @@ function renderList() {
   const activeFilterChip = filters.artist ? `Artist: ${filters.artist}` : filters.language ? `Language: ${filters.language}` : filters.tag ? `Tag: ${filters.tag}` : null;
 
   let html = `<div class="subtabs">
-      <button class="${songTab==='new'?'active':''}" onclick="songTab='new';songListPage=0;render()">New Songs</button>
-      <button class="${songTab==='all'?'active':''}" onclick="songTab='all';songListPage=0;render()">All Songs</button>
-      <button class="${songTab==='favorites'?'active':''}" onclick="songTab='favorites';songListPage=0;render()">Favorites</button>
-      <button class="${songTab==='known'?'active':''}" onclick="songTab='known';songListPage=0;render()">Known Songs</button>
+      <button class="${songTab==='new'?'active':''}" onclick="songTab='new';songListPage=0;render()">${SONG_TAB_ICONS.new}New Songs</button>
+      <button class="${songTab==='all'?'active':''}" onclick="songTab='all';songListPage=0;render()">${SONG_TAB_ICONS.all}All Songs</button>
+      <button class="${songTab==='favorites'?'active':''}" onclick="songTab='favorites';songListPage=0;render()">${SONG_TAB_ICONS.favorites}Favorites</button>
+      <button class="${songTab==='known'?'active':''}" onclick="songTab='known';songListPage=0;render()">${SONG_TAB_ICONS.known}Known Songs</button>
     </div>
     <div class="searchRow">
       <input type="text" id="searchBox" placeholder="Search by title, artist, or lyrics…" value="${escapeHtml(filters.q)}">
@@ -1499,14 +1533,28 @@ function renderContactBody() {
   html += `<div class="table-wrap"><table><tr><th>Status</th><th>Song</th><th>Artist</th></tr>
       ${pageSlice(myRequests, contactRequestsPage, 10).map(r => `<tr><td><span class="badge ${r.status}" title="${escapeHtml(r.status)}">${requestStatusSymbol(r.status)}</span></td><td>${escapeHtml(r.song_title)}</td><td>${escapeHtml(r.artist)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No requests yet.</td></tr>'}
       </table></div>
-      ${pagerHtml(myRequests.length, contactRequestsPage, 'changeContactRequestsPage', 10)}
-      <h2 style="margin-top:24px">${viewAsUser ? escapeHtml(viewAsUser.name) + `'s Messages` : 'Message your teacher'}</h2>
-      <div class="chat-thread" id="chatThread">${renderChatMessages(myMessages)}</div>
+      ${pagerHtml(myRequests.length, contactRequestsPage, 'changeContactRequestsPage', 10)}`;
+  // The chat card is a clickable preview that expands into the full thread —
+  // under View As it's always shown expanded (the admin is inspecting this
+  // user's conversation, not chatting themselves), see isOpen below.
+  const chatTitle = viewAsUser ? `${escapeHtml(viewAsUser.name)}'s Messages` : 'Message Admin';
+  const sortedMsgs = myMessages.slice().sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
+  const lastMsg = sortedMsgs[0];
+  const preview = lastMsg ? (escapeHtml(lastMsg.text).slice(0, 60) + (lastMsg.text.length > 60 ? '…' : '')) : 'No messages yet — tap to say hi!';
+  const isOpen = contactChatOpen || !!viewAsUser;
+  html += `<div class="chat-card" onclick="toggleContactChat()">
+      <div><div class="chat-card-title">${chatTitle}</div><div class="chat-card-preview">${preview}</div></div>
+      <span class="chat-card-arrow">${isOpen ? '▾' : '▸'}</span>
+    </div>`;
+  if (isOpen) {
+    html += `<div class="chat-thread" id="chatThread">${renderChatMessages(myMessages)}</div>
       <div style="display:flex;gap:8px"><input type="text" id="chatInput" placeholder="Type a message…" style="flex:1"><button class="btn" onclick="sendChatMessage()">Send</button></div>`;
+  }
   document.getElementById('app').innerHTML = html;
   const thread = document.getElementById('chatThread'); if (thread) thread.scrollTop = thread.scrollHeight;
 }
 function changeContactRequestsPage(p) { contactRequestsPage = p; renderContactBody(); }
+function toggleContactChat() { contactChatOpen = !contactChatOpen; renderContactBody(); }
 function renderChatMessages(list) {
   return list.slice().sort((a,b)=> new Date(a.created_at)-new Date(b.created_at))
     .map(m => `<div class="msg ${m.sender}">${escapeHtml(m.text)}<div class="meta">${new Date(m.created_at).toLocaleString()}</div></div>`).join('') || '<div class="muted">No messages yet — say hi!</div>';
@@ -1812,7 +1860,31 @@ function mountGateSignInButton() {
     if (container) { try { google.accounts.id.renderButton(container, { theme: 'filled_blue', size: 'large', text: 'signin_with' }); } catch (e) {} }
   }
 }
+// Top bar reads "Welcome" on Home and the current section's name elsewhere
+// (the song/playlist title for detail views) — kept in sync with view.name
+// from render() below, same place renderNav()/renderBottomNav() refresh.
+function headerTitleText() {
+  switch (view.name) {
+    case 'home': return 'Welcome';
+    case 'list': return 'Songs';
+    case 'artists': return 'Artists';
+    case 'categories': return 'Categories';
+    case 'playlists': return 'Playlists';
+    case 'playlistDetail': { const pl = playlists.find(p => p.id === view.id); return pl ? pl.title : 'Playlists'; }
+    case 'contact': return 'Contact';
+    case 'admin': return 'Admin';
+    case 'knownChords': return 'My Chords & Favorites';
+    case 'edit': return view.id ? 'Edit Song' : 'Add Song';
+    case 'detail': { const s = songs.find(x => x.id === view.id); return s ? s.title : 'Songs'; }
+    default: return 'Welcome';
+  }
+}
+function renderHeaderTitle() {
+  const el = document.getElementById('headerTitle');
+  if (el) el.textContent = headerTitleText();
+}
 function render() {
+  renderHeaderTitle();
   renderNav();
   renderBottomNav();
   renderViewAsBanner();
