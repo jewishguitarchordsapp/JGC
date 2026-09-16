@@ -307,9 +307,15 @@ const SVG_ICONS = {
 };
 
 /* ============================================================
-   STATE — kept in memory only (no localStorage/sessionStorage).
-   Returning sign-in relies on Google's own "auto_select"; a hard
-   refresh may ask you to click "Sign in with Google" again.
+   STATE — currentUser is also mirrored to localStorage (see
+   saveAuthCache/loadAuthCache near GOOGLE SIGN-IN below) purely so a page
+   reload — including a mobile pull-to-refresh, which is just a full page
+   reload — can restore the signed-in view immediately instead of flashing
+   the sign-in gate while Google's own silent "auto_select"/FedCM prompt is
+   still resolving. The cached idToken can still be past Google's ~1hr
+   lifetime; real API calls are always re-verified server-side regardless
+   (see Code.gs's verifyIdToken_), and initGoogleSignIn()'s silent prompt is
+   what actually keeps a fresh token flowing in behind the scenes.
    ============================================================ */
 let songs = [];
 let playlists = [];
@@ -393,9 +399,29 @@ function decodeJwt(token) {
   } catch (e) { return {}; }
 }
 
+// See the STATE comment above: this is what lets a reload (including a
+// mobile pull-to-refresh) restore the signed-in view instantly instead of
+// showing the sign-in gate while Google's silent prompt is still resolving.
+// It's just a convenience mirror of currentUser, not a security boundary —
+// every real API call is still independently re-verified server-side.
+const AUTH_CACHE_KEY = 'jgc_auth_cache_v1';
+function saveAuthCache(user) {
+  try {
+    if (user) localStorage.setItem(AUTH_CACHE_KEY, JSON.stringify({ idToken: user.idToken, email: user.email, name: user.name, picture: user.picture, isAdmin: user.isAdmin }));
+    else localStorage.removeItem(AUTH_CACHE_KEY);
+  } catch (e) {}
+}
+function loadAuthCache() {
+  try {
+    const raw = localStorage.getItem(AUTH_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+
 function handleCredentialResponse(response) {
   const claims = decodeJwt(response.credential);
-  currentUser = { idToken: response.credential, email: (claims.email||'').toLowerCase(), name: claims.name || claims.email, picture: claims.picture || '', isAdmin: false };
+  currentUser = { idToken: response.credential, email: (claims.email||'').toLowerCase(), name: claims.name || claims.email, picture: claims.picture || '', isAdmin: currentUser ? currentUser.isAdmin : false };
+  saveAuthCache(currentUser);
   renderUserArea();
   loadMyData();
   startAfterSignIn();
@@ -412,6 +438,7 @@ function initGoogleSignIn() {
 function signOut() {
   if (window.google) google.accounts.id.disableAutoSelect();
   currentUser = null; favorites = []; knownChords = [];
+  saveAuthCache(null);
   if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
   dataStarted = false;
   if (view.name === 'edit' || view.name === 'admin' || view.name === 'playlistDetail') goTo('list');
@@ -1067,9 +1094,10 @@ function renderSongListBody() {
       html = `<div class="empty">${songTab==='favorites' ? (currentUser? 'No favorites yet — tap the heart on a song.' : 'Sign in to save favorites.') : songTab==='known' ? 'No songs match your known chords yet.' : songTab==='new' ? 'No new songs in the last 30 days.' : 'No songs match your search/filter.'}</div>`;
     }
   } else {
-    // Only the Favorites tab wires up a Next/Prev-Song queue — "all"/"new"/
-    // "known" aren't a single stable list the way a playlist or favorites is.
-    const queueIds = songTab === 'favorites' ? list.map(s => s.id) : null;
+    // Every song tab (and Artists/Categories browsing, which funnels through
+    // here too via filters + goTo('list')) gets a Next/Prev-Song queue now —
+    // it's just the current filtered/sorted list, same as a playlist's.
+    const queueIds = list.map(s => s.id);
     html = pageSlice(list, songListPage).map(s => songRowHtml(s, queueIds)).join('') + pagerHtml(list.length, songListPage, 'changeSongPage');
   }
   body.innerHTML = html;
@@ -1283,6 +1311,34 @@ function goToQueueSong(delta) {
   if (newIdx < 0 || newIdx >= view.queue.length) return;
   goTo('detail', { id: view.queue[newIdx], queue: view.queue, queueIdx: newIdx });
 }
+
+// Bound once to the persistent #app container at startup (its DOM node is
+// never replaced — only its innerHTML on every render() — so attaching here
+// instead of per-render avoids piling up duplicate listeners). Only acts on
+// the song detail view, and only when a queue is present, via the existing
+// goToQueueSong() (already a safe no-op with no queue or at either end of one).
+(function attachSwipeNav() {
+  const el = document.getElementById('app');
+  if (!el) return;
+  let touchStartX = 0, touchStartY = 0, touchStartT = 0;
+  el.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) return;
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+    touchStartT = Date.now();
+  }, { passive: true });
+  el.addEventListener('touchend', (e) => {
+    if (view.name !== 'detail') return;
+    const touch = e.changedTouches[0];
+    if (!touch) return;
+    const dx = touch.clientX - touchStartX;
+    const dy = touch.clientY - touchStartY;
+    const dt = Date.now() - touchStartT;
+    if (dt > 800 || Math.abs(dx) < 60 || Math.abs(dy) > 60) return;
+    if (dx < 0) goToQueueSong(1);   // swipe left  -> next song
+    else goToQueueSong(-1);         // swipe right -> previous song
+  }, { passive: true });
+})();
 
 function deleteSongConfirm(id) {
   if (!confirm('Delete this song? This cannot be undone.')) return;
@@ -1991,8 +2047,20 @@ function render() {
    ============================================================ */
 document.getElementById('shareIcon').src = ICONS.share;
 document.getElementById('shareBtn').onclick = shareApp;
+// Optimistically restore a cached signed-in session (see saveAuthCache/
+// loadAuthCache above) before Google's own script — or its silent
+// auto_select/FedCM prompt — has had any chance to run. This is what stops
+// the sign-in gate from flashing on every reload, including a mobile
+// pull-to-refresh. If the cached idToken has actually expired, the first
+// real API call fails and the existing expiry handling in api() drops back
+// to the gate — but initGoogleSignIn()'s silent prompt below usually lands
+// a fresh token (via handleCredentialResponse, which re-saves the cache)
+// well before that ever surfaces to the user.
+const cachedAuth = loadAuthCache();
+if (cachedAuth && cachedAuth.idToken) currentUser = cachedAuth;
 renderUserArea();
 render(); // show the sign-in gate (or restore a still-valid session's view) immediately
+if (currentUser) { loadMyData(); startAfterSignIn(); }
 window.addEventListener('load', initGoogleSignIn);
 </script>
 </body>
