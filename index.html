@@ -64,6 +64,8 @@
   .new-badge-age{font-weight:500;opacity:.85;}
   .chip{display:inline-block;background:#eef4f4;color:var(--accent);border-radius:20px;padding:5px 12px;font-size:13px;margin:3px;cursor:pointer;border:1px solid #d7e6e6;}
   .chip.active{background:var(--teal);color:#fff;border-color:var(--teal);}
+  .chip.icon-chip{display:inline-flex;align-items:center;justify-content:center;padding:7px 10px;}
+  .chip.icon-chip svg{width:16px;height:16px;stroke:currentColor;}
   .chip.toggle-on{background:var(--accent);color:#fff;border-color:var(--accent);}
   .chip .count{opacity:0.7;font-size:11px;}
   .grid-cats{display:flex;flex-wrap:wrap;gap:4px;}
@@ -272,6 +274,25 @@ const SONG_TAB_ICONS = {
   favorites: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"/></svg>',
   known: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
 };
+// Icon-only filter chips for the admin Song Requests / Error Reports tabs
+// (see filterChipsHtml below) — status values share icons where the
+// meaning lines up (added/resolved both read as "done").
+const ADMIN_FILTER_ICONS = {
+  pending: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+  added: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="8 12 11 15 16 9"/></svg>',
+  declined: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
+  archived: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><line x1="10" y1="13" x2="14" y2="13"/></svg>',
+  open: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
+  resolved: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="8 12 11 15 16 9"/></svg>',
+};
+// Renders a row of icon-only, multi-select toggle chips (no text — see
+// ADMIN_FILTER_ICONS) for an admin list's status filter. `selected` is the
+// live filter array itself; clicking a chip calls `toggleFn(key)`.
+function filterChipsHtml(options, selected, toggleFn) {
+  return `<div class="admin-filter-row">` + options.map(o =>
+    `<span class="chip icon-chip ${selected.includes(o.key) ? 'toggle-on' : ''}" title="${escapeHtml(o.title)}" onclick="${toggleFn}('${o.key}')">${ADMIN_FILTER_ICONS[o.key]}</span>`
+  ).join('') + `</div>`;
+}
 const SVG_ICONS = {
   list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>',
   artists: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
@@ -325,8 +346,9 @@ let contactRequestsPage = 0; // paginates the Contact page's "My Song Requests" 
 let contactChatOpen = false; // Contact page's "Message Admin" card starts collapsed; clicking it reveals the thread
 let adminRequestsPage = 0;
 let adminErrorsPage = 0;
-let requestsFilter = 'all';  // 'all' | 'pending' | 'added' | 'declined' | 'archived'
-let errorsFilter = 'all';    // 'all' | 'open' | 'resolved' | 'archived'
+let adminMessagesPage = 0; // paginates the admin Messages tab's conversation list, 10/page
+let requestsFilter = [];  // multi-select subset of 'pending'/'added'/'declined'/'archived' — empty means all non-archived
+let errorsFilter = [];    // multi-select subset of 'open'/'resolved'/'archived' — empty means all non-archived
 let messagesFilter = 'all';  // 'all' | 'unread' | 'archived'
 
 /* ============================================================
@@ -1653,27 +1675,31 @@ function loadAdminRequests() {
   }).catch(err => { document.getElementById('adminBody').innerHTML = `<div class="error">${err.message}</div>`; });
 }
 function filterRequests(list) {
-  if (requestsFilter === 'archived') return list.filter(r => r.archived === 'true');
-  const active = list.filter(r => r.archived !== 'true');
-  return requestsFilter === 'all' ? active : active.filter(r => r.status === requestsFilter);
+  const wantArchived = requestsFilter.includes('archived');
+  const statuses = requestsFilter.filter(f => f !== 'archived');
+  let out = list.filter(r => (r.archived === 'true') === wantArchived);
+  if (statuses.length) out = out.filter(r => statuses.includes(r.status));
+  return out;
+}
+function toggleRequestsFilter(key) {
+  const i = requestsFilter.indexOf(key);
+  if (i >= 0) requestsFilter.splice(i, 1); else requestsFilter.push(key);
+  adminRequestsPage = 0;
+  renderAdminRequests();
 }
 function renderAdminRequests() {
   const body = document.getElementById('adminBody');
   if (!body) return;
   const filtered = filterRequests(requestsCache).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
-  const filterBar = `<div class="admin-filter-row"><label class="muted">Filter:</label><select onchange="requestsFilter=this.value;adminRequestsPage=0;renderAdminRequests()">
-      <option value="all" ${requestsFilter==='all'?'selected':''}>All</option>
-      <option value="pending" ${requestsFilter==='pending'?'selected':''}>Pending</option>
-      <option value="added" ${requestsFilter==='added'?'selected':''}>Added</option>
-      <option value="declined" ${requestsFilter==='declined'?'selected':''}>Declined</option>
-      <option value="archived" ${requestsFilter==='archived'?'selected':''}>Archived</option>
-    </select></div>`;
+  const filterBar = filterChipsHtml(
+    [{key:'pending',title:'Pending'},{key:'added',title:'Added'},{key:'declined',title:'Declined'},{key:'archived',title:'Archived'}],
+    requestsFilter, 'toggleRequestsFilter');
   body.innerHTML = filterBar + `<div class="table-wrap"><table><tr><th>Status</th><th>Song</th><th>Artist</th><th>Requested by</th><th>Note</th><th></th></tr>` +
     (pageSlice(filtered, adminRequestsPage).map(r => `<tr>
       <td><span class="badge ${r.status}" title="${escapeHtml(r.status)}">${requestStatusSymbol(r.status)}</span></td><td>${escapeHtml(r.song_title)}</td><td>${escapeHtml(r.artist)}</td>
       <td>${escapeHtml(r.user_name)}<br><span class="muted">${escapeHtml(r.user_email)}</span></td><td>${escapeHtml(r.note)}</td>
       <td>${r.status==='pending' ? `<button class="btn secondary" onclick="setRequestStatus('${r.id}','added')">Mark added</button> <button class="btn danger" onclick="setRequestStatus('${r.id}','declined')">Decline</button> ` : ''}${r.archived==='true' ? `<button class="btn secondary" onclick="setRequestArchived('${r.id}',false)">Unarchive</button>` : `<button class="btn secondary" onclick="setRequestArchived('${r.id}',true)">Archive</button>`}</td>
-    </tr>`).join('') || `<tr><td colspan="6" class="muted">No requests${requestsFilter==='all'?' yet':''}.</td></tr>`) + `</table></div>` +
+    </tr>`).join('') || `<tr><td colspan="6" class="muted">No requests${requestsFilter.length===0?' yet':''}.</td></tr>`) + `</table></div>` +
     pagerHtml(filtered.length, adminRequestsPage, 'changeAdminRequestsPage');
 }
 function changeAdminRequestsPage(p) { adminRequestsPage = p; renderAdminRequests(); }
@@ -1696,41 +1722,61 @@ function filterThreads(threads) {
   const active = threads.filter(t => !t.archived);
   return messagesFilter === 'unread' ? active.filter(t => t.hasUnread) : active;
 }
+// A conversation's preview line: the last message, "You: " prefixed when
+// the admin sent it, trimmed to one line — same idea as the Contact page's
+// own "Message Admin" card preview.
+function threadPreviewText(t) {
+  const last = t.msgs[t.msgs.length - 1];
+  if (!last) return '';
+  const text = (last.sender === 'admin' ? 'You: ' : '') + last.text;
+  return escapeHtml(text.slice(0, 70)) + (text.length > 70 ? '…' : '');
+}
 function renderAdminMessages() {
   const body = document.getElementById('adminBody');
   if (!body) return;
   const threads = computeThreads(messagesCache);
   const filtered = filterThreads(threads);
-  if (chatTarget && !filtered.some(t => t.email === chatTarget.email)) chatTarget = null;
-  if (!chatTarget && filtered.length) chatTarget = { email: filtered[0].email, name: filtered[0].name };
-  const active = chatTarget ? threads.find(t => t.email === chatTarget.email) : null;
-  const filterBar = `<div class="admin-filter-row"><label class="muted">Filter:</label><select onchange="messagesFilter=this.value;renderAdminMessages()">
+  const filterBar = `<div class="admin-filter-row"><label class="muted">Filter:</label><select onchange="messagesFilter=this.value;adminMessagesPage=0;renderAdminMessages()">
       <option value="all" ${messagesFilter==='all'?'selected':''}>All</option>
       <option value="unread" ${messagesFilter==='unread'?'selected':''}>Unread</option>
       <option value="archived" ${messagesFilter==='archived'?'selected':''}>Archived</option>
     </select></div>`;
-  body.innerHTML = filterBar + `<div style="display:flex;gap:16px;flex-wrap:wrap;">
-      <div style="flex:1;min-width:220px;">${filtered.map(t => `<div class="thread-list-item ${chatTarget && chatTarget.email===t.email?'active':''}" onclick='selectThread(${JSON.stringify(t.email)},${JSON.stringify(t.name)})'>
-          <span>${t.hasUnread ? '<span class="tab-dot"></span>' : ''}${escapeHtml(t.name)}<br><span class="muted">${escapeHtml(t.email)}</span></span></div>`).join('') || `<div class="muted">No ${messagesFilter==='all'?'':messagesFilter+' '}conversations.</div>`}</div>
-      <div style="flex:2;min-width:260px;">
-        ${chatTarget ? `<div style="display:flex;justify-content:flex-end;margin-bottom:8px;"><button class="btn secondary" onclick="setThreadArchived(${JSON.stringify(chatTarget.email)},${active && active.archived ? 'false' : 'true'})">${active && active.archived ? 'Unarchive' : 'Archive'} conversation</button></div>
-        <div class="chat-thread" id="adminChatThread">${renderChatMessages(active ? active.msgs : [])}</div>
-        <div style="display:flex;gap:8px"><input type="text" id="adminChatInput" placeholder="Reply…" style="flex:1"><button class="btn" onclick="sendAdminReply()">Send</button></div>` : '<div class="muted">Select a conversation.</div>'}
-      </div></div>`;
-  const t = document.getElementById('adminChatThread'); if (t) t.scrollTop = t.scrollHeight;
+  // Preview-only list — tapping a row opens that conversation in a modal
+  // (openThreadModal below); the full thread never renders on this page.
+  body.innerHTML = filterBar + `<div>${
+    pageSlice(filtered, adminMessagesPage, 10).map(t => `<div class="thread-list-item" onclick='openThreadModal(${JSON.stringify(t.email)},${JSON.stringify(t.name)})'>
+        <span>${t.hasUnread ? '<span class="tab-dot"></span>' : ''}<b>${escapeHtml(t.name)}</b><br><span class="muted">${threadPreviewText(t)}</span></span></div>`).join('')
+      || `<div class="muted">No ${messagesFilter==='all'?'':messagesFilter+' '}conversations.</div>`
+  }</div>` + pagerHtml(filtered.length, adminMessagesPage, 'changeAdminMessagesPage', 10);
 }
-function selectThread(email, name) {
+function changeAdminMessagesPage(p) { adminMessagesPage = p; renderAdminMessages(); }
+function threadModalHtml() {
+  const active = computeThreads(messagesCache).find(t => t.email === chatTarget.email);
+  return `<h2 style="margin-top:0">${escapeHtml(chatTarget.name)}</h2>
+    <div class="muted" style="margin-top:-10px;margin-bottom:12px;font-size:12.5px;">${escapeHtml(chatTarget.email)}</div>
+    <div class="chat-thread" id="adminChatThread">${renderChatMessages(active ? active.msgs : [])}</div>
+    <div style="display:flex;gap:8px;margin-bottom:14px;"><input type="text" id="adminChatInput" placeholder="Reply…" style="flex:1"><button class="btn" onclick="sendAdminReply()">Send</button></div>
+    <div class="modal-actions"><button class="btn secondary" onclick="setThreadArchived(${JSON.stringify(chatTarget.email)},${active && active.archived ? 'false' : 'true'})">${active && active.archived ? 'Unarchive' : 'Archive'} conversation</button><button class="btn secondary" onclick="closeModal()">Close</button></div>`;
+}
+function openThreadModal(email, name) {
   chatTarget = { email, name };
-  renderAdminMessages();
+  openModal(threadModalHtml());
+  const t = document.getElementById('adminChatThread'); if (t) t.scrollTop = t.scrollHeight;
   api('markThreadRead', { user_email: email }).then(() => {
     messagesCache.forEach(m => { if (m.user_email === email && m.sender === 'user') m.read_by_admin = 'true'; });
-    renderAdminMessages();
     renderAdminNav();
   }).catch(() => {});
+}
+function refreshThreadModalIfOpen() {
+  const card = document.querySelector('#modalBackdrop .modal-card');
+  if (!card || !chatTarget) return;
+  card.innerHTML = threadModalHtml();
+  const t = document.getElementById('adminChatThread'); if (t) t.scrollTop = t.scrollHeight;
 }
 function setThreadArchived(email, archived) {
   api('archiveThread', { user_email: email, archived }).then(() => {
     messagesCache.forEach(m => { if (m.user_email === email) m.archived = archived ? 'true' : 'false'; });
+    closeModal();
     renderAdminMessages();
   }).catch(err => alert(err.message));
 }
@@ -1738,7 +1784,12 @@ function sendAdminReply() {
   const input = document.getElementById('adminChatInput');
   const text = input.value.trim(); if (!text || !chatTarget) return;
   input.value = '';
-  api('sendMessage', { text, target_email: chatTarget.email, target_name: chatTarget.name }).then(loadAdminMessages).catch(err => alert(err.message));
+  api('sendMessage', { text, target_email: chatTarget.email, target_name: chatTarget.name }).then(() => api('getMessages', {})).then(data => {
+    messagesCache = data.messages || [];
+    messagesLoaded = true;
+    refreshThreadModalIfOpen();
+    renderAdminNav();
+  }).catch(err => alert(err.message));
 }
 function loadAdminErrors() {
   api('getErrors', {}).then(data => {
@@ -1747,20 +1798,25 @@ function loadAdminErrors() {
   }).catch(err => { document.getElementById('adminBody').innerHTML = `<div class="error">${err.message}</div>`; });
 }
 function filterErrors(list) {
-  if (errorsFilter === 'archived') return list.filter(e => e.archived === 'true');
-  const active = list.filter(e => e.archived !== 'true');
-  return errorsFilter === 'all' ? active : active.filter(e => e.status === errorsFilter);
+  const wantArchived = errorsFilter.includes('archived');
+  const statuses = errorsFilter.filter(f => f !== 'archived');
+  let out = list.filter(e => (e.archived === 'true') === wantArchived);
+  if (statuses.length) out = out.filter(e => statuses.includes(e.status));
+  return out;
+}
+function toggleErrorsFilter(key) {
+  const i = errorsFilter.indexOf(key);
+  if (i >= 0) errorsFilter.splice(i, 1); else errorsFilter.push(key);
+  adminErrorsPage = 0;
+  renderAdminErrors();
 }
 function renderAdminErrors() {
   const body = document.getElementById('adminBody');
   if (!body) return;
   const filtered = filterErrors(errorsCache).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
-  const filterBar = `<div class="admin-filter-row"><label class="muted">Filter:</label><select onchange="errorsFilter=this.value;adminErrorsPage=0;renderAdminErrors()">
-      <option value="all" ${errorsFilter==='all'?'selected':''}>All</option>
-      <option value="open" ${errorsFilter==='open'?'selected':''}>Open</option>
-      <option value="resolved" ${errorsFilter==='resolved'?'selected':''}>Resolved</option>
-      <option value="archived" ${errorsFilter==='archived'?'selected':''}>Archived</option>
-    </select></div>`;
+  const filterBar = filterChipsHtml(
+    [{key:'open',title:'Open'},{key:'resolved',title:'Resolved'},{key:'archived',title:'Archived'}],
+    errorsFilter, 'toggleErrorsFilter');
   body.innerHTML = filterBar + `<div class="table-wrap"><table><tr><th>Status</th><th>Song</th><th>Reported by</th><th>Description</th><th></th></tr>` +
     (pageSlice(filtered, adminErrorsPage).map(e => `<tr>
       <td><span class="badge ${e.status}">${e.status}</span></td>
@@ -1768,7 +1824,7 @@ function renderAdminErrors() {
       <td>${escapeHtml(e.user_name)}<br><span class="muted">${escapeHtml(e.user_email)}</span></td>
       <td>${escapeHtml(e.description)}</td>
       <td>${e.status==='open' ? `<button class="btn secondary" onclick="setErrorStatus('${e.id}','resolved')">Mark resolved</button> ` : ''}${e.archived==='true' ? `<button class="btn secondary" onclick="setErrorArchived('${e.id}',false)">Unarchive</button>` : `<button class="btn secondary" onclick="setErrorArchived('${e.id}',true)">Archive</button>`}</td>
-    </tr>`).join('') || `<tr><td colspan="5" class="muted">No error reports${errorsFilter==='all'?'':' in this view'}.</td></tr>`) + `</table></div>` +
+    </tr>`).join('') || `<tr><td colspan="5" class="muted">No error reports${errorsFilter.length===0?'':' in this view'}.</td></tr>`) + `</table></div>` +
     pagerHtml(filtered.length, adminErrorsPage, 'changeAdminErrorsPage');
 }
 function changeAdminErrorsPage(p) { adminErrorsPage = p; renderAdminErrors(); }
