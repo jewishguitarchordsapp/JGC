@@ -122,6 +122,10 @@
   .home-tile-title{font-weight:700;font-size:16px;color:#181a1b;}
   .home-tile-desc{color:var(--muted);font-size:13.5px;margin-top:2px;line-height:1.4;}
   .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;z-index:100;padding:16px;}
+  .modal-card{background:var(--card);border-radius:12px;padding:20px;max-width:420px;width:100%;box-shadow:0 10px 30px rgba(0,0,0,0.25);}
+  .modal-card h2{margin-top:0;}
+  .modal-actions{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:16px;flex-wrap:wrap;}
   @media (max-width:640px){
     header{padding:10px 12px;gap:8px;}
     header h1{font-size:15px;}
@@ -467,6 +471,26 @@ function parseChordLine(line) {
 }
 
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// Generic popup used for small forms (e.g. "Request a Song") that don't
+// warrant a whole page — a simple backdrop + card appended to <body>,
+// closed by its Cancel button, an Escape press, or a click outside the card.
+function openModal(bodyHtml) {
+  closeModal();
+  const el = document.createElement('div');
+  el.className = 'modal-backdrop';
+  el.id = 'modalBackdrop';
+  el.onclick = (e) => { if (e.target.id === 'modalBackdrop') closeModal(); };
+  el.innerHTML = `<div class="modal-card">${bodyHtml}</div>`;
+  document.body.appendChild(el);
+  document.addEventListener('keydown', modalEscHandler_);
+}
+function modalEscHandler_(e) { if (e.key === 'Escape') closeModal(); }
+function closeModal() {
+  const el = document.getElementById('modalBackdrop');
+  if (el) el.remove();
+  document.removeEventListener('keydown', modalEscHandler_);
+}
 
 // Songs imported from the old app store their chart as HTML paragraph pairs
 // (a "-red" chords paragraph immediately followed by a "-black" lyrics
@@ -1298,15 +1322,8 @@ function renderContact() {
 function renderContactBody() {
   const myRequests = effectiveRequests().slice().sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
   const myMessages = effectiveMessages();
-  let html = viewAsUser ? `<h2>${escapeHtml(viewAsUser.name)}'s Song Requests</h2>` : `<h2>Request a Song</h2>
-      <p class="muted">Up to 2 requests per week.</p>
-      <div class="row">
-        <div><label>Song title</label><input type="text" id="req_title"></div>
-        <div><label>Artist</label><input type="text" id="req_artist"></div>
-      </div>
-      <label>Note (optional)</label><input type="text" id="req_note">
-      <div style="margin-top:8px"><button class="btn" onclick="submitRequest()">Request Song</button> <span id="reqStatus" class="status"></span></div>
-      <h2 style="margin-top:24px">My Song Requests</h2>`;
+  let html = viewAsUser ? `<h2>${escapeHtml(viewAsUser.name)}'s Song Requests</h2>` : `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h2 style="margin:0">My Song Requests</h2><button class="btn" onclick="openRequestSongModal()">+ Request a Song</button></div>
+      <p class="muted">Up to 2 requests per week.</p>`;
   html += `<div class="table-wrap"><table><tr><th>Status</th><th>Song</th><th>Artist</th></tr>
       ${pageSlice(myRequests, contactRequestsPage, 10).map(r => `<tr><td><span class="badge ${r.status}" title="${escapeHtml(r.status)}">${requestStatusSymbol(r.status)}</span></td><td>${escapeHtml(r.song_title)}</td><td>${escapeHtml(r.artist)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No requests yet.</td></tr>'}
       </table></div>
@@ -1322,6 +1339,18 @@ function renderChatMessages(list) {
   return list.slice().sort((a,b)=> new Date(a.created_at)-new Date(b.created_at))
     .map(m => `<div class="msg ${m.sender}">${escapeHtml(m.text)}<div class="meta">${new Date(m.created_at).toLocaleString()}</div></div>`).join('') || '<div class="muted">No messages yet — say hi!</div>';
 }
+function openRequestSongModal() {
+  openModal(`
+    <h2>Request a Song</h2>
+    <p class="muted">Up to 2 requests per week.</p>
+    <div class="row">
+      <div><label>Song title</label><input type="text" id="req_title"></div>
+      <div><label>Artist</label><input type="text" id="req_artist"></div>
+    </div>
+    <label>Note (optional)</label><input type="text" id="req_note">
+    <div class="modal-actions"><span id="reqStatus" class="status"></span><button class="btn secondary" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitRequest()">Request Song</button></div>
+  `);
+}
 function submitRequest() {
   const song_title = document.getElementById('req_title').value.trim();
   const artist = document.getElementById('req_artist').value.trim();
@@ -1329,7 +1358,7 @@ function submitRequest() {
   const statusEl = document.getElementById('reqStatus');
   if (!song_title) { statusEl.textContent = 'Please enter a song title.'; statusEl.className='error'; return; }
   statusEl.textContent = 'Sending…';
-  api('createRequest', { song_title, artist, note }).then(() => renderContact()).catch(err => { statusEl.textContent = 'Error: '+err.message; statusEl.className='error'; });
+  api('createRequest', { song_title, artist, note }).then(() => { closeModal(); renderContact(); }).catch(err => { statusEl.textContent = 'Error: '+err.message; statusEl.className='error'; });
 }
 function sendChatMessage() {
   const input = document.getElementById('chatInput');
