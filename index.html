@@ -352,6 +352,13 @@ let editChordAlign = 'left'; // 'left' | 'right'
 let chatTarget = null;     // {email,name} admin is viewing/replying to
 let refreshTimer = null;
 let dataStarted = false; // gate: don't fetch songs/content until someone signs in
+// Set once loadMyData() has actually populated favorites/knownChords from
+// the server this session — lets handleCredentialResponse (see GOOGLE
+// SIGN-IN below) tell a real first sign-in apart from Google's later silent
+// FedCM token refreshes, which fire that same callback purely to keep
+// currentUser.idToken fresh and should NOT re-trigger a full favorites
+// refetch (see the comment there for why that was flashing hearts wrong).
+let myDataReady = false;
 let viewAsUser = null;     // {email,name} — admin "View As" impersonation target; actions taken while set act as this user, or null
 let viewAsData = null;     // {favorites,knownChords,playlists,requests,messages} snapshot for viewAsUser, kept in sync via refreshAfterWrite()
 let usersCache = [];       // admin Users tab cache
@@ -430,8 +437,16 @@ function handleCredentialResponse(response) {
   currentUser = { idToken: response.credential, email: (claims.email||'').toLowerCase(), name: claims.name || claims.email, picture: claims.picture || '', isAdmin: currentUser ? currentUser.isAdmin : false };
   saveAuthCache(currentUser);
   renderUserArea();
-  loadMyData();
-  startAfterSignIn();
+  // Google calls this same callback again later, silently, whenever its own
+  // FedCM prompt (see initGoogleSignIn) reissues a fresh idToken in the
+  // background — not just on a real sign-in. Only kick off the full
+  // favorites/knownChords + song-catalog load the first time this session
+  // (myDataReady/dataStarted below); re-running loadMyData() on every silent
+  // token refresh was refetching favorites mid-toggle and racing the
+  // optimistic heart update, briefly flashing it back to its old state
+  // before the toggle's own response corrected it again.
+  if (!myDataReady) loadMyData();
+  startAfterSignIn(); // already a no-op after the first call (see dataStarted guard inside)
 }
 
 function initGoogleSignIn() {
@@ -448,6 +463,7 @@ function signOut() {
   saveAuthCache(null);
   if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
   dataStarted = false;
+  myDataReady = false;
   if (view.name === 'edit' || view.name === 'admin' || view.name === 'playlistDetail') goTo('list');
   renderUserArea(); render();
 }
@@ -481,9 +497,16 @@ async function loadMyData() {
   if (!currentUser) return;
   try {
     const data = await api('getMyData', {});
-    favorites = data.favorites || [];
-    knownChords = data.knownChords || [];
+    // Update favorites/knownChords in place (empty + refill the same array)
+    // instead of reassigning the variables to new arrays. toggleFavoriteFor/
+    // toggleKnownChord capture a reference to this array for their optimistic
+    // update + later reconciliation with the server's response; reassigning
+    // here would leave an in-flight toggle patching a now-detached array
+    // while the visibly-rendered one silently went stale underneath it.
+    favorites.length = 0; favorites.push(...(data.favorites || []));
+    knownChords.length = 0; knownChords.push(...(data.knownChords || []));
     currentUser.isAdmin = !!(data.user && data.user.isAdmin);
+    myDataReady = true;
     renderUserArea();
     render();
   } catch (err) { console.error(err); }
