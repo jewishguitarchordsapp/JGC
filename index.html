@@ -65,7 +65,8 @@
   .song-row:hover{background:#f7f9f9;}
   .song-row .title{font-weight:600;}
   .song-row .artist{color:var(--muted);font-size:13px;}
-  .song-row .star{font-size:26px;color:#ccc;cursor:pointer;padding:8px 10px;margin:-8px -10px;display:inline-flex;align-items:center;justify-content:center;}
+  .song-row .star{color:#ccc;cursor:pointer;padding:8px 10px;margin:-8px -10px;display:inline-flex;align-items:center;justify-content:center;}
+  .song-row .star svg{width:25px;height:23px;display:block;}
   .song-row .star.on{color:#d9302f;}
   .new-badge{display:inline-flex;align-items:center;gap:3px;background:#e8f5e9;color:#2e7d32;font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px;margin-bottom:3px;letter-spacing:.3px;white-space:nowrap;}
   .new-badge-age{font-weight:500;opacity:.85;}
@@ -135,6 +136,7 @@
   .signin-gate{text-align:center;padding:30px;color:var(--muted);}
   nav button img{width:15px;height:15px;vertical-align:middle;margin-right:5px;opacity:0.9;}
   nav button svg{width:17px;height:17px;vertical-align:-3px;margin-right:5px;stroke:#fff;}
+  .fav-btn svg{width:15px;height:14px;vertical-align:-2px;margin-right:5px;}
   .html-chord-row{font-family:"CustomCourier",'Courier New',monospace;color:var(--chord);font-weight:700;white-space:pre-wrap;line-height:1.35;font-size:14px;}
   .html-lyric-row{font-family:"CustomCourier",'Courier New',monospace;white-space:pre-wrap;line-height:1.35;font-size:14px;margin-bottom:5px;}
   .title-hebrew{color:var(--muted);font-size:13px;direction:rtl;}
@@ -304,6 +306,11 @@ const SVG_ICONS = {
   knownChords: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
   share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>',
   admin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+  // A wide, rounded heart (not the tall/narrow shape mobile fonts render for
+  // the "♥"/"♡" text characters) used for song favoriting — filled for
+  // favorited, outline for not, both built from the same path so they line up.
+  heart: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>',
+  heartOutline: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>',
 };
 
 /* ============================================================
@@ -1056,7 +1063,7 @@ function songRowHtml(s, queueIds) {
         <div style="display:flex;align-items:center;gap:10px;flex:1;cursor:pointer;" onclick="${detailGoTo(s.id, queueIds)}">
           <div>${newBadge}<div class="title">${escapeHtml(s.title)}</div><div class="artist">${escapeHtml(s.artist||'')}</div></div>
         </div>
-        <span class="star ${effectiveFavorites().includes(s.id)?'on':''}" onclick="event.stopPropagation();toggleFavoriteFor('${s.id}')">♥</span>
+        <span class="star ${effectiveFavorites().includes(s.id)?'on':''}" onclick="event.stopPropagation();toggleFavoriteFor('${s.id}')">${SVG_ICONS.heart}</span>
       </div>`;
 }
 function renderList() {
@@ -1231,7 +1238,7 @@ function renderDetail() {
     <div class="song-header">
       <div><h2 style="margin-bottom:2px">${escapeHtml(song.title)}</h2><div class="meta">${artistLinksHtml(song.artist)}</div></div>
       <div style="display:flex;gap:8px">
-        <button class="btn secondary" style="${isFav?'color:#d9302f;border-color:#d9302f;':''}" onclick="toggleFavoriteFor('${song.id}')">${isFav?'♥ Favorited':'♡ Favorite'}</button>
+        <button class="btn secondary fav-btn" style="${isFav?'color:#d9302f;border-color:#d9302f;':''}" onclick="toggleFavoriteFor('${song.id}')">${isFav?SVG_ICONS.heart:SVG_ICONS.heartOutline}${isFav?'Favorited':'Favorite'}</button>
         <button class="btn secondary" onclick="openAddToPlaylist('${song.id}')">+ Playlist</button>
         ${effectiveIsAdmin() ? `<button class="btn secondary" onclick="goTo('edit',{id:'${song.id}'})">Edit</button>
         <button class="btn danger" onclick="deleteSongConfirm('${song.id}')">Delete</button>` : ''}
