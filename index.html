@@ -58,9 +58,9 @@
   .song-row:hover{background:#f7f9f9;}
   .song-row .title{font-weight:600;}
   .song-row .artist{color:var(--muted);font-size:13px;}
-  .song-row .star{font-size:18px;color:#ccc;cursor:pointer;padding:4px;}
+  .song-row .star{font-size:26px;color:#ccc;cursor:pointer;padding:8px 10px;margin:-8px -10px;display:inline-flex;align-items:center;justify-content:center;}
   .song-row .star.on{color:#d9302f;}
-  .new-badge{display:inline-flex;align-items:center;gap:3px;background:#e8f5e9;color:#2e7d32;font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px;margin-left:7px;letter-spacing:.3px;vertical-align:middle;white-space:nowrap;}
+  .new-badge{display:inline-flex;align-items:center;gap:3px;background:#e8f5e9;color:#2e7d32;font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px;margin-bottom:3px;letter-spacing:.3px;white-space:nowrap;}
   .new-badge-age{font-weight:500;opacity:.85;}
   .chip{display:inline-block;background:#eef4f4;color:var(--accent);border-radius:20px;padding:5px 12px;font-size:13px;margin:3px;cursor:pointer;border:1px solid #d7e6e6;}
   .chip.active{background:var(--teal);color:#fff;border-color:var(--teal);}
@@ -131,10 +131,10 @@
   .html-chord-row{font-family:"CustomCourier",'Courier New',monospace;color:var(--chord);font-weight:700;white-space:pre-wrap;line-height:1.35;font-size:14px;}
   .html-lyric-row{font-family:"CustomCourier",'Courier New',monospace;white-space:pre-wrap;line-height:1.35;font-size:14px;margin-bottom:5px;}
   .title-hebrew{color:var(--muted);font-size:13px;direction:rtl;}
-  .home-tile{display:flex;align-items:flex-start;gap:14px;background:#f2f4f5;border:none;border-radius:14px;padding:16px 18px;margin-bottom:12px;cursor:pointer;transition:background .15s ease;}
+  .home-tile{display:flex;align-items:flex-start;gap:14px;background:#f2f4f5;border:1px solid rgba(0,0,0,.10);border-radius:14px;padding:16px 18px;margin-bottom:12px;cursor:pointer;transition:background .15s ease;}
   .home-tile:hover{background:#e9edee;}
   .home-tile:active{background:#e1e6e7;}
-  .home-tile-icon{flex:0 0 auto;width:52px;height:52px;display:flex;align-items:center;justify-content:center;font-size:22px;border-radius:12px;border:1px solid rgba(0,0,0,.10);box-shadow:0 1px 3px rgba(0,0,0,.15);background:#fff;}
+  .home-tile-icon{flex:0 0 auto;width:52px;height:52px;display:flex;align-items:center;justify-content:center;font-size:22px;border-radius:12px;border:1px solid rgba(0,0,0,.10);box-shadow:0 1px 3px rgba(0,0,0,.15);}
   .home-tile-icon svg{width:26px;height:26px;stroke:var(--teal);}
   .home-tile-icon img{width:44px;height:44px;object-fit:contain;}
   .home-tile-title{font-weight:700;font-size:16px;color:#181a1b;}
@@ -166,8 +166,7 @@
   .install-banner-close{background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer;padding:2px 6px;}
   @media (max-width:640px){
     header{padding:10px 12px;gap:8px;}
-    header h1{font-size:15px;}
-    header h1 img{width:20px;height:20px;}
+    header h1{font-size:15px;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;margin:0;white-space:nowrap;}
     nav{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;}
     nav button{flex:0 0 auto;padding:7px 9px;font-size:12.5px;}
     nav button svg{width:15px;height:15px;margin-right:4px;}
@@ -191,12 +190,12 @@
     #userArea{display:none;}
     #shareBtn{display:none;}
     footer{padding-bottom:80px;}
-    .bottom-nav{display:flex;position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--border);z-index:20;padding:6px 2px calc(6px + env(safe-area-inset-bottom));justify-content:space-around;}
-    .bottom-nav button{background:none;border:none;display:flex;flex-direction:column;align-items:center;gap:2px;color:var(--muted);font-size:10.5px;padding:4px 2px;flex:1;cursor:pointer;}
+    .bottom-nav{display:flex;position:fixed;left:0;right:0;bottom:0;background:var(--teal);border-top:none;z-index:20;padding:6px 2px calc(6px + env(safe-area-inset-bottom));justify-content:space-around;}
+    .bottom-nav button{background:none;border:none;display:flex;flex-direction:column;align-items:center;gap:2px;color:rgba(255,255,255,0.85);font-size:10.5px;padding:4px 2px;flex:1;cursor:pointer;}
     .bottom-nav button .nav-icon-wrap{width:30px;height:30px;display:flex;align-items:center;justify-content:center;margin-bottom:1px;}
-    .bottom-nav button .nav-icon-wrap img{width:24px;height:24px;object-fit:contain;}
-    .bottom-nav button .nav-icon-wrap svg{width:18px;height:18px;stroke:var(--teal);}
-    .bottom-nav button.active{color:var(--teal-dark);font-weight:600;}
+    .bottom-nav button .nav-icon-wrap svg{width:18px;height:18px;stroke:#fff;}
+    .bottom-nav button.active{color:#fff;font-weight:600;}
+    .bottom-nav button.active .nav-icon-wrap{background:rgba(255,255,255,0.2);border-radius:9px;}
   }
 </style>
 </head>
@@ -204,7 +203,7 @@
 
 <header>
   <button class="hamburger-btn" onclick="openMobileDrawer()" aria-label="Menu">☰</button>
-  <h1 style="cursor:pointer;" onclick="goTo('home')"><img id="logoImg" alt="" style="width:24px;height:24px;vertical-align:middle;border-radius:6px;margin-right:6px;"><span id="headerTitle">Welcome</span></h1>
+  <h1 style="cursor:pointer;" onclick="goTo('home')"><span id="headerTitle">Welcome</span></h1>
   <nav id="mainNav"></nav>
   <div class="spacer"></div>
   <button id="shareBtn" class="btn secondary" style="padding:6px 10px;" title="Share this app"><img id="shareIcon" alt="Share" style="width:16px;height:16px;vertical-align:middle;"></button>
@@ -816,25 +815,16 @@ function renderNav() {
     return `<button class="${view.name===name?'active':''}" onclick="goTo('${name}')">${icon}${label}</button>`;
   }).join('');
 }
-// Bottom nav reuses the richer Home-tile artwork (ICONS.home_*) instead of
-// the plain-line SVG_ICONS so it reads crisp at small mobile sizes — no
-// border/shadow box here (that treatment is for the Home page tiles only,
-// see .home-tile-icon). Falls back to SVG_ICONS for any tab with no
-// matching artwork (e.g. Admin).
-const NAV_ICON_IMAGE = { list: 'home_songs', artists: 'home_artists', categories: 'home_categories', playlists: 'home_playlists', contact: 'home_contact' };
-function navIconHtml(name) {
-  const key = NAV_ICON_IMAGE[name];
-  if (key && ICONS[key]) return `<img src="${ICONS[key]}" alt="">`;
-  return SVG_ICONS[name] || '';
-}
 // Mobile-only fixed tab bar (see .bottom-nav CSS) — same tabs as renderNav,
-// laid out icon-over-label instead of icon-before-label.
+// laid out icon-over-label instead of icon-before-label. Same plain-line
+// SVG_ICONS as the top nav (both now sit on a solid teal bar with white
+// icons), so the two stay visually consistent.
 function renderBottomNav() {
   const el = document.getElementById('bottomNav');
   if (!el) return;
   if (!currentUser) { el.innerHTML = ''; return; }
   el.innerHTML = navTabs().map(([name,label]) => {
-    const icon = navIconHtml(name);
+    const icon = SVG_ICONS[name] || '';
     return `<button class="${view.name===name?'active':''}" onclick="goTo('${name}')"><span class="nav-icon-wrap">${icon}</span><span>${label}</span></button>`;
   }).join('');
 }
@@ -1013,10 +1003,10 @@ function detailGoTo(songId, queueIds) {
   return `goTo('detail',{id:'${songId}',queue:${arr},queueIdx:${idx}})`;
 }
 function songRowHtml(s, queueIds) {
-  const newBadge = isNewSong(s) ? `<span class="new-badge">NEW <span class="new-badge-age">· ${songDaysAgoLabel(s)}</span></span>` : '';
+  const newBadge = isNewSong(s) ? `<div class="new-badge">NEW <span class="new-badge-age">· ${songDaysAgoLabel(s)}</span></div>` : '';
   return `<div class="song-row">
         <div style="display:flex;align-items:center;gap:10px;flex:1;cursor:pointer;" onclick="${detailGoTo(s.id, queueIds)}">
-          <div><div class="title">${escapeHtml(s.title)}${s.title_hebrew ? ` <span class="title-hebrew">${escapeHtml(s.title_hebrew)}</span>` : ''}${newBadge}</div><div class="artist">${escapeHtml(s.artist||'')}</div></div>
+          <div>${newBadge}<div class="title">${escapeHtml(s.title)}</div><div class="artist">${escapeHtml(s.artist||'')}</div></div>
         </div>
         <span class="star ${effectiveFavorites().includes(s.id)?'on':''}" onclick="event.stopPropagation();toggleFavoriteFor('${s.id}')">♥</span>
       </div>`;
@@ -1191,7 +1181,7 @@ function renderDetail() {
   const { language, tags } = splitCategories(song.categories);
   let html = `<span class="backlink" onclick="goTo('list')">‹ Back to Songs</span>
     <div class="song-header">
-      <div><h2 style="margin-bottom:2px">${escapeHtml(song.title)}${song.title_hebrew ? ` <span class="title-hebrew">${escapeHtml(song.title_hebrew)}</span>` : ''}</h2><div class="meta">${artistLinksHtml(song.artist)}</div></div>
+      <div><h2 style="margin-bottom:2px">${escapeHtml(song.title)}</h2><div class="meta">${artistLinksHtml(song.artist)}</div></div>
       <div style="display:flex;gap:8px">
         <button class="btn secondary" style="${isFav?'color:#d9302f;border-color:#d9302f;':''}" onclick="toggleFavoriteFor('${song.id}')">${isFav?'♥ Favorited':'♡ Favorite'}</button>
         <button class="btn secondary" onclick="openAddToPlaylist('${song.id}')">+ Playlist</button>
@@ -1978,7 +1968,6 @@ function render() {
 /* ============================================================
    INIT
    ============================================================ */
-document.getElementById('logoImg').src = ICONS.logo;
 document.getElementById('shareIcon').src = ICONS.share;
 document.getElementById('shareBtn').onclick = shareApp;
 renderUserArea();
