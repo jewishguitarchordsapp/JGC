@@ -654,6 +654,13 @@ function extractYouTubeId(url) {
 
 const COMMON_CHORDS = ['C','C#','D','Eb','E','F','F#','G','Ab','A','Bb','B','Cm','Dm','Em','Fm','Gm','Am','Bm','C7','D7','E7','F7','G7','A7','B7'];
 
+// Renders a chord name for display with any trailing quality digits (the "7"
+// in "C7", "D7", etc.) as a superscript, e.g. C<sup>7</sup> — purely
+// cosmetic, so escapeHtml runs first and the sup tag is added after.
+function formatChordLabel(c) {
+  return escapeHtml(c).replace(/(\d+)$/, '<sup>$1</sup>');
+}
+
 /* ============================================================
    NAVIGATION
    ============================================================ */
@@ -863,13 +870,13 @@ function toggleFavoriteFor(songId) {
    KNOWN CHORDS PICKER
    ============================================================ */
 function renderKnownChords() {
-  if (viewAsUser) { document.getElementById('app').innerHTML = `<span class="backlink" onclick="goTo('list')">‹ Back to Songs</span><h2>Chords ${escapeHtml(viewAsUser.name)} knows</h2><div class="grid-cats">` + (effectiveKnownChords().map(c => `<span class="chip toggle-on">${escapeHtml(c)}</span>`).join('') || '<span class="muted">None set.</span>') + `</div>`; return; }
+  if (viewAsUser) { document.getElementById('app').innerHTML = `<span class="backlink" onclick="goTo('list')">‹ Back to Songs</span><h2>Chords ${escapeHtml(viewAsUser.name)} knows</h2><div class="grid-cats">` + (effectiveKnownChords().map(c => `<span class="chip toggle-on">${formatChordLabel(c)}</span>`).join('') || '<span class="muted">None set.</span>') + `</div>`; return; }
   if (!currentUser) { document.getElementById('app').innerHTML = '<div class="empty">Sign in to set your known chords.</div>'; return; }
   let html = `<span class="backlink" onclick="goTo('list')">‹ Back to Songs</span>
     <h2>Chords you know</h2>
     <p class="muted">Tap the chords you can already play. "Known Songs" will show songs that only use these.</p>
     <div class="grid-cats" id="chordPicker">` +
-    COMMON_CHORDS.map(c => `<span class="chip ${knownChords.includes(c)?'toggle-on':''}" onclick="toggleKnownChord('${c}')">${c}</span>`).join('') +
+    COMMON_CHORDS.map(c => `<span class="chip ${knownChords.includes(c)?'toggle-on':''}" onclick="toggleKnownChord('${c}')">${formatChordLabel(c)}</span>`).join('') +
     `</div><div style="margin-top:14px"><button class="btn" onclick="saveKnownChords()">Save</button> <span id="kcStatus" class="status"></span></div>`;
   document.getElementById('app').innerHTML = html;
 }
