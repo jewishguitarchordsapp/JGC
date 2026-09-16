@@ -2,8 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Jewish Guitar Chords App</title>
+<!-- PWA: lets a phone's browser install this as a home-screen app that
+     opens full-screen (no browser bars), instead of just a bookmark. -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#4a9b9b">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="JGC Chords">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
   @font-face{
@@ -126,6 +134,26 @@
   .modal-card{background:var(--card);border-radius:12px;padding:20px;max-width:420px;width:100%;box-shadow:0 10px 30px rgba(0,0,0,0.25);}
   .modal-card h2{margin-top:0;}
   .modal-actions{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:16px;flex-wrap:wrap;}
+  /* Mobile-only chrome: a hamburger (opens sign-in info in a drawer) and a
+     fixed bottom tab bar, replacing the desktop top nav + inline user box on
+     small screens. Hidden here, switched on inside the mobile media query
+     below, so desktop layout is completely unaffected. */
+  .hamburger-btn{display:none;background:transparent;border:none;color:#fff;font-size:22px;line-height:1;cursor:pointer;padding:2px 8px;}
+  .bottom-nav{display:none;}
+  .mobile-drawer{display:none;}
+  .mobile-drawer.open{display:block;position:fixed;inset:0;z-index:30;}
+  .mobile-drawer-backdrop{position:absolute;inset:0;background:rgba(0,0,0,0.4);}
+  .mobile-drawer-panel{position:absolute;top:0;left:0;bottom:0;width:78%;max-width:300px;background:#fff;padding:20px 16px;box-shadow:2px 0 12px rgba(0,0,0,0.2);overflow-y:auto;}
+  .mobile-drawer-close{background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted);float:inline-end;padding:4px;}
+  .mobile-drawer .userbox{clear:both;flex-direction:column;align-items:flex-start;gap:10px;}
+  .mobile-drawer .userbox img{width:40px;height:40px;border-radius:50%;}
+  /* Custom "install this app" banner — shown for a real install prompt on
+     Android/Chrome, or manual Share-sheet instructions on iOS (Safari never
+     fires beforeinstallprompt, so there's no programmatic install there). */
+  .install-banner{display:none;}
+  .install-banner.show{display:flex;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap;background:#eef4f4;color:var(--accent);padding:10px 16px;font-size:13.5px;border-bottom:1px solid #d7e6e6;}
+  .install-banner .btn{padding:5px 12px;font-size:12.5px;}
+  .install-banner-close{background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer;padding:2px 6px;}
   @media (max-width:640px){
     header{padding:10px 12px;gap:8px;}
     header h1{font-size:15px;}
@@ -133,7 +161,7 @@
     nav{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;}
     nav button{flex:0 0 auto;padding:7px 9px;font-size:12.5px;}
     nav button svg{width:15px;height:15px;margin-right:4px;}
-    main{padding:12px;}
+    main{padding:12px;padding-bottom:78px;}
     .card{padding:12px;}
     .home-tile{padding:13px 14px;gap:11px;}
     .home-tile-icon{width:44px;height:44px;}
@@ -144,12 +172,24 @@
     table{font-size:12.5px;}
     .song-row{padding:11px 12px;}
     .btn{padding:10px 14px;}
+    /* Bottom tab bar replaces the top nav row + inline user box; a hamburger
+       (left of the title) opens the same sign-in info in a slide-out drawer. */
+    .hamburger-btn{display:inline-flex;align-items:center;}
+    nav#mainNav{display:none;}
+    #userArea{display:none;}
+    #shareBtn{display:none;}
+    footer{padding-bottom:80px;}
+    .bottom-nav{display:flex;position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--border);z-index:20;padding:6px 2px calc(6px + env(safe-area-inset-bottom));justify-content:space-around;}
+    .bottom-nav button{background:none;border:none;display:flex;flex-direction:column;align-items:center;gap:2px;color:var(--muted);font-size:10.5px;padding:4px 2px;flex:1;cursor:pointer;}
+    .bottom-nav button svg{width:21px;height:21px;}
+    .bottom-nav button.active{color:var(--teal-dark);font-weight:600;}
   }
 </style>
 </head>
 <body>
 
 <header>
+  <button class="hamburger-btn" onclick="openMobileDrawer()" aria-label="Menu">☰</button>
   <h1 style="cursor:pointer;" onclick="goTo('home')"><img id="logoImg" alt="" style="width:24px;height:24px;vertical-align:middle;border-radius:6px;margin-right:6px;">Jewish Guitar Chords App</h1>
   <nav id="mainNav"></nav>
   <div class="spacer"></div>
@@ -157,10 +197,24 @@
   <div id="userArea" class="userbox"></div>
 </header>
 
+<!-- Mobile-only: opened by the hamburger button above; holds the same
+     sign-in info the desktop header shows inline (#userArea). -->
+<div id="mobileDrawer" class="mobile-drawer">
+  <div class="mobile-drawer-backdrop" onclick="closeMobileDrawer()"></div>
+  <div class="mobile-drawer-panel">
+    <button class="mobile-drawer-close" onclick="closeMobileDrawer()" aria-label="Close menu">✕</button>
+    <div id="userAreaMobile" class="userbox"></div>
+  </div>
+</div>
+
+<div id="installBanner" class="install-banner"></div>
 <div id="viewAsBanner"></div>
 <main id="app"></main>
 
 <footer id="footerStatus"></footer>
+
+<!-- Mobile-only fixed tab bar; mirrors #mainNav (see renderBottomNav). -->
+<nav id="bottomNav" class="bottom-nav"></nav>
 
 <script>
 /* ============================================================
@@ -312,15 +366,27 @@ function signOut() {
   renderUserArea(); render();
 }
 
+// Renders into both the desktop header's inline user box (#userArea) and
+// the mobile hamburger drawer's copy (#userAreaMobile) — on mobile the
+// header's own copy is hidden by CSS and the drawer is what's shown, but
+// both stay populated so switching between phone/desktop widths (or a
+// resize) never leaves either one stale.
 function renderUserArea() {
-  const el = document.getElementById('userArea');
+  const targets = [document.getElementById('userArea'), document.getElementById('userAreaMobile')].filter(Boolean);
+  if (targets.length === 0) return;
   if (currentUser) {
-    el.innerHTML = `${currentUser.picture ? `<img src="${currentUser.picture}">` : ''}<span class="name">${escapeHtml(currentUser.name)}${currentUser.isAdmin?' (admin)':''}</span><button id="signoutBtn">Sign out</button>`;
-    document.getElementById('signoutBtn').onclick = signOut;
+    const html = `${currentUser.picture ? `<img src="${currentUser.picture}">` : ''}<span class="name">${escapeHtml(currentUser.name)}${currentUser.isAdmin?' (admin)':''}</span><button class="btn secondary" onclick="signOut()">Sign out</button>`;
+    targets.forEach(el => { el.innerHTML = html; });
   } else {
-    el.innerHTML = `<div id="gsiButtonContainer"></div>`;
+    targets.forEach((el, i) => {
+      el.innerHTML = `<div id="${i===0?'gsiButtonContainer':'gsiButtonContainerMobile'}"></div>`;
+    });
     if (window.google && CONFIG.CLIENT_ID.indexOf('PASTE_YOUR') !== 0) {
-      try { google.accounts.id.renderButton(document.getElementById('gsiButtonContainer'), { theme:'filled_blue', size:'medium', text:'signin' }); } catch(e) {}
+      ['gsiButtonContainer','gsiButtonContainerMobile'].forEach(id => {
+        const container = document.getElementById(id);
+        if (!container) return;
+        try { google.accounts.id.renderButton(container, { theme:'filled_blue', size:'medium', text:'signin' }); } catch(e) {}
+      });
     }
   }
 }
@@ -690,18 +756,75 @@ function formatChordLabel(c) {
    ============================================================ */
 function goTo(name, extra) { view = Object.assign({ name }, extra || {}); render(); window.scrollTo(0,0); }
 
-function renderNav() {
-  const nav = document.getElementById('mainNav');
-  // 'Home' is deliberately not a nav tab — the header title already goes
-  // home when clicked (onclick="goTo('home')" above), so a separate tab
-  // would just be a redundant second way to do the same thing.
+// Shared by the desktop top nav and the mobile bottom tab bar so the two
+// never drift out of sync. 'Home' is deliberately not a tab — the header
+// title already goes home when clicked (onclick="goTo('home')" above), so a
+// separate tab would just be a redundant second way to do the same thing.
+function navTabs() {
   const tabs = [['list','Songs'],['artists','Artists'],['categories','Categories'],['playlists','Playlists'],['contact','Contact']];
   if (effectiveIsAdmin()) tabs.push(['admin','Admin']);
-  nav.innerHTML = tabs.map(([name,label]) => {
+  return tabs;
+}
+function renderNav() {
+  const nav = document.getElementById('mainNav');
+  nav.innerHTML = navTabs().map(([name,label]) => {
     const icon = SVG_ICONS[name] || '';
     return `<button class="${view.name===name?'active':''}" onclick="goTo('${name}')">${icon}${label}</button>`;
   }).join('');
 }
+// Mobile-only fixed tab bar (see .bottom-nav CSS) — same tabs as renderNav,
+// laid out icon-over-label instead of icon-before-label.
+function renderBottomNav() {
+  const el = document.getElementById('bottomNav');
+  if (!el) return;
+  el.innerHTML = navTabs().map(([name,label]) => {
+    const icon = SVG_ICONS[name] || '';
+    return `<button class="${view.name===name?'active':''}" onclick="goTo('${name}')">${icon}<span>${label}</span></button>`;
+  }).join('');
+}
+function openMobileDrawer() { document.getElementById('mobileDrawer').classList.add('open'); }
+function closeMobileDrawer() { document.getElementById('mobileDrawer').classList.remove('open'); }
+
+/* ============================================================
+   PWA INSTALL PROMPT — a custom banner (instead of leaving this to
+   whatever the browser does on its own, which varies a lot): a real
+   "Install App" button on Android/Chrome, or manual Share-sheet
+   instructions on iOS (Safari never fires beforeinstallprompt, so there's
+   no programmatic install to offer there). Dismissing it only hides it for
+   this visit — this app deliberately keeps no state in localStorage/
+   sessionStorage (see the STATE comment above) — so it can reappear next time.
+   ============================================================ */
+let deferredInstallPrompt = null;
+let installBannerDismissed = false;
+function isStandaloneDisplay() { return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true; }
+function isIosDevice() { return /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream; }
+function showInstallBanner(kind) {
+  if (installBannerDismissed || isStandaloneDisplay()) return;
+  const el = document.getElementById('installBanner');
+  if (!el) return;
+  const msg = kind === 'ios'
+    ? 'Install this app: tap <b>Share</b>, then <b>Add to Home Screen</b>.'
+    : 'Install this app on your device for quick, full-screen access.';
+  el.innerHTML = `<span>${msg}</span><span style="display:flex;align-items:center;gap:6px">${kind === 'android' ? `<button class="btn" onclick="installAppClick()">Install App</button>` : ''}<button class="install-banner-close" onclick="hideInstallBanner()" aria-label="Dismiss">✕</button></span>`;
+  el.classList.add('show');
+}
+function hideInstallBanner() {
+  installBannerDismissed = true;
+  const el = document.getElementById('installBanner');
+  if (el) { el.classList.remove('show'); el.innerHTML = ''; }
+}
+function installAppClick() {
+  if (!deferredInstallPrompt) return;
+  deferredInstallPrompt.prompt();
+  deferredInstallPrompt.userChoice.finally(() => { deferredInstallPrompt = null; hideInstallBanner(); });
+}
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  showInstallBanner('android');
+});
+window.addEventListener('appinstalled', () => { deferredInstallPrompt = null; hideInstallBanner(); });
+if (isIosDevice() && !isStandaloneDisplay()) showInstallBanner('ios');
 
 /* ============================================================
    HOME — the landing page with a tile for each section
@@ -1660,6 +1783,7 @@ function renderViewAsBanner() {
 }
 function render() {
   renderNav();
+  renderBottomNav();
   renderViewAsBanner();
   if (!CONFIG.SCRIPT_URL || CONFIG.SCRIPT_URL.indexOf('PASTE_YOUR') === 0) {
     document.getElementById('app').innerHTML = `<div class="card"><h2>One setup step left</h2>
