@@ -200,9 +200,13 @@
     #shareBtn{display:none;}
     footer{padding-bottom:80px;}
     .bottom-nav{display:flex;position:fixed;left:0;right:0;bottom:0;background:var(--teal);border-top:none;z-index:20;padding:6px 2px calc(6px + env(safe-area-inset-bottom));justify-content:space-around;}
-    .bottom-nav button{background:none;border:none;display:flex;flex-direction:column;align-items:center;gap:2px;color:rgba(255,255,255,0.85);font-size:10.5px;padding:4px 2px;flex:1;cursor:pointer;}
+    .bottom-nav button{background:none;border:none;display:flex;flex-direction:column;align-items:center;gap:2px;color:rgba(255,255,255,0.85);font-size:10.5px;padding:4px 2px;flex:1;cursor:pointer;text-align:center;}
     .bottom-nav button .nav-icon-wrap{width:30px;height:30px;display:flex;align-items:center;justify-content:center;margin-bottom:1px;}
     .bottom-nav button .nav-icon-wrap svg{width:18px;height:18px;stroke:#fff;}
+    /* Labels like "Categories"/"Playlists" can wrap to two lines on a narrow
+       phone; without this, the wrapped lines default to left-aligned text,
+       which reads as off-center under the icon above them. */
+    .bottom-nav button span:last-child{text-align:center;line-height:1.15;}
     .bottom-nav button.active{color:#fff;font-weight:600;}
     .bottom-nav button.active .nav-icon-wrap{background:rgba(255,255,255,0.2);border-radius:9px;}
   }
@@ -464,6 +468,7 @@ function signOut() {
   if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
   dataStarted = false;
   myDataReady = false;
+  saveViewCache(null);
   if (view.name === 'edit' || view.name === 'admin' || view.name === 'playlistDetail') goTo('list');
   renderUserArea(); render();
 }
@@ -875,7 +880,25 @@ function formatChordLabel(c) {
 /* ============================================================
    NAVIGATION
    ============================================================ */
-function goTo(name, extra) { view = Object.assign({ name }, extra || {}); render(); window.scrollTo(0,0); }
+// Mirrors the current `view` to localStorage (see loadViewCache, used at
+// INIT below) purely so a page reload — including a mobile
+// pull-to-refresh, which is just a full page reload — can reopen whatever
+// page you were actually on instead of always landing back on Home. Every
+// render function already tolerates its data not being loaded yet (songs/
+// playlists arrive asynchronously after sign-in), showing a brief "not
+// found yet"-style placeholder that self-corrects once that data arrives.
+const VIEW_CACHE_KEY = 'jgc_view_cache_v1';
+function saveViewCache(v) {
+  try { localStorage.setItem(VIEW_CACHE_KEY, JSON.stringify(v)); } catch (e) {}
+}
+function loadViewCache() {
+  try {
+    const raw = localStorage.getItem(VIEW_CACHE_KEY);
+    const v = raw ? JSON.parse(raw) : null;
+    return (v && typeof v.name === 'string') ? v : null;
+  } catch (e) { return null; }
+}
+function goTo(name, extra) { view = Object.assign({ name }, extra || {}); saveViewCache(view); render(); window.scrollTo(0,0); }
 
 // Shared by the desktop top nav and the mobile bottom tab bar so the two
 // never drift out of sync. 'Home' is deliberately not a tab — the header
@@ -2087,6 +2110,12 @@ document.getElementById('shareBtn').onclick = shareApp;
 // well before that ever surfaces to the user.
 const cachedAuth = loadAuthCache();
 if (cachedAuth && cachedAuth.idToken) currentUser = cachedAuth;
+// Reopen whatever page was open before the reload (see saveViewCache above)
+// instead of always resetting to Home/Welcome — this is what makes a mobile
+// pull-to-refresh stay put on, say, the Known Chords page instead of
+// bouncing back to the start.
+const cachedView = loadViewCache();
+if (cachedView) view = cachedView;
 renderUserArea();
 render(); // show the sign-in gate (or restore a still-valid session's view) immediately
 if (currentUser) { loadMyData(); startAfterSignIn(); }
