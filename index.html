@@ -239,8 +239,8 @@ let editChordDir = 'ltr';   // 'ltr' | 'rtl'
 let editChordAlign = 'left'; // 'left' | 'right'
 let chatTarget = null;     // {email,name} admin is viewing/replying to
 let refreshTimer = null;
-let viewAsUser = null;     // {email,name} — admin "View As" impersonation target (read-only), or null
-let viewAsData = null;     // {favorites,knownChords,playlists} snapshot for viewAsUser
+let viewAsUser = null;     // {email,name} — admin "View As" impersonation target; actions taken while set act as this user, or null
+let viewAsData = null;     // {favorites,knownChords,playlists,requests,messages} snapshot for viewAsUser, kept in sync via refreshAfterWrite()
 let usersCache = [];       // admin Users tab cache
 let userSearch = '';
 let usersPage = 0;
@@ -743,9 +743,10 @@ function renderHome() {
    SONGS LIST (All / Favorites / Known Songs)
    ============================================================ */
 // While admin is "viewing as" another user, every favorites/known-chords
-// read in the app should reflect THAT user's data (read-only) instead of
-// the signed-in admin's own — these two helpers are the single place that
-// decides which set is "in effect" right now.
+// read in the app should reflect THAT user's data instead of the signed-in
+// admin's own — these two helpers are the single place that decides which
+// set is "in effect" right now. Writes made while viewAsUser is set (see
+// viewAsFields()/refreshAfterWrite() above) mutate this same data in place.
 function effectiveFavorites() { return viewAsUser ? (viewAsData.favorites || []) : favorites; }
 function effectiveKnownChords() { return viewAsUser ? (viewAsData.knownChords || []) : knownChords; }
 function effectiveRequests() { return viewAsUser ? (viewAsData.requests || []) : requestsCache; }
@@ -755,6 +756,22 @@ function effectiveMessages() { return viewAsUser ? (viewAsData.messages || []) :
 // admin account itself is still an admin, since the whole point of View As
 // is to see the app exactly as that (non-admin) user does.
 function effectiveIsAdmin() { return !viewAsUser && !!(currentUser && currentUser.isAdmin); }
+// While "View As" is active, a write (favoriting a song, saving known
+// chords, a playlist, a song request, a chat message) should be attributed
+// to the impersonated user, not the admin doing the impersonating — merge
+// this into the payload of any such write so the backend does that.
+function viewAsFields() { return viewAsUser ? { target_email: viewAsUser.email, target_name: viewAsUser.name, view_as: true } : {}; }
+// After a write, refresh whatever data that write could have changed: the
+// impersonated user's own snapshot during View As, or the normal global
+// caches otherwise (same refresh every write already did before View As
+// could make real changes).
+function refreshAfterWrite() {
+  const base = loadSongs(false);
+  if (!viewAsUser) return base;
+  return base.then(() => api('getUserSnapshot', { target_email: viewAsUser.email })).then(data => {
+    viewAsData = { favorites: data.favorites || [], knownChords: data.knownChords || [], playlists: data.playlists || [], requests: data.requests || [], messages: data.messages || [] };
+  });
+}
 
 function songKnown(song) {
   const used = chordsUsedIn(song.chords_lyrics, 0);
@@ -865,26 +882,28 @@ function shareApp() {
 }
 
 function toggleFavoriteFor(songId) {
-  if (viewAsUser) { alert('You\'re viewing ' + viewAsUser.name + ' as read-only. Exit "View As" to make changes.'); return; }
   if (!currentUser) { alert('Sign in with Google first to save favorites.'); return; }
   // Optimistic update: flip the heart and redraw immediately instead of
   // waiting on the round trip to the Apps Script backend (which verifies
   // the Google ID token and scans a sheet, so it can take a second or more
   // and made the heart feel unresponsive). Reconcile with the server's
   // answer when it arrives, and revert with a message if the request fails.
-  const wasFavorited = favorites.includes(songId);
-  if (wasFavorited) favorites = favorites.filter(id => id !== songId); else favorites.push(songId);
+  // During "View As" this mutates the impersonated user's own favorites
+  // list in place (viewAsData.favorites) instead of the admin's.
+  const favList = viewAsUser ? viewAsData.favorites : favorites;
+  const wasFavorited = favList.includes(songId);
+  if (wasFavorited) favList.splice(favList.indexOf(songId), 1); else favList.push(songId);
   render();
-  api('toggleFavorite', { song_id: songId }).then(r => {
-    const nowFavorited = favorites.includes(songId);
+  api('toggleFavorite', Object.assign({ song_id: songId }, viewAsFields())).then(r => {
+    const nowFavorited = favList.includes(songId);
     if (r.favorited !== nowFavorited) {
-      if (r.favorited) { if (!favorites.includes(songId)) favorites.push(songId); }
-      else favorites = favorites.filter(id => id !== songId);
+      if (r.favorited) { if (!favList.includes(songId)) favList.push(songId); }
+      else { const i = favList.indexOf(songId); if (i >= 0) favList.splice(i, 1); }
       render();
     }
   }).catch(err => {
-    if (wasFavorited) { if (!favorites.includes(songId)) favorites.push(songId); }
-    else favorites = favorites.filter(id => id !== songId);
+    if (wasFavorited) { if (!favList.includes(songId)) favList.push(songId); }
+    else { const i = favList.indexOf(songId); if (i >= 0) favList.splice(i, 1); }
     render();
     alert(err.message);
   });
@@ -894,23 +913,26 @@ function toggleFavoriteFor(songId) {
    KNOWN CHORDS PICKER
    ============================================================ */
 function renderKnownChords() {
-  if (viewAsUser) { document.getElementById('app').innerHTML = `<span class="backlink" onclick="goTo('list')">‹ Back to Songs</span><h2>Chords ${escapeHtml(viewAsUser.name)} knows</h2><div class="grid-cats">` + (effectiveKnownChords().map(c => `<span class="chip toggle-on">${formatChordLabel(c)}</span>`).join('') || '<span class="muted">None set.</span>') + `</div>`; return; }
   if (!currentUser) { document.getElementById('app').innerHTML = '<div class="empty">Sign in to set your known chords.</div>'; return; }
   let html = `<span class="backlink" onclick="goTo('list')">‹ Back to Songs</span>
-    <h2>Chords you know</h2>
+    <h2>${viewAsUser ? escapeHtml(viewAsUser.name) + `'s known chords` : 'Chords you know'}</h2>
     <p class="muted">Tap the chords you can already play. "Known Songs" will show songs that only use these.</p>
     <div class="grid-cats" id="chordPicker">` +
-    COMMON_CHORDS.map(c => `<span class="chip ${knownChords.includes(c)?'toggle-on':''}" onclick="toggleKnownChord('${c}')">${formatChordLabel(c)}</span>`).join('') +
+    COMMON_CHORDS.map(c => `<span class="chip ${effectiveKnownChords().includes(c)?'toggle-on':''}" onclick="toggleKnownChord('${c}')">${formatChordLabel(c)}</span>`).join('') +
     `</div><div style="margin-top:14px"><button class="btn" onclick="saveKnownChords()">Save</button> <span id="kcStatus" class="status"></span></div>`;
   document.getElementById('app').innerHTML = html;
 }
 function toggleKnownChord(c) {
-  knownChords = knownChords.includes(c) ? knownChords.filter(x=>x!==c) : knownChords.concat([c]);
+  // During "View As" this mutates the impersonated user's own known-chords
+  // list in place (viewAsData.knownChords) instead of the admin's.
+  const list = viewAsUser ? viewAsData.knownChords : knownChords;
+  const idx = list.indexOf(c);
+  if (idx >= 0) list.splice(idx, 1); else list.push(c);
   renderKnownChords();
 }
 function saveKnownChords() {
   const statusEl = document.getElementById('kcStatus'); statusEl.textContent = 'Saving…';
-  api('setKnownChords', { chords: knownChords }).then(()=>{ statusEl.textContent='Saved.'; }).catch(err=>{ statusEl.textContent='Error: '+err.message; statusEl.className='error'; });
+  api('setKnownChords', Object.assign({ chords: effectiveKnownChords() }, viewAsFields())).then(()=>{ statusEl.textContent='Saved.'; }).catch(err=>{ statusEl.textContent='Error: '+err.message; statusEl.className='error'; });
 }
 
 /* ============================================================
@@ -971,7 +993,7 @@ function renderDetail() {
       <div><h2 style="margin-bottom:2px">${escapeHtml(song.title)}${song.title_hebrew ? ` <span class="title-hebrew">${escapeHtml(song.title_hebrew)}</span>` : ''}</h2><div class="meta">${artistLinksHtml(song.artist)}</div></div>
       <div style="display:flex;gap:8px">
         <button class="btn secondary" style="${isFav?'color:#d9302f;border-color:#d9302f;':''}" onclick="toggleFavoriteFor('${song.id}')">${isFav?'♥ Favorited':'♡ Favorite'}</button>
-        ${!viewAsUser ? `<button class="btn secondary" onclick="openAddToPlaylist('${song.id}')">+ Playlist</button>` : ''}
+        <button class="btn secondary" onclick="openAddToPlaylist('${song.id}')">+ Playlist</button>
         ${effectiveIsAdmin() ? `<button class="btn secondary" onclick="goTo('edit',{id:'${song.id}'})">Edit</button>
         <button class="btn danger" onclick="deleteSongConfirm('${song.id}')">Delete</button>` : ''}
       </div>
@@ -1195,7 +1217,8 @@ function renderPlaylists() {
   if (viewAsUser) {
     const mine = viewAsData.playlists || [];
     const pub = playlists.filter(p => p.visibility === 'public');
-    let html = `<h2>${escapeHtml(viewAsUser.name)}'s Playlists</h2>` + (mine.length? renderPlaylistCards(mine) : '<div class="muted">None yet.</div>');
+    let html = `<div class="searchRow"><div class="spacer"></div><button class="btn" onclick="createPlaylistPrompt()">+ New Playlist</button></div>`;
+    html += `<h2>${escapeHtml(viewAsUser.name)}'s Playlists</h2>` + (mine.length? renderPlaylistCards(mine) : '<div class="muted">None yet.</div>');
     html += `<h2>Public Playlists</h2>` + (pub.length? renderPlaylistCards(pub) : '<div class="muted">None yet.</div>');
     document.getElementById('app').innerHTML = html;
     return;
@@ -1223,15 +1246,18 @@ function renderPlaylistCards(list) {
 function createPlaylistPrompt() {
   const title = prompt('Playlist name?');
   if (!title) return;
-  api('createPlaylist', { title, visibility: 'private', song_ids: [], shared_with: [] })
-    .then(() => loadSongs(false)).then(() => goTo('playlists'))
+  api('createPlaylist', Object.assign({ title, visibility: 'private', song_ids: [], shared_with: [] }, viewAsFields()))
+    .then(() => refreshAfterWrite()).then(() => goTo('playlists'))
     .catch(err => alert(err.message));
 }
 function renderPlaylistDetail() {
   const p = playlists.find(pl => pl.id === view.id) || (viewAsUser && (viewAsData.playlists||[]).find(pl => pl.id === view.id));
   if (!p) { document.getElementById('app').innerHTML = '<div class="empty">Playlist not found.</div>'; return; }
-  const isOwner = !viewAsUser && currentUser && p.owner_email === currentUser.email;
-  const canEdit = !viewAsUser && (isOwner || (currentUser && currentUser.isAdmin));
+  // The "owning" identity is the impersonated user during View As, or the
+  // signed-in account otherwise — an admin can always edit/delete either way.
+  const actingEmail = viewAsUser ? viewAsUser.email : (currentUser && currentUser.email);
+  const isOwner = actingEmail && p.owner_email === actingEmail;
+  const canEdit = isOwner || (currentUser && currentUser.isAdmin);
   const list = (p.song_ids||[]).map(id => songs.find(s => s.id === id)).filter(Boolean);
   const queueIds = list.map(s => s.id);
   let html = `<span class="backlink" onclick="goTo('playlists')">‹ Back to Playlists</span>
@@ -1247,7 +1273,7 @@ function renderPlaylistDetail() {
   document.getElementById('app').innerHTML = html;
 }
 function editPlaylistSettings(id) {
-  const p = playlists.find(pl => pl.id === id);
+  const p = playlists.find(pl => pl.id === id) || (viewAsUser && (viewAsData.playlists||[]).find(pl => pl.id === id));
   const title = prompt('Playlist name:', p.title); if (title === null) return;
   const vis = prompt('Visibility — type private, shared, or public:', p.visibility) || p.visibility;
   let sharedWith = p.shared_with || [];
@@ -1255,41 +1281,41 @@ function editPlaylistSettings(id) {
     const emails = prompt('Share with which email addresses? (comma separated)', sharedWith.join(', '));
     sharedWith = (emails||'').split(',').map(e=>e.trim()).filter(Boolean);
   }
-  api('updatePlaylist', { id, title, visibility: vis, shared_with: sharedWith })
-    .then(() => loadSongs(false)).then(() => render()).catch(err => alert(err.message));
+  api('updatePlaylist', Object.assign({ id, title, visibility: vis, shared_with: sharedWith }, viewAsFields()))
+    .then(() => refreshAfterWrite()).then(() => render()).catch(err => alert(err.message));
 }
 function deletePlaylistConfirm(id) {
   if (!confirm('Delete this playlist?')) return;
-  api('deletePlaylist', { id }).then(() => loadSongs(false)).then(() => goTo('playlists')).catch(err => alert(err.message));
+  api('deletePlaylist', Object.assign({ id }, viewAsFields())).then(() => refreshAfterWrite()).then(() => goTo('playlists')).catch(err => alert(err.message));
 }
 function removeFromPlaylist(playlistId, songId) {
-  const p = playlists.find(pl => pl.id === playlistId);
+  const p = playlists.find(pl => pl.id === playlistId) || (viewAsUser && (viewAsData.playlists||[]).find(pl => pl.id === playlistId));
   const newIds = (p.song_ids||[]).filter(id => id !== songId);
-  api('updatePlaylist', { id: playlistId, song_ids: newIds }).then(() => loadSongs(false)).then(() => render()).catch(err => alert(err.message));
+  api('updatePlaylist', Object.assign({ id: playlistId, song_ids: newIds }, viewAsFields())).then(() => refreshAfterWrite()).then(() => render()).catch(err => alert(err.message));
 }
 function openAddToPlaylist(songId) {
   if (!currentUser) { alert('Sign in with Google first to use playlists.'); return; }
-  const mine = playlists.filter(p => p.owner_email === currentUser.email);
+  const mine = viewAsUser ? (viewAsData.playlists||[]) : playlists.filter(p => p.owner_email === currentUser.email);
   if (mine.length === 0) {
     if (!confirm('You have no playlists yet. Create one now?')) return;
     const title = prompt('Playlist name?'); if (!title) return;
-    api('createPlaylist', { title, visibility:'private', song_ids:[songId], shared_with:[] })
-      .then(() => loadSongs(false)).then(() => alert('Added to "'+title+'".')).catch(err => alert(err.message));
+    api('createPlaylist', Object.assign({ title, visibility:'private', song_ids:[songId], shared_with:[] }, viewAsFields()))
+      .then(() => refreshAfterWrite()).then(() => alert('Added to "'+title+'".')).catch(err => alert(err.message));
     return;
   }
   const choice = prompt('Add to which playlist?\n' + mine.map((p,i)=>(i+1)+'. '+p.title).join('\n') + '\n\nType a number, or "new" for a new playlist:');
   if (!choice) return;
   if (choice.trim().toLowerCase() === 'new') {
     const title = prompt('Playlist name?'); if (!title) return;
-    api('createPlaylist', { title, visibility:'private', song_ids:[songId], shared_with:[] })
-      .then(() => loadSongs(false)).then(() => alert('Added to "'+title+'".')).catch(err => alert(err.message));
+    api('createPlaylist', Object.assign({ title, visibility:'private', song_ids:[songId], shared_with:[] }, viewAsFields()))
+      .then(() => refreshAfterWrite()).then(() => alert('Added to "'+title+'".')).catch(err => alert(err.message));
     return;
   }
   const idx = parseInt(choice, 10) - 1;
   const p = mine[idx];
   if (!p) { alert('Not a valid choice.'); return; }
   const newIds = Array.from(new Set((p.song_ids||[]).concat([songId])));
-  api('updatePlaylist', { id: p.id, song_ids: newIds }).then(() => loadSongs(false)).then(() => alert('Added to "'+p.title+'".')).catch(err => alert(err.message));
+  api('updatePlaylist', Object.assign({ id: p.id, song_ids: newIds }, viewAsFields())).then(() => refreshAfterWrite()).then(() => alert('Added to "'+p.title+'".')).catch(err => alert(err.message));
 }
 
 /* ============================================================
@@ -1322,15 +1348,16 @@ function renderContact() {
 function renderContactBody() {
   const myRequests = effectiveRequests().slice().sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
   const myMessages = effectiveMessages();
-  let html = viewAsUser ? `<h2>${escapeHtml(viewAsUser.name)}'s Song Requests</h2>` : `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h2 style="margin:0">My Song Requests</h2><button class="btn" onclick="openRequestSongModal()">+ Request a Song</button></div>
+  const requestsHeading = viewAsUser ? `${escapeHtml(viewAsUser.name)}'s Song Requests` : 'My Song Requests';
+  let html = `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h2 style="margin:0">${requestsHeading}</h2><button class="btn" onclick="openRequestSongModal()">+ Request a Song</button></div>
       <p class="muted">Up to 2 requests per week.</p>`;
   html += `<div class="table-wrap"><table><tr><th>Status</th><th>Song</th><th>Artist</th></tr>
       ${pageSlice(myRequests, contactRequestsPage, 10).map(r => `<tr><td><span class="badge ${r.status}" title="${escapeHtml(r.status)}">${requestStatusSymbol(r.status)}</span></td><td>${escapeHtml(r.song_title)}</td><td>${escapeHtml(r.artist)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No requests yet.</td></tr>'}
       </table></div>
       ${pagerHtml(myRequests.length, contactRequestsPage, 'changeContactRequestsPage', 10)}
       <h2 style="margin-top:24px">${viewAsUser ? escapeHtml(viewAsUser.name) + `'s Messages` : 'Message your teacher'}</h2>
-      <div class="chat-thread" id="chatThread">${renderChatMessages(myMessages)}</div>` +
-      (viewAsUser ? '' : `<div style="display:flex;gap:8px"><input type="text" id="chatInput" placeholder="Type a message…" style="flex:1"><button class="btn" onclick="sendChatMessage()">Send</button></div>`);
+      <div class="chat-thread" id="chatThread">${renderChatMessages(myMessages)}</div>
+      <div style="display:flex;gap:8px"><input type="text" id="chatInput" placeholder="Type a message…" style="flex:1"><button class="btn" onclick="sendChatMessage()">Send</button></div>`;
   document.getElementById('app').innerHTML = html;
   const thread = document.getElementById('chatThread'); if (thread) thread.scrollTop = thread.scrollHeight;
 }
@@ -1358,13 +1385,13 @@ function submitRequest() {
   const statusEl = document.getElementById('reqStatus');
   if (!song_title) { statusEl.textContent = 'Please enter a song title.'; statusEl.className='error'; return; }
   statusEl.textContent = 'Sending…';
-  api('createRequest', { song_title, artist, note }).then(() => { closeModal(); renderContact(); }).catch(err => { statusEl.textContent = 'Error: '+err.message; statusEl.className='error'; });
+  api('createRequest', Object.assign({ song_title, artist, note }, viewAsFields())).then(() => refreshAfterWrite()).then(() => { closeModal(); renderContact(); }).catch(err => { statusEl.textContent = 'Error: '+err.message; statusEl.className='error'; });
 }
 function sendChatMessage() {
   const input = document.getElementById('chatInput');
   const text = input.value.trim(); if (!text) return;
   input.value = '';
-  api('sendMessage', { text }).then(() => renderContact()).catch(err => alert(err.message));
+  api('sendMessage', Object.assign({ text }, viewAsFields())).then(() => refreshAfterWrite()).then(() => renderContact()).catch(err => alert(err.message));
 }
 
 /* ============================================================
@@ -1628,7 +1655,7 @@ function renderViewAsBanner() {
   const el = document.getElementById('viewAsBanner');
   if (!el) return;
   el.innerHTML = viewAsUser
-    ? `<div class="viewas-banner">👀 Viewing as <b>${escapeHtml(viewAsUser.name)}</b> <span class="muted">(${escapeHtml(viewAsUser.email)})</span> — read-only <button class="btn secondary" onclick="exitViewAs()">Exit</button></div>`
+    ? `<div class="viewas-banner">👀 Viewing as <b>${escapeHtml(viewAsUser.name)}</b> <span class="muted">(${escapeHtml(viewAsUser.email)})</span> — anything you do here happens on their account <button class="btn secondary" onclick="exitViewAs()">Exit</button></div>`
     : '';
 }
 function render() {
