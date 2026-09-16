@@ -665,7 +665,7 @@ function renderNav() {
   // home when clicked (onclick="goTo('home')" above), so a separate tab
   // would just be a redundant second way to do the same thing.
   const tabs = [['list','Songs'],['artists','Artists'],['categories','Categories'],['playlists','Playlists'],['contact','Contact']];
-  if (currentUser && currentUser.isAdmin) tabs.push(['admin','Admin']);
+  if (effectiveIsAdmin()) tabs.push(['admin','Admin']);
   nav.innerHTML = tabs.map(([name,label]) => {
     const icon = SVG_ICONS[name] || '';
     return `<button class="${view.name===name?'active':''}" onclick="goTo('${name}')">${icon}${label}</button>`;
@@ -717,6 +717,13 @@ function renderHome() {
 // decides which set is "in effect" right now.
 function effectiveFavorites() { return viewAsUser ? (viewAsData.favorites || []) : favorites; }
 function effectiveKnownChords() { return viewAsUser ? (viewAsData.knownChords || []) : knownChords; }
+function effectiveRequests() { return viewAsUser ? (viewAsData.requests || []) : requestsCache; }
+function effectiveMessages() { return viewAsUser ? (viewAsData.messages || []) : messagesCache; }
+// Whether admin-only UI (the Admin nav tab, Edit/Delete controls) should show
+// right now — false while "View As" is active, even though the signed-in
+// admin account itself is still an admin, since the whole point of View As
+// is to see the app exactly as that (non-admin) user does.
+function effectiveIsAdmin() { return !viewAsUser && !!(currentUser && currentUser.isAdmin); }
 
 function songKnown(song) {
   const used = chordsUsedIn(song.chords_lyrics, 0);
@@ -778,7 +785,7 @@ function renderList() {
       <input type="text" id="searchBox" placeholder="Search by title, artist, or lyrics…" value="${escapeHtml(filters.q)}">
       <button class="btn secondary" onclick="goRandomSong()"><img src="${ICONS.random}" alt="" style="width:15px;height:15px;vertical-align:middle;margin-right:5px;">Random Song</button>
       ${currentUser ? `<button class="btn secondary" onclick="goTo('knownChords')">Set Known Chords</button>` : ''}
-      ${currentUser && currentUser.isAdmin ? `<button class="btn" onclick="goTo('edit')">+ Add Song</button>` : ''}
+      ${effectiveIsAdmin() ? `<button class="btn" onclick="goTo('edit')">+ Add Song</button>` : ''}
     </div>`;
   if (activeFilterChip) html += `<div style="margin-bottom:10px"><span class="chip active" onclick="filters.artist='';filters.language='';filters.tag='';songListPage=0;render()">${escapeHtml(activeFilterChip)} ✕</span></div>`;
   html += `<div id="songListBody"></div>`;
@@ -933,8 +940,8 @@ function renderDetail() {
       <div><h2 style="margin-bottom:2px">${escapeHtml(song.title)}${song.title_hebrew ? ` <span class="title-hebrew">${escapeHtml(song.title_hebrew)}</span>` : ''}</h2><div class="meta">${artistLinksHtml(song.artist)}</div></div>
       <div style="display:flex;gap:8px">
         <button class="btn secondary" style="${isFav?'color:#d9302f;border-color:#d9302f;':''}" onclick="toggleFavoriteFor('${song.id}')">${isFav?'♥ Favorited':'♡ Favorite'}</button>
-        <button class="btn secondary" onclick="openAddToPlaylist('${song.id}')">+ Playlist</button>
-        ${currentUser && currentUser.isAdmin ? `<button class="btn secondary" onclick="goTo('edit',{id:'${song.id}'})">Edit</button>
+        ${!viewAsUser ? `<button class="btn secondary" onclick="openAddToPlaylist('${song.id}')">+ Playlist</button>` : ''}
+        ${effectiveIsAdmin() ? `<button class="btn secondary" onclick="goTo('edit',{id:'${song.id}'})">Edit</button>
         <button class="btn danger" onclick="deleteSongConfirm('${song.id}')">Delete</button>` : ''}
       </div>
     </div>
@@ -951,7 +958,7 @@ function renderDetail() {
       <div class="group"><button class="icon" onclick="togglePlay()">${playerState.playing ? '⏸' : '▶'}</button><button class="icon" onclick="changeSpeed(-0.2)">−</button><span>${playerState.speed.toFixed(1)}x</span><button class="icon" onclick="changeSpeed(0.2)">+</button></div>
       <label style="display:inline-flex;align-items:center;gap:5px;font-size:13px;margin:0;"><input type="checkbox" ${playerState.delay?'checked':''} onchange="playerState.delay=this.checked"> 5s delay</label>
       <button class="btn secondary" onclick="window.print()">🖶 Print</button>
-      <button class="btn secondary" onclick="showReportForm=!showReportForm;renderDetail();"><img src="${ICONS.report}" alt="" style="width:15px;height:15px;vertical-align:middle;margin-right:5px;">Report issue</button>
+      ${!viewAsUser ? `<button class="btn secondary" onclick="showReportForm=!showReportForm;renderDetail();"><img src="${ICONS.report}" alt="" style="width:15px;height:15px;vertical-align:middle;margin-right:5px;">Report issue</button>` : ''}
     </div>
 
     ${showReportForm ? renderReportForm(song) : ''}
@@ -1021,7 +1028,7 @@ function deleteSongConfirm(id) {
    ADD / EDIT SONG (admin only)
    ============================================================ */
 function renderEdit() {
-  if (!currentUser || !currentUser.isAdmin) { document.getElementById('app').innerHTML = '<div class="empty">Sign in with an admin Google account to add or edit songs.</div>'; return; }
+  if (!effectiveIsAdmin()) { document.getElementById('app').innerHTML = '<div class="empty">Sign in with an admin Google account to add or edit songs.</div>'; return; }
   const song = view.id ? songs.find(s => s.id === view.id) : null;
   const s = song || { title:'', title_hebrew:'', artist:'', categories:[], capo:0, youtube_url:'', chords_lyrics:'', lyrics_only:'' };
   const { language, tags } = splitCategories(s.categories);
@@ -1265,19 +1272,26 @@ function requestStatusSymbol(status) {
   return status === 'added' ? '✓' : status === 'declined' ? '✕' : status === 'pending' ? '⏳' : (status || '');
 }
 function renderContact() {
+  // While "View As" is active, the target user's own requests/messages were
+  // already snapshotted into viewAsData by enterViewAs (a fresh getRequests/
+  // getMessages call here would authenticate as the real admin, not them —
+  // see effectiveRequests()/effectiveMessages()), so just render directly.
+  if (viewAsUser) { renderContactBody(); return; }
   if (!currentUser) { document.getElementById('app').innerHTML = '<div class="empty">Sign in with Google to request a song or message your teacher.</div>'; return; }
   Promise.all([api('getRequests', {}), api('getMessages', {})]).then(([reqData, msgData]) => {
     requestsCache = reqData.requests || []; messagesCache = msgData.messages || [];
     renderContactBody();
   }).catch(err => { document.getElementById('app').innerHTML = `<div class="error">${err.message}</div>`; });
 }
-// Renders from the already-loaded requestsCache/messagesCache without
+// Renders from the already-loaded requestsCache/messagesCache (or, under
+// View As, viewAsData via effectiveRequests()/effectiveMessages()) without
 // re-fetching — used for the initial load (after renderContact's fetch
 // above) and for paging through "My Song Requests" (10/page, distinct from
 // the app's other lists which page at 15).
 function renderContactBody() {
-  const myRequests = requestsCache.slice().sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
-  let html = `<h2>Request a Song</h2>
+  const myRequests = effectiveRequests().slice().sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
+  const myMessages = effectiveMessages();
+  let html = viewAsUser ? `<h2>${escapeHtml(viewAsUser.name)}'s Song Requests</h2>` : `<h2>Request a Song</h2>
       <p class="muted">Up to 2 requests per week.</p>
       <div class="row">
         <div><label>Song title</label><input type="text" id="req_title"></div>
@@ -1285,14 +1299,14 @@ function renderContactBody() {
       </div>
       <label>Note (optional)</label><input type="text" id="req_note">
       <div style="margin-top:8px"><button class="btn" onclick="submitRequest()">Request Song</button> <span id="reqStatus" class="status"></span></div>
-      <h2 style="margin-top:24px">My Song Requests</h2>
-      <div class="table-wrap"><table><tr><th>Status</th><th>Song</th><th>Artist</th></tr>
+      <h2 style="margin-top:24px">My Song Requests</h2>`;
+  html += `<div class="table-wrap"><table><tr><th>Status</th><th>Song</th><th>Artist</th></tr>
       ${pageSlice(myRequests, contactRequestsPage, 10).map(r => `<tr><td><span class="badge ${r.status}" title="${escapeHtml(r.status)}">${requestStatusSymbol(r.status)}</span></td><td>${escapeHtml(r.song_title)}</td><td>${escapeHtml(r.artist)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No requests yet.</td></tr>'}
       </table></div>
       ${pagerHtml(myRequests.length, contactRequestsPage, 'changeContactRequestsPage', 10)}
-      <h2 style="margin-top:24px">Message your teacher</h2>
-      <div class="chat-thread" id="chatThread">${renderChatMessages(messagesCache)}</div>
-      <div style="display:flex;gap:8px"><input type="text" id="chatInput" placeholder="Type a message…" style="flex:1"><button class="btn" onclick="sendChatMessage()">Send</button></div>`;
+      <h2 style="margin-top:24px">${viewAsUser ? escapeHtml(viewAsUser.name) + `'s Messages` : 'Message your teacher'}</h2>
+      <div class="chat-thread" id="chatThread">${renderChatMessages(myMessages)}</div>` +
+      (viewAsUser ? '' : `<div style="display:flex;gap:8px"><input type="text" id="chatInput" placeholder="Type a message…" style="flex:1"><button class="btn" onclick="sendChatMessage()">Send</button></div>`);
   document.getElementById('app').innerHTML = html;
   const thread = document.getElementById('chatThread'); if (thread) thread.scrollTop = thread.scrollHeight;
 }
@@ -1345,7 +1359,7 @@ function userHasUnreadMessage(email) { return messagesCache.some(m => m.user_ema
 function tabBadgeHtml(count) { return count > 0 ? ` <span class="tab-badge">${count}</span>` : ''; }
 
 function renderAdmin() {
-  if (!currentUser || !currentUser.isAdmin) { document.getElementById('app').innerHTML = '<div class="empty">Admin only.</div>'; return; }
+  if (!effectiveIsAdmin()) { document.getElementById('app').innerHTML = '<div class="empty">Admin only.</div>'; return; }
   document.getElementById('app').innerHTML = `<div class="subtabs" id="adminNav"></div><div id="adminBody">Loading…</div>`;
   renderAdminNav();
   if (adminTab === 'requests') loadAdminRequests();
@@ -1549,7 +1563,7 @@ function changeUsersPage(p) { usersPage = p; renderUsersTable(); }
 function enterViewAs(email, name) {
   api('getUserSnapshot', { target_email: email }).then(data => {
     viewAsUser = { email: data.email, name: name || data.email };
-    viewAsData = { favorites: data.favorites || [], knownChords: data.knownChords || [], playlists: data.playlists || [] };
+    viewAsData = { favorites: data.favorites || [], knownChords: data.knownChords || [], playlists: data.playlists || [], requests: data.requests || [], messages: data.messages || [] };
     songTab = 'all';
     goTo('list');
   }).catch(err => alert(err.message));
