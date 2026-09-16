@@ -181,8 +181,11 @@
     footer{padding-bottom:80px;}
     .bottom-nav{display:flex;position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--border);z-index:20;padding:6px 2px calc(6px + env(safe-area-inset-bottom));justify-content:space-around;}
     .bottom-nav button{background:none;border:none;display:flex;flex-direction:column;align-items:center;gap:2px;color:var(--muted);font-size:10.5px;padding:4px 2px;flex:1;cursor:pointer;}
-    .bottom-nav button svg{width:21px;height:21px;}
+    .bottom-nav button .nav-icon-wrap{width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:9px;border:1px solid rgba(0,0,0,.10);box-shadow:0 1px 3px rgba(0,0,0,.15);background:#fff;margin-bottom:1px;}
+    .bottom-nav button .nav-icon-wrap img{width:22px;height:22px;object-fit:contain;}
+    .bottom-nav button .nav-icon-wrap svg{width:18px;height:18px;stroke:var(--teal);}
     .bottom-nav button.active{color:var(--teal-dark);font-weight:600;}
+    .bottom-nav button.active .nav-icon-wrap{border-color:var(--teal-dark);box-shadow:0 2px 5px rgba(0,0,0,.22);}
   }
 </style>
 </head>
@@ -767,19 +770,31 @@ function navTabs() {
 }
 function renderNav() {
   const nav = document.getElementById('mainNav');
+  if (!currentUser) { nav.innerHTML = ''; return; }
   nav.innerHTML = navTabs().map(([name,label]) => {
     const icon = SVG_ICONS[name] || '';
     return `<button class="${view.name===name?'active':''}" onclick="goTo('${name}')">${icon}${label}</button>`;
   }).join('');
+}
+// Bottom nav reuses the richer Home-tile artwork (ICONS.home_*) instead of
+// the plain-line SVG_ICONS, wrapped in a bordered/shadowed box (.nav-icon-wrap)
+// so it reads crisp at small mobile sizes — falls back to SVG_ICONS for any
+// tab with no matching artwork (e.g. Admin).
+const NAV_ICON_IMAGE = { list: 'home_songs', artists: 'home_artists', categories: 'home_categories', playlists: 'home_playlists', contact: 'home_contact' };
+function navIconHtml(name) {
+  const key = NAV_ICON_IMAGE[name];
+  if (key && ICONS[key]) return `<img src="${ICONS[key]}" alt="">`;
+  return SVG_ICONS[name] || '';
 }
 // Mobile-only fixed tab bar (see .bottom-nav CSS) — same tabs as renderNav,
 // laid out icon-over-label instead of icon-before-label.
 function renderBottomNav() {
   const el = document.getElementById('bottomNav');
   if (!el) return;
+  if (!currentUser) { el.innerHTML = ''; return; }
   el.innerHTML = navTabs().map(([name,label]) => {
-    const icon = SVG_ICONS[name] || '';
-    return `<button class="${view.name===name?'active':''}" onclick="goTo('${name}')">${icon}<span>${label}</span></button>`;
+    const icon = navIconHtml(name);
+    return `<button class="${view.name===name?'active':''}" onclick="goTo('${name}')"><span class="nav-icon-wrap">${icon}</span><span>${label}</span></button>`;
   }).join('');
 }
 function openMobileDrawer() { document.getElementById('mobileDrawer').classList.add('open'); }
@@ -824,6 +839,13 @@ window.addEventListener('beforeinstallprompt', (e) => {
   showInstallBanner('android');
 });
 window.addEventListener('appinstalled', () => { deferredInstallPrompt = null; hideInstallBanner(); });
+// A registered service worker (even one that does no caching of its own) is
+// part of Android Chrome's installability criteria — without one, Chrome
+// can decline to fire beforeinstallprompt, or the "Install" action can fail
+// to actually create a home-screen shortcut.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(function(){}); });
+}
 if (isIosDevice() && !isStandaloneDisplay()) showInstallBanner('ios');
 
 /* ============================================================
@@ -1781,6 +1803,15 @@ function renderViewAsBanner() {
     ? `<div class="viewas-banner">👀 Viewing as <b>${escapeHtml(viewAsUser.name)}</b> <span class="muted">(${escapeHtml(viewAsUser.email)})</span> — anything you do here happens on their account <button class="btn secondary" onclick="exitViewAs()">Exit</button></div>`
     : '';
 }
+// Renders the Google Sign-In button into the sign-in gate card (see render()
+// below) — separate from renderUserArea()'s header/drawer button since this
+// one only exists in the DOM while signed out and the gate is showing.
+function mountGateSignInButton() {
+  if (window.google && CONFIG.CLIENT_ID.indexOf('PASTE_YOUR') !== 0) {
+    const container = document.getElementById('gsiButtonContainerGate');
+    if (container) { try { google.accounts.id.renderButton(container, { theme: 'filled_blue', size: 'large', text: 'signin_with' }); } catch (e) {} }
+  }
+}
 function render() {
   renderNav();
   renderBottomNav();
@@ -1790,6 +1821,17 @@ function render() {
       <p>Deploy the included <code>Code.gs</code> as an Apps Script Web App, then paste the Web App URL into
       <code>CONFIG.SCRIPT_URL</code>, and your Google OAuth Client ID into <code>CONFIG.CLIENT_ID</code>,
       near the top of this file. See SETUP.md for the full walkthrough.</p></div>`;
+    return;
+  }
+  if (!currentUser) {
+    document.getElementById('app').innerHTML = `
+      <div class="card" style="text-align:center;max-width:420px;margin:40px auto;">
+        <img src="${ICONS.logo}" alt="" style="width:64px;height:64px;border-radius:14px;margin-bottom:14px;">
+        <h2>Sign in to continue</h2>
+        <p class="muted">Sign in with Google to browse songs, chords, and playlists.</p>
+        <div id="gsiButtonContainerGate" style="display:flex;justify-content:center;margin-top:14px;"></div>
+      </div>`;
+    mountGateSignInButton();
     return;
   }
   if (view.name === 'home') renderHome();
