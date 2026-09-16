@@ -1530,10 +1530,13 @@ function renderUsersTable() {
   body.innerHTML = `<div style="margin-bottom:10px"><input type="text" id="userSearchBox" placeholder="Search by name or email…" value="${escapeHtml(userSearch)}" style="max-width:320px"></div>
     ${list.length === 0 ? `<div class="empty">No users found.</div>` : pageSlice(list, usersPage).map(u => `
       <div class="playlist-card" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
-        <div>
-          <div class="title">${userHasUnreadMessage(u.email) ? '<span class="tab-dot"></span>' : ''}${escapeHtml(u.name||u.email)}</div>
-          <div class="muted">${escapeHtml(u.email)}</div>
-          <div class="muted" style="margin-top:4px">★ ${u.favorites||0} favorites · ${u.knownChords ? 'chords set' : 'no chords set'} · ${u.playlists||0} playlists · ${u.requests||0} requests · ${u.messages||0} messages · ${u.errors||0} error reports${u.lastActivity ? ' · last active ' + new Date(u.lastActivity).toLocaleDateString() : ''}</div>
+        <div style="display:flex;gap:10px;align-items:flex-start;">
+          ${u.photo ? `<img src="${escapeHtml(u.photo)}" alt="" style="width:36px;height:36px;border-radius:50%;flex:0 0 auto;margin-top:2px;object-fit:cover;">` : ''}
+          <div>
+            <div class="title">${userHasUnreadMessage(u.email) ? '<span class="tab-dot"></span>' : ''}${escapeHtml(u.name||u.email)}</div>
+            <div class="muted">${escapeHtml(u.email)}${u.level ? ' · ' + escapeHtml(u.level) : ''}${u.language ? ' · ' + escapeHtml(u.language) : ''}</div>
+            <div class="muted" style="margin-top:4px">★ ${u.favorites||0} favorites · ${u.knownChords ? 'chords set' : 'no chords set'} · ${u.playlists||0} playlists · ${u.requests||0} requests · ${u.messages||0} messages · ${u.errors||0} error reports${u.lastActivity ? ' · last active ' + new Date(u.lastActivity).toLocaleDateString() : ''}</div>
+          </div>
         </div>
         <button class="btn secondary" onclick='enterViewAs(${JSON.stringify(u.email)},${JSON.stringify(u.name||u.email)})'>View As</button>
       </div>`).join('')}
