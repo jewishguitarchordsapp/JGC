@@ -1070,8 +1070,7 @@ function renderList() {
     </div>
     <div class="searchRow">
       <input type="text" id="searchBox" placeholder="Search by title, artist, or lyrics…" value="${escapeHtml(filters.q)}">
-      <button class="btn secondary" onclick="goRandomSong()"><img src="${ICONS.random}" alt="" style="width:15px;height:15px;vertical-align:middle;margin-right:5px;">Random Song</button>
-      ${currentUser ? `<button class="btn secondary" onclick="goTo('knownChords')">Set Known Chords</button>` : ''}
+      <button class="btn secondary" onclick="goRandomSong()" title="Random Song" aria-label="Random Song" style="border-radius:50%;width:38px;height:38px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex:none;"><img src="${ICONS.random}" alt="" style="width:18px;height:18px;"></button>
       ${effectiveIsAdmin() ? `<button class="btn" onclick="goTo('edit')">+ Add Song</button>` : ''}
     </div>`;
   if (activeFilterChip) html += `<div style="margin-bottom:10px"><span class="chip active" onclick="filters.artist='';filters.language='';filters.tag='';songListPage=0;render()">${escapeHtml(activeFilterChip)} ✕</span></div>`;
