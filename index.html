@@ -338,6 +338,7 @@ let editChordDir = 'ltr';   // 'ltr' | 'rtl'
 let editChordAlign = 'left'; // 'left' | 'right'
 let chatTarget = null;     // {email,name} admin is viewing/replying to
 let refreshTimer = null;
+let dataStarted = false; // gate: don't fetch songs/content until someone signs in
 let viewAsUser = null;     // {email,name} — admin "View As" impersonation target; actions taken while set act as this user, or null
 let viewAsData = null;     // {favorites,knownChords,playlists,requests,messages} snapshot for viewAsUser, kept in sync via refreshAfterWrite()
 let usersCache = [];       // admin Users tab cache
@@ -397,18 +398,22 @@ function handleCredentialResponse(response) {
   currentUser = { idToken: response.credential, email: (claims.email||'').toLowerCase(), name: claims.name || claims.email, picture: claims.picture || '', isAdmin: false };
   renderUserArea();
   loadMyData();
+  startAfterSignIn();
 }
 
 function initGoogleSignIn() {
   if (!window.google || !CONFIG.CLIENT_ID || CONFIG.CLIENT_ID.indexOf('PASTE_YOUR') === 0) return;
   google.accounts.id.initialize({ client_id: CONFIG.CLIENT_ID, callback: handleCredentialResponse, auto_select: true });
   renderUserArea();
+  if (!currentUser) mountGateSignInButton();
   google.accounts.id.prompt(); // silent attempt; no-op if not eligible
 }
 
 function signOut() {
   if (window.google) google.accounts.id.disableAutoSelect();
   currentUser = null; favorites = []; knownChords = [];
+  if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+  dataStarted = false;
   if (view.name === 'edit' || view.name === 'admin' || view.name === 'playlistDetail') goTo('list');
   renderUserArea(); render();
 }
@@ -516,6 +521,18 @@ async function loadSongContentAll() {
     if (view.name === 'list' && (songTab === 'known' || filters.q)) renderSongListBody();
     if (view.name === 'detail') renderDetail();
   } catch (err) { console.error('Failed to load full song text', err); }
+}
+
+// Only start pulling the song catalog, its full text, and the periodic
+// refresh once someone has actually signed in — these previously fired
+// unconditionally at page load, hitting the backend before we even knew
+// whether a visitor was signed in.
+function startAfterSignIn() {
+  if (dataStarted) return;
+  dataStarted = true;
+  loadSongs(true);
+  loadSongContentAll();
+  refreshTimer = setInterval(() => loadSongs(false), CONFIG.AUTO_REFRESH_SECONDS * 1000);
 }
 
 // Fetches one song's full text on demand — used when its detail page is
@@ -1975,10 +1992,8 @@ function render() {
 document.getElementById('shareIcon').src = ICONS.share;
 document.getElementById('shareBtn').onclick = shareApp;
 renderUserArea();
-loadSongs(true);
-loadSongContentAll(); // fetch every song's full text once, in the background
+render(); // show the sign-in gate (or restore a still-valid session's view) immediately
 window.addEventListener('load', initGoogleSignIn);
-refreshTimer = setInterval(() => loadSongs(false), CONFIG.AUTO_REFRESH_SECONDS * 1000);
 </script>
 </body>
 </html>
