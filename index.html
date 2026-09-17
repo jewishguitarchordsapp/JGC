@@ -1176,6 +1176,21 @@ function refreshAfterWrite() {
   });
 }
 
+// Playlist edits (create/add/remove/delete song, rename, etc.) only ever
+// change playlist data — refreshAfterWrite() above re-pulls the ENTIRE song
+// catalog (apiList(), thousands of rows) just to also get the fresh
+// playlists list, which is why "Add to Playlist" felt very slow: tapping a
+// playlist pill sat waiting on a full catalog reload before the modal would
+// even close. This re-fetches only what actually changed.
+function refreshPlaylistsOnly() {
+  if (viewAsUser) {
+    return api('getUserSnapshot', { target_email: viewAsUser.email }).then(data => {
+      viewAsData = { favorites: data.favorites || [], knownChords: data.knownChords || [], playlists: data.playlists || [], requests: data.requests || [], messages: data.messages || [] };
+    });
+  }
+  return api('getPlaylists', {}).then(pl => { playlists = pl.playlists || []; });
+}
+
 function songKnown(song) {
   const used = chordsUsedIn(song.chords_lyrics, 0);
   if (used.length === 0) return false;
@@ -1860,7 +1875,7 @@ function createPlaylistPrompt() {
   const title = prompt('Playlist name?');
   if (!title) return;
   api('createPlaylist', Object.assign({ title, visibility: 'private', song_ids: [], shared_with: [] }, viewAsFields()))
-    .then(() => refreshAfterWrite()).then(() => goTo('playlists'))
+    .then(() => refreshPlaylistsOnly()).then(() => goTo('playlists'))
     .catch(err => alert(err.message));
 }
 function renderPlaylistDetail() {
@@ -1895,16 +1910,16 @@ function editPlaylistSettings(id) {
     sharedWith = (emails||'').split(',').map(e=>e.trim()).filter(Boolean);
   }
   api('updatePlaylist', Object.assign({ id, title, visibility: vis, shared_with: sharedWith }, viewAsFields()))
-    .then(() => refreshAfterWrite()).then(() => render()).catch(err => alert(err.message));
+    .then(() => refreshPlaylistsOnly()).then(() => render()).catch(err => alert(err.message));
 }
 function deletePlaylistConfirm(id) {
   if (!confirm('Delete this playlist?')) return;
-  api('deletePlaylist', Object.assign({ id }, viewAsFields())).then(() => refreshAfterWrite()).then(() => goTo('playlists')).catch(err => alert(err.message));
+  api('deletePlaylist', Object.assign({ id }, viewAsFields())).then(() => refreshPlaylistsOnly()).then(() => goTo('playlists')).catch(err => alert(err.message));
 }
 function removeFromPlaylist(playlistId, songId) {
   const p = playlists.find(pl => pl.id === playlistId) || (viewAsUser && (viewAsData.playlists||[]).find(pl => pl.id === playlistId));
   const newIds = (p.song_ids||[]).filter(id => id !== songId);
-  api('updatePlaylist', Object.assign({ id: playlistId, song_ids: newIds }, viewAsFields())).then(() => refreshAfterWrite()).then(() => render()).catch(err => alert(err.message));
+  api('updatePlaylist', Object.assign({ id: playlistId, song_ids: newIds }, viewAsFields())).then(() => refreshPlaylistsOnly()).then(() => render()).catch(err => alert(err.message));
 }
 function openAddToPlaylist(songId) {
   if (!currentUser) { alert('Sign in with Google first to use playlists.'); return; }
@@ -1925,14 +1940,14 @@ function addSongToPlaylist(playlistId, songId) {
   if (!p) return;
   const newIds = Array.from(new Set((p.song_ids||[]).concat([songId])));
   api('updatePlaylist', Object.assign({ id: p.id, song_ids: newIds }, viewAsFields()))
-    .then(() => refreshAfterWrite()).then(() => { closeModal(); alert('Added to "'+p.title+'".'); }).catch(err => alert(err.message));
+    .then(() => refreshPlaylistsOnly()).then(() => { closeModal(); alert('Added to "'+p.title+'".'); }).catch(err => alert(err.message));
 }
 function createPlaylistAndAddSong(songId) {
   const input = document.getElementById('newPlaylistName');
   const title = (input && input.value || '').trim();
   if (!title) { alert('Enter a playlist name.'); return; }
   api('createPlaylist', Object.assign({ title, visibility:'private', song_ids:[songId], shared_with:[] }, viewAsFields()))
-    .then(() => refreshAfterWrite()).then(() => { closeModal(); alert('Added to "'+title+'".'); }).catch(err => alert(err.message));
+    .then(() => refreshPlaylistsOnly()).then(() => { closeModal(); alert('Added to "'+title+'".'); }).catch(err => alert(err.message));
 }
 
 /* ============================================================
