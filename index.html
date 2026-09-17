@@ -1202,8 +1202,21 @@ function shareApp() {
   }
 }
 
+// Song ids with a toggleFavorite request currently in flight — guards
+// against a double-tap (very easy to do while waiting on the Apps Script
+// round trip, which can take a second or more) sending two overlapping
+// toggle requests for the same song. The backend's toggle isn't a "set to
+// X", it's a true flip, so two overlapping requests can race each other —
+// both client-side (a confusing flip-flip-flicker as each response lands)
+// and, worse, server-side (both reading the sheet before either has
+// committed, which can leave a duplicate or inconsistent row behind). This
+// makes a repeat tap on a song already mid-toggle a no-op until the first
+// request settles.
+const pendingFavoriteToggles = new Set();
 function toggleFavoriteFor(songId) {
   if (!currentUser) { alert('Sign in with Google first to save favorites.'); return; }
+  if (pendingFavoriteToggles.has(songId)) return;
+  pendingFavoriteToggles.add(songId);
   // Optimistic update: flip the heart and redraw immediately instead of
   // waiting on the round trip to the Apps Script backend (which verifies
   // the Google ID token and scans a sheet, so it can take a second or more
@@ -1227,7 +1240,7 @@ function toggleFavoriteFor(songId) {
     else { const i = favList.indexOf(songId); if (i >= 0) favList.splice(i, 1); }
     render();
     alert(err.message);
-  });
+  }).finally(() => { pendingFavoriteToggles.delete(songId); });
 }
 
 /* ============================================================
