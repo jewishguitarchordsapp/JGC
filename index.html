@@ -658,7 +658,18 @@ async function apiList() {
   if (isOffline) throw offlineError_();
   let res;
   try { res = await fetch(CONFIG.SCRIPT_URL + '?action=list'); }
-  catch (networkErr) { setOffline(true); throw offlineError_(); }
+  catch (networkErr) {
+    // A single failed fetch can mean lots of things that aren't "no
+    // internet" (Google's own script service hiccuping, a backgrounded
+    // mobile tab waking up, a momentary blip) - latching the persistent
+    // offline banner on any one of those, with no automatic way back short
+    // of the browser's own 'online' event (which only fires for a REAL
+    // disconnect/reconnect), was showing "you're offline" at random and
+    // leaving it stuck that way. Only treat this as real offline when the
+    // browser itself agrees there's no connection.
+    if (!navigator.onLine) setOffline(true);
+    throw offlineError_();
+  }
   const data = await res.json();
   if (!data.success) throw new Error(data.error || 'Failed to load songs');
   return data.songs;
@@ -672,7 +683,12 @@ async function api(action, fields) {
   if (currentUser) payload.idToken = currentUser.idToken;
   let res;
   try { res = await fetch(CONFIG.SCRIPT_URL, { method: 'POST', body: JSON.stringify(payload) }); }
-  catch (networkErr) { setOffline(true); throw offlineError_(); }
+  catch (networkErr) {
+    // See the matching comment in apiList() above - only a real, browser-
+    // confirmed disconnect should latch the persistent offline banner.
+    if (!navigator.onLine) setOffline(true);
+    throw offlineError_();
+  }
   const data = await res.json();
   if (!data.success) {
     // A sign-in error usually means the Google ID token has expired (it's
@@ -1259,7 +1275,38 @@ function loadViewCache() {
     return (v && typeof v.name === 'string') ? v : null;
   } catch (e) { return null; }
 }
-function goTo(name, extra) { view = Object.assign({ name }, extra || {}); saveViewCache(view); render(); window.scrollTo(0,0); }
+function goTo(name, extra) {
+  view = Object.assign({ name }, extra || {});
+  saveViewCache(view);
+  pushViewHistory_(view);
+  render();
+  window.scrollTo(0,0);
+}
+// Makes a phone's native Back button (and a desktop browser's Back button)
+// step back through whichever screens were actually visited inside the
+// app, instead of exiting/closing the tab the moment it's pressed - which
+// is what happened before, since goTo() never touched browser history at
+// all, so there was nothing on the history stack for Back to land on.
+// Every navigation in this file goes through goTo() (nowhere else
+// reassigns `view`), so one pushState per real navigation here is enough
+// to cover the whole app. The popstate handler below restores whichever
+// `view` the browser stepped back (or forward) to directly - NOT via
+// goTo(), which would push a fresh entry and corrupt the very stack
+// popstate is walking.
+function pushViewHistory_(v) {
+  try {
+    const cur = history.state && history.state.jgcView;
+    if (cur && JSON.stringify(cur) === JSON.stringify(v)) return; // not a real navigation (e.g. tapping the same tab twice) - don't grow the stack
+    history.pushState({ jgcView: v }, '');
+  } catch (e) {}
+}
+window.addEventListener('popstate', (e) => {
+  closeModal(); // don't leave a modal floating over a screen it was never opened on
+  if (!e.state || !e.state.jgcView) return; // stepped past the app's own history (or it isn't seeded yet) - let that happen normally, e.g. actually exiting
+  view = e.state.jgcView;
+  render();
+  window.scrollTo(0,0);
+});
 
 // Shared by the desktop top nav and the mobile bottom tab bar so the two
 // never drift out of sync. 'Home' is deliberately not a tab — the header
@@ -1944,7 +1991,18 @@ function startScroll() {
   playerState.timer = setInterval(() => {
     if (!el.isConnected) { stopPlayMode(); return; }
     el.scrollTop += playerState.speed * 0.7;
-    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 2) stopPlayMode();
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 2) {
+      // Reached the end of the chart - only PAUSE, don't exit Play Mode.
+      // Someone can still be mid-song (about to repeat a chorus, flipping
+      // back up to check a chord) and would not want to be suddenly kicked
+      // back to the normal view just because the scroll ran out of chart.
+      // They stay in Play Mode - chart still expanded, floating bar still
+      // up - until they explicitly tap Stop.
+      clearInterval(playerState.timer);
+      playerState.timer = null;
+      playerState.paused = true;
+      updatePlayFloatBarPauseBtn();
+    }
   }, 40);
 }
 // Pause/Resume: stops the auto-scroll but stays in Play Mode (chart still
@@ -1961,7 +2019,19 @@ function pausePlay() {
     playerState.timer = null;
     playerState.paused = true;
   }
-  renderDetail();
+  // Deliberately NOT renderDetail() - that rebuilds #chartScroll's whole
+  // innerHTML from scratch, which resets its scrollTop back to 0. Pausing
+  // (or being auto-paused at the end of the chart, see startScroll above)
+  // is meant to freeze playback exactly where it is, not jump the chart
+  // back to the top - only the floating bar's own Pause/Resume icon needs
+  // to change, so update just that instead of the whole page.
+  updatePlayFloatBarPauseBtn();
+}
+function updatePlayFloatBarPauseBtn() {
+  const btn = document.querySelector('#playFloatBar .play-btn:not(.stop-btn)');
+  if (!btn) return;
+  btn.textContent = playerState.paused ? '▶' : '⏸';
+  btn.title = playerState.paused ? 'Resume' : 'Pause';
 }
 // Stop: fully exits Play Mode (chart back to normal size, floating bar
 // gone) - what the single combined button used to do on a second tap.
@@ -1970,7 +2040,14 @@ function stopPlayMode() {
   playerState.timer = null;
   playerState.playing = false;
   playerState.paused = false;
-  renderDetail();
+  // Only re-render the detail page if we're actually still looking at it.
+  // This can also fire from startScroll's own "chart got removed from the
+  // DOM" check above, which means the user already navigated away entirely
+  // (the Back link, a nav tab, the phone's Back button) while still mid-
+  // playback - blindly calling renderDetail() then would stomp whatever
+  // screen they'd already moved to with "Song not found" instead of
+  // leaving it alone.
+  if (view.name === 'detail') renderDetail();
 }
 // Play Mode's floating control strip: Pause/Resume, Stop, and speed,
 // draggable anywhere on screen (see .play-float-bar CSS) so it doesn't sit
@@ -2892,6 +2969,10 @@ if (cachedAuth && cachedAuth.idToken) currentUser = cachedAuth;
 // bouncing back to the start.
 const cachedView = loadViewCache();
 if (cachedView) view = cachedView;
+// Seeds the history stack with the screen we're actually starting on, so
+// pushViewHistory_ (see goTo above) has something correct to compare
+// against and popstate has something correct to fall back to/past.
+try { history.replaceState({ jgcView: view }, ''); } catch (e) {}
 // Hydrate the song catalog from its own cache (see saveCatalogCache above)
 // before the real network fetch even starts, so whichever page comes back
 // (a song list, a chart, a playlist) has something real to show on this
