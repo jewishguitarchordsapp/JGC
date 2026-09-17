@@ -113,6 +113,8 @@
   .adv-row .adv-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
   .stepper-btn{width:28px;height:28px;border-radius:7px;border:1px solid #d7dcdd;background:#fff;color:var(--teal-dark);font-size:15px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none;}
   .stepper-btn:hover{background:#eef4f4;}
+  .stepper-btn.active{background:var(--teal);color:#fff;border-color:var(--teal);}
+  .stepper-btn svg{width:16px;height:16px;display:block;}
   .adv-link{font-size:11.5px;color:var(--accent);cursor:pointer;}
   .switch-toggle{width:38px;height:22px;border-radius:11px;position:relative;cursor:pointer;flex:none;}
   .switch-toggle .knob{width:18px;height:18px;border-radius:50%;background:#fff;position:absolute;top:2px;box-shadow:0 1px 2px rgba(0,0,0,0.25);transition:left .15s;}
@@ -362,6 +364,10 @@ const SVG_ICONS = {
   // Song detail page's Report action tile — an alert/error triangle, since
   // this tile is for flagging something wrong with the chart.
   error: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+  // Advanced panel's Show-chords toggle: open eye when chords are shown,
+  // slashed eye when hidden.
+  eye: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
+  eyeOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a18.66 18.66 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>',
 };
 
 /* ============================================================
@@ -1440,20 +1446,15 @@ function renderDetail() {
 
     ${playerState.advancedOpen ? `<div class="advanced-panel">
       <div class="adv-row">
-        <span class="adv-label">Font size</span>
         <div class="adv-controls">
           <button class="stepper-btn" onclick="changeFontStep(-1)">A&#8595;</button>
           <span style="width:20px;text-align:center;font-size:13px;color:#444;">${17 + (playerState.fontSize||0)}</span>
           <button class="stepper-btn" onclick="changeFontStep(1)">A&#8593;</button>
         </div>
-      </div>
-      <div class="adv-row">
-        <span class="adv-label">Bold</span>
-        <div class="switch-toggle" style="background:${playerState.bold?'#4a9b9b':'#d7dcdd'};" onclick="toggleBold()"><div class="knob" style="left:${playerState.bold?'18px':'2px'};"></div></div>
-      </div>
-      <div class="adv-row">
-        <span class="adv-label">Show chords</span>
-        <div class="switch-toggle" style="background:${playerState.showChords?'#4a9b9b':'#d7dcdd'};" onclick="toggleShowChords()"><div class="knob" style="left:${playerState.showChords?'18px':'2px'};"></div></div>
+        <div class="adv-controls">
+          <button class="stepper-btn${playerState.bold?' active':''}" onclick="toggleBold()" title="Bold" style="font-weight:700;">B</button>
+          <button class="stepper-btn${playerState.showChords?' active':''}" onclick="toggleShowChords()" title="${playerState.showChords?'Hide chords':'Show chords'}">${playerState.showChords?SVG_ICONS.eye:SVG_ICONS.eyeOff}</button>
+        </div>
       </div>
       <div class="adv-row">
         <span class="adv-label">Capo</span>
