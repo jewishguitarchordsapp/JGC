@@ -122,6 +122,17 @@
   #chartScroll{max-height:60vh;overflow-y:auto;padding:8px 4px 40px;background:#fff;border:1px solid var(--border);border-radius:9px;}
   #chartScroll.hide-chords .chord{display:none;}
   #chartScroll.hide-chords .html-chord-row{display:none;}
+  /* "Play Mode": pressing Play expands the chart to most of the screen and
+     replaces the normal playback row with a small floating, draggable strip
+     (play/pause + speed) so it can be moved out of the way while playing. */
+  #chartScroll.chart-playing{max-height:78vh;}
+  .play-float-bar{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:40;background:#fff;border:1px solid var(--border);border-radius:999px;box-shadow:0 6px 20px rgba(0,0,0,0.22);padding:6px 16px 6px 6px;display:flex;align-items:center;gap:10px;touch-action:none;user-select:none;}
+  .play-float-bar .drag-handle{cursor:grab;color:var(--muted);display:flex;align-items:center;justify-content:center;width:22px;height:34px;flex:none;touch-action:none;}
+  .play-float-bar .drag-handle:active{cursor:grabbing;}
+  .play-float-bar .drag-handle svg{width:16px;height:16px;display:block;}
+  .play-float-bar .play-btn{flex:none;}
+  .play-float-bar .speed-group{display:flex;align-items:center;gap:6px;background:#f0f2f3;border-radius:20px;padding:4px 10px;font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;}
+  .play-float-bar .speed-group button{width:24px;height:24px;border-radius:50%;border:none;background:#fff;color:var(--teal-dark);font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;line-height:1;flex:none;}
   .chord-line{position:relative;line-height:2.7em;font-size:calc(17px + var(--chart-step,0px));font-weight:var(--chart-fw,400);padding:0 6px;unicode-bidi:plaintext;}
   .cw{position:relative;display:inline-block;white-space:pre;}
   .chord{position:absolute;inset-inline-start:0;top:-1.2em;color:var(--chord);font-weight:700;font-size:0.78em;white-space:nowrap;}
@@ -254,6 +265,7 @@
        it. -webkit-tap-highlight-color above also stops the browser's own
        default tap-flash rectangle from doing the same thing on a press. */
     .bottom-nav button.active{color:#fff;font-weight:600;background:rgba(255,255,255,0.15);}
+    .play-float-bar{bottom:76px;}
   }
 </style>
 </head>
@@ -372,6 +384,9 @@ const SVG_ICONS = {
   // Random-Song button (Songs list search row): shuffle glyph, replacing the
   // old flat PNG icon.
   shuffle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>',
+  // Play Mode's floating strip: a grip/handle icon marking the one spot on
+  // the pill that actually starts a drag.
+  dragHandle: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>',
 };
 
 /* ============================================================
@@ -1383,6 +1398,11 @@ function renderCategories() {
    ============================================================ */
 let playerState = { playing:false, speed:1.0, delay:false, capo:0, myCapo:null, timer:null, songId:null, transpose:0, fontSize:0, bold:false, showChords:true, advancedOpen:false };
 let showReportForm = false;
+// Where the floating Play-Mode control strip was last dragged to (see
+// playFloatBarHtml/initPlayFloatBar) — deliberately outside playerState so
+// it isn't reset by the per-song capo/transpose bookkeeping above; null
+// means "use the default bottom-center position" (see .play-float-bar CSS).
+let floatBarPos = null;
 
 function renderDetail() {
   const song = songs.find(s => s.id === view.id);
@@ -1429,7 +1449,7 @@ function renderDetail() {
       </div>` : ''}
     </div>
 
-    ${hasQueue ? `<div style="display:flex;gap:8px;margin:2px 0 14px;">
+    ${playerState.playing ? '' : `${hasQueue ? `<div style="display:flex;gap:8px;margin:2px 0 14px;">
       <button class="btn secondary" ${!queuePrevId?'disabled':''} onclick="goToQueueSong(-1)">‹ Previous Song</button>
       <button class="btn secondary" ${!queueNextId?'disabled':''} onclick="goToQueueSong(1)">Next Song ›</button>
     </div>` : ''}
@@ -1448,7 +1468,7 @@ function renderDetail() {
     </div>
 
     <div class="playback-row">
-      <button class="play-btn" onclick="togglePlay()">${playerState.playing ? '⏸' : '▶'}</button>
+      <button class="play-btn" onclick="togglePlay()">▶</button>
       <div class="group"><button class="icon" onclick="changeSpeed(-0.2)">−</button><span>${playerState.speed.toFixed(1)}x</span><button class="icon" onclick="changeSpeed(0.2)">+</button></div>
       <label style="display:inline-flex;align-items:center;gap:5px;font-size:13px;margin:0;"><input type="checkbox" ${playerState.delay?'checked':''} onchange="playerState.delay=this.checked"> 5s delay</label>
       <button class="adv-toggle" onclick="toggleAdvanced()">Advanced <span class="adv-chevron${playerState.advancedOpen?' open':''}">›</span></button>
@@ -1484,13 +1504,15 @@ function renderDetail() {
           <button class="stepper-btn" onclick="changeTranspose(1)">+</button>
         </div>
       </div>
-    </div>` : ''}
+    </div>` : ''}`}
 
-    <div id="chartScroll" class="${playerState.showChords ? '' : 'hide-chords'}" style="--chart-step:${playerState.fontSize||0}px;--chart-fw:${playerState.bold?700:400};">${contentReady ? renderChart(song.chords_lyrics, transpose) : '<div class="muted" style="padding:24px 4px">Loading chart…</div>'}</div>
-    ${ytId ? `<div class="yt-wrap"><iframe src="https://www.youtube.com/embed/${ytId}" allowfullscreen></iframe></div>` : ''}
-    <div class="grid-cats" style="margin-top:10px">${tags.map(t=>`<span class="chip">${escapeHtml(t)}</span>`).join('')}${language ? `<span class="chip">${escapeHtml(language)}</span>` : ''}</div>`;
+    <div id="chartScroll" class="${playerState.showChords ? '' : 'hide-chords'}${playerState.playing ? ' chart-playing' : ''}" style="--chart-step:${playerState.fontSize||0}px;--chart-fw:${playerState.bold?700:400};">${contentReady ? renderChart(song.chords_lyrics, transpose) : '<div class="muted" style="padding:24px 4px">Loading chart…</div>'}</div>
+    ${playerState.playing ? '' : `${ytId ? `<div class="yt-wrap"><iframe src="https://www.youtube.com/embed/${ytId}" allowfullscreen></iframe></div>` : ''}
+    <div class="grid-cats" style="margin-top:10px">${tags.map(t=>`<span class="chip">${escapeHtml(t)}</span>`).join('')}${language ? `<span class="chip">${escapeHtml(language)}</span>` : ''}</div>`}
+    ${playerState.playing ? playFloatBarHtml() : ''}`;
 
   document.getElementById('app').innerHTML = html;
+  if (playerState.playing) initPlayFloatBar();
 }
 
 function renderReportForm(song) {
@@ -1558,8 +1580,8 @@ function changeTranspose(delta) { playerState.transpose = (playerState.transpose
 function togglePlay() {
   if (playerState.playing) { stopScroll(); return; }
   playerState.playing = true;
-  if (playerState.delay) { renderDetail(); setTimeout(startScroll, 5000); } else { startScroll(); }
   renderDetail();
+  if (playerState.delay) { setTimeout(startScroll, 5000); } else { startScroll(); }
 }
 function startScroll() {
   const el = document.getElementById('chartScroll'); if (!el) return;
@@ -1571,6 +1593,59 @@ function startScroll() {
   }, 40);
 }
 function stopScroll() { clearInterval(playerState.timer); playerState.timer=null; playerState.playing=false; renderDetail(); }
+// Play Mode's floating control strip: just Play/Pause + speed, draggable
+// anywhere on screen (see .play-float-bar CSS) so it doesn't sit over the
+// part of the chart the player is currently reading. Position is kept in
+// the page-level floatBarPos (not playerState) across the re-renders a
+// speed change triggers, so dragging it once keeps it put for the rest of
+// this playback.
+function playFloatBarHtml() {
+  const posStyle = floatBarPos ? `left:${floatBarPos.x}px; top:${floatBarPos.y}px; bottom:auto; transform:none;` : '';
+  return `<div class="play-float-bar" id="playFloatBar" style="${posStyle}">
+    <span class="drag-handle" id="playFloatHandle" title="Drag to move">${SVG_ICONS.dragHandle}</span>
+    <button class="play-btn" onclick="togglePlay()">⏸</button>
+    <div class="speed-group">
+      <button onclick="changeSpeed(-0.2)">−</button>
+      <span>${playerState.speed.toFixed(1)}x</span>
+      <button onclick="changeSpeed(0.2)">+</button>
+    </div>
+  </div>`;
+}
+// Pointer Events cover mouse, touch and pen with one code path. Only the
+// small grip handle starts a drag (not the whole pill) so the Play and speed
+// buttons stay ordinary taps. setPointerCapture means we don't need any
+// document-level listeners to track the drag outside the handle's own bounds.
+function initPlayFloatBar() {
+  const bar = document.getElementById('playFloatBar');
+  const handle = document.getElementById('playFloatHandle');
+  if (!bar || !handle) return;
+  let dragging = false, startX = 0, startY = 0, startLeft = 0, startTop = 0;
+  handle.addEventListener('pointerdown', e => {
+    dragging = true;
+    const rect = bar.getBoundingClientRect();
+    startLeft = rect.left; startTop = rect.top;
+    startX = e.clientX; startY = e.clientY;
+    bar.style.transform = 'none';
+    bar.style.bottom = 'auto';
+    bar.style.left = startLeft + 'px';
+    bar.style.top = startTop + 'px';
+    try { handle.setPointerCapture(e.pointerId); } catch (err) {}
+    e.preventDefault();
+  });
+  handle.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    const maxLeft = window.innerWidth - bar.offsetWidth - 4;
+    const maxTop = window.innerHeight - bar.offsetHeight - 4;
+    const newLeft = Math.max(4, Math.min(maxLeft, startLeft + (e.clientX - startX)));
+    const newTop = Math.max(4, Math.min(maxTop, startTop + (e.clientY - startY)));
+    bar.style.left = newLeft + 'px';
+    bar.style.top = newTop + 'px';
+    floatBarPos = { x: newLeft, y: newTop };
+  });
+  const endDrag = e => { dragging = false; try { handle.releasePointerCapture(e.pointerId); } catch (err) {} };
+  handle.addEventListener('pointerup', endDrag);
+  handle.addEventListener('pointercancel', endDrag);
+}
 
 // Steps to the previous (-1) or next (+1) song in the queue the current
 // song was opened from (see detailGoTo) — keeps carrying the same queue
