@@ -140,13 +140,25 @@
   .play-float-bar .drag-handle:active{cursor:grabbing;}
   .play-float-bar .drag-handle svg{width:16px;height:16px;display:block;transform:rotate(90deg);}
   .play-float-bar .play-btn{flex:none;}
+  .play-float-bar .stop-btn{background:#8a9096;font-size:11px;}
   .play-float-bar .speed-group{display:flex;flex-direction:column;align-items:center;gap:6px;background:#f0f2f3;border-radius:14px;padding:8px 4px;font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;}
   .play-float-bar .speed-group button{width:24px;height:24px;border-radius:50%;border:none;background:#fff;color:var(--teal-dark);font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;line-height:1;flex:none;}
   .chord-line{position:relative;line-height:2.7em;font-size:calc(17px + var(--chart-step,0px));font-weight:var(--chart-fw,400);padding:0 6px;unicode-bidi:plaintext;white-space:nowrap;}
   .cw{position:relative;display:inline-block;white-space:pre;}
   .chord{position:absolute;inset-inline-start:0;top:-1.2em;color:var(--chord);font-weight:700;font-size:0.78em;white-space:nowrap;}
-  .chords-used{margin:10px 0;white-space:nowrap;overflow-x:auto;min-width:0;flex:1;}
-  .chords-used .chip{background:#fff;border-color:var(--border);color:var(--chord);font-weight:600;cursor:default;}
+  /* "Chords in song" row: always exactly one line, no horizontal scroll -
+     see fitChordsUsedChips(). --cu-scale shrinks the chip font/padding/
+     margin together so more chords fit before anything gets clipped;
+     JS measures overflow and dials it down only as far as actually needed. */
+  .chords-used{margin:10px 0;display:flex;align-items:baseline;gap:6px;min-width:0;flex:1;--cu-scale:1;}
+  .chords-used-label{white-space:nowrap;flex:none;}
+  .chords-used-chips{white-space:nowrap;overflow:hidden;min-width:0;flex:1;}
+  .chords-used-chips .muted{white-space:nowrap;}
+  .chords-used .chip{display:inline-block;background:#fff;border-color:var(--border);color:var(--chord);font-weight:600;cursor:default;white-space:nowrap;
+    font-size:calc(13px * var(--cu-scale));
+    padding:calc(5px * var(--cu-scale)) calc(12px * var(--cu-scale));
+    margin:calc(3px * var(--cu-scale)) calc(1.5px * var(--cu-scale));
+  }
   .yt-wrap{position:relative;padding-bottom:56.25%;height:0;margin:16px 0;border-radius:8px;overflow:hidden;}
   .yt-wrap iframe{position:absolute;top:0;left:0;width:100%;height:100%;border:0;}
   label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px;}
@@ -1704,7 +1716,7 @@ function renderCategories() {
 /* ============================================================
    SONG DETAIL
    ============================================================ */
-let playerState = { playing:false, speed:1.0, delay:false, capo:0, myCapo:null, timer:null, songId:null, transpose:0, fontSize:0, bold:false, showChords:true, advancedOpen:false };
+let playerState = { playing:false, paused:false, speed:1.0, delay:false, capo:0, myCapo:null, timer:null, songId:null, transpose:0, fontSize:0, bold:false, showChords:true, advancedOpen:false };
 let showReportForm = false;
 // Where the floating Play-Mode control strip was last dragged to (see
 // playFloatBarHtml/initPlayFloatBar) — deliberately outside playerState so
@@ -1773,7 +1785,7 @@ function renderDetail() {
     ${showReportForm ? renderReportForm(song) : ''}
 
     <div class="chords-used-row">
-      <div class="chords-used">Chords in song: ${chordChips}</div>
+      <div class="chords-used"><span class="chords-used-label">Chords in song:</span><span class="chords-used-chips" id="chordsUsedChips">${chordChips}</span></div>
     </div>
 
     <div class="playback-row">
@@ -1822,7 +1834,28 @@ function renderDetail() {
 
   document.getElementById('app').innerHTML = html;
   if (playerState.playing) initPlayFloatBar();
+  if (contentReady) fitChordsUsedChips();
 }
+
+// Shrinks the "Chords in song: ..." chip row (via the --cu-scale CSS
+// variable on .chords-used, see its CSS) just enough that every chord chip
+// fits on one line with no horizontal scroll - measuring the row's natural
+// (fully-expanded) width against the space actually available, rather than
+// applying a fixed smaller size regardless of how many chords a given song
+// uses. Re-run after every renderDetail() (a fresh DOM each time resets any
+// previous scale) and on window resize while a song's detail view is open.
+function fitChordsUsedChips() {
+  const el = document.getElementById('chordsUsedChips');
+  if (!el) return;
+  el.style.setProperty('--cu-scale', '1');
+  const available = el.clientWidth;
+  const natural = el.scrollWidth;
+  if (available > 0 && natural > available) {
+    const scale = Math.max(0.55, Math.min(1, (available / natural) * 0.97));
+    el.style.setProperty('--cu-scale', String(scale));
+  }
+}
+window.addEventListener('resize', () => { if (view.name === 'detail') fitChordsUsedChips(); });
 
 function renderReportForm(song) {
   if (!currentUser) return `<div class="card">Sign in with Google to report an issue with this song.</div>`;
@@ -1895,8 +1928,13 @@ function toggleBold() { playerState.bold = !playerState.bold; renderDetail(); }
 function toggleShowChords() { playerState.showChords = !playerState.showChords; renderDetail(); }
 function changeTranspose(delta) { playerState.transpose = (playerState.transpose||0) + delta; renderDetail(); }
 function togglePlay() {
-  if (playerState.playing) { stopScroll(); return; }
+  // Only ever the ENTRY into Play Mode (the plain "▶ Play" button, shown
+  // when not already playing) - once inside Play Mode, the floating bar's
+  // own Pause/Resume and Stop buttons (pausePlay/stopPlayMode below) take
+  // over, so this has nothing to do once playerState.playing is already true.
+  if (playerState.playing) return;
   playerState.playing = true;
+  playerState.paused = false;
   renderDetail();
   if (playerState.delay) { setTimeout(startScroll, 5000); } else { startScroll(); }
 }
@@ -1904,23 +1942,48 @@ function startScroll() {
   const el = document.getElementById('chartScroll'); if (!el) return;
   clearInterval(playerState.timer);
   playerState.timer = setInterval(() => {
-    if (!el.isConnected) { stopScroll(); return; }
+    if (!el.isConnected) { stopPlayMode(); return; }
     el.scrollTop += playerState.speed * 0.7;
-    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 2) stopScroll();
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 2) stopPlayMode();
   }, 40);
 }
-function stopScroll() { clearInterval(playerState.timer); playerState.timer=null; playerState.playing=false; renderDetail(); }
-// Play Mode's floating control strip: just Play/Pause + speed, draggable
-// anywhere on screen (see .play-float-bar CSS) so it doesn't sit over the
-// part of the chart the player is currently reading. Position is kept in
-// the page-level floatBarPos (not playerState) across the re-renders a
-// speed change triggers, so dragging it once keeps it put for the rest of
-// this playback.
+// Pause/Resume: stops the auto-scroll but stays in Play Mode (chart still
+// expanded, floating bar still showing) - distinct from Stop, which exits
+// Play Mode entirely. Resuming picks the scroll back up from wherever it
+// was left, with no re-application of the initial "5s delay" setting
+// (that's only meant to give time to get ready before playback FIRST starts).
+function pausePlay() {
+  if (playerState.paused) {
+    playerState.paused = false;
+    startScroll();
+  } else {
+    clearInterval(playerState.timer);
+    playerState.timer = null;
+    playerState.paused = true;
+  }
+  renderDetail();
+}
+// Stop: fully exits Play Mode (chart back to normal size, floating bar
+// gone) - what the single combined button used to do on a second tap.
+function stopPlayMode() {
+  clearInterval(playerState.timer);
+  playerState.timer = null;
+  playerState.playing = false;
+  playerState.paused = false;
+  renderDetail();
+}
+// Play Mode's floating control strip: Pause/Resume, Stop, and speed,
+// draggable anywhere on screen (see .play-float-bar CSS) so it doesn't sit
+// over the part of the chart the player is currently reading. Position is
+// kept in the page-level floatBarPos (not playerState) across the
+// re-renders a speed change triggers, so dragging it once keeps it put for
+// the rest of this playback.
 function playFloatBarHtml() {
   const posStyle = floatBarPos ? `left:${floatBarPos.x}px; top:${floatBarPos.y}px; right:auto; bottom:auto; transform:none;` : '';
   return `<div class="play-float-bar" id="playFloatBar" style="${posStyle}">
     <span class="drag-handle" id="playFloatHandle" title="Drag to move">${SVG_ICONS.dragHandle}</span>
-    <button class="play-btn" onclick="togglePlay()">⏸</button>
+    <button class="play-btn" onclick="pausePlay()" title="${playerState.paused ? 'Resume' : 'Pause'}">${playerState.paused ? '▶' : '⏸'}</button>
+    <button class="play-btn stop-btn" onclick="stopPlayMode()" title="Stop">⏹</button>
     <div class="speed-group">
       <button onclick="changeSpeed(0.2)" title="Faster">▲</button>
       <span>${playerState.speed.toFixed(1)}x</span>
