@@ -126,17 +126,17 @@
      replaces the normal playback row with a small floating, draggable strip
      (play/pause + speed) so it can be moved out of the way while playing. */
   #chartScroll.chart-playing{max-height:78vh;}
-  .play-float-bar{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:40;background:#fff;border:1px solid var(--border);border-radius:999px;box-shadow:0 6px 20px rgba(0,0,0,0.22);padding:6px 16px 6px 6px;display:flex;align-items:center;gap:10px;touch-action:none;user-select:none;}
-  .play-float-bar .drag-handle{cursor:grab;color:var(--muted);display:flex;align-items:center;justify-content:center;width:22px;height:34px;flex:none;touch-action:none;}
+  .play-float-bar{position:fixed;right:22px;top:50%;transform:translateY(-50%);z-index:40;background:#fff;border:1px solid var(--border);border-radius:999px;box-shadow:0 6px 20px rgba(0,0,0,0.22);padding:16px 6px;display:flex;flex-direction:column;align-items:center;gap:10px;touch-action:none;user-select:none;}
+  .play-float-bar .drag-handle{cursor:grab;color:var(--muted);display:flex;align-items:center;justify-content:center;width:34px;height:22px;flex:none;touch-action:none;}
   .play-float-bar .drag-handle:active{cursor:grabbing;}
-  .play-float-bar .drag-handle svg{width:16px;height:16px;display:block;}
+  .play-float-bar .drag-handle svg{width:16px;height:16px;display:block;transform:rotate(90deg);}
   .play-float-bar .play-btn{flex:none;}
-  .play-float-bar .speed-group{display:flex;align-items:center;gap:6px;background:#f0f2f3;border-radius:20px;padding:4px 10px;font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;}
+  .play-float-bar .speed-group{display:flex;flex-direction:column;align-items:center;gap:6px;background:#f0f2f3;border-radius:14px;padding:8px 4px;font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;}
   .play-float-bar .speed-group button{width:24px;height:24px;border-radius:50%;border:none;background:#fff;color:var(--teal-dark);font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;line-height:1;flex:none;}
   .chord-line{position:relative;line-height:2.7em;font-size:calc(17px + var(--chart-step,0px));font-weight:var(--chart-fw,400);padding:0 6px;unicode-bidi:plaintext;white-space:nowrap;}
   .cw{position:relative;display:inline-block;white-space:pre;}
   .chord{position:absolute;inset-inline-start:0;top:-1.2em;color:var(--chord);font-weight:700;font-size:0.78em;white-space:nowrap;}
-  .chords-used{margin:10px 0;}
+  .chords-used{margin:10px 0;white-space:nowrap;overflow-x:auto;min-width:0;flex:1;}
   .chords-used .chip{background:#fff;border-color:var(--border);color:var(--chord);font-weight:600;cursor:default;}
   .yt-wrap{position:relative;padding-bottom:56.25%;height:0;margin:16px 0;border-radius:8px;overflow:hidden;}
   .yt-wrap iframe{position:absolute;top:0;left:0;width:100%;height:100%;border:0;}
@@ -265,7 +265,6 @@
        it. -webkit-tap-highlight-color above also stops the browser's own
        default tap-flash rectangle from doing the same thing on a press. */
     .bottom-nav button.active{color:#fff;font-weight:600;background:rgba(255,255,255,0.15);}
-    .play-float-bar{bottom:76px;}
   }
 </style>
 </head>
@@ -1301,7 +1300,7 @@ function goRandomSong() {
   const list = filteredSongs().length ? filteredSongs() : songs;
   if (list.length === 0) { alert('No songs to pick from yet.'); return; }
   const pick = list[Math.floor(Math.random() * list.length)];
-  goTo('detail', { id: pick.id });
+  goTo('detail', { id: pick.id, fromShuffle: true });
 }
 
 function shareApp() {
@@ -1458,9 +1457,10 @@ function renderDetail() {
   let html = `<span class="backlink" onclick="goTo('list')">‹ Back to Songs</span>
     <div class="song-header">
       <div><h2 style="margin-bottom:2px">${escapeHtml(song.title)}</h2><div class="meta">${artistLinksHtml(song.artist)}</div></div>
-      ${effectiveIsAdmin() ? `<div style="display:flex;gap:8px">
-        <button class="btn secondary" onclick="goTo('edit',{id:'${song.id}'})">&#9998; Edit</button>
-        <button class="btn danger" onclick="deleteSongConfirm('${song.id}')">Delete</button>
+      ${(view.fromShuffle || effectiveIsAdmin()) ? `<div style="display:flex;gap:8px">
+        ${view.fromShuffle ? `<button class="btn secondary icon-btn-round" onclick="goRandomSong()" title="Shuffle again" aria-label="Shuffle again" style="border-radius:50%;width:38px;height:38px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex:none;">${SVG_ICONS.shuffle}</button>` : ''}
+        ${effectiveIsAdmin() ? `<button class="btn secondary" onclick="goTo('edit',{id:'${song.id}'})">&#9998; Edit</button>
+        <button class="btn danger" onclick="deleteSongConfirm('${song.id}')">Delete</button>` : ''}
       </div>` : ''}
     </div>
 
@@ -1580,7 +1580,15 @@ function clearMyCapo() {
   closeModal();
   renderDetail();
 }
-function changeSpeed(delta) { playerState.speed = Math.max(0.2, Math.min(3, +(playerState.speed + delta).toFixed(1))); renderDetail(); }
+function changeSpeed(delta) {
+  playerState.speed = Math.max(0.2, Math.min(3, +(playerState.speed + delta).toFixed(1)));
+  if (playerState.playing) {
+    const label = document.querySelector('#playFloatBar .speed-group span');
+    if (label) label.textContent = playerState.speed.toFixed(1) + 'x';
+    return;
+  }
+  renderDetail();
+}
 // Advanced panel controls (song detail page redesign): font size step,
 // bold lyrics, show/hide chord labels, and a transpose offset that's
 // independent of capo (capo still drives the fret/shape math via
@@ -1615,14 +1623,14 @@ function stopScroll() { clearInterval(playerState.timer); playerState.timer=null
 // speed change triggers, so dragging it once keeps it put for the rest of
 // this playback.
 function playFloatBarHtml() {
-  const posStyle = floatBarPos ? `left:${floatBarPos.x}px; top:${floatBarPos.y}px; bottom:auto; transform:none;` : '';
+  const posStyle = floatBarPos ? `left:${floatBarPos.x}px; top:${floatBarPos.y}px; right:auto; bottom:auto; transform:none;` : '';
   return `<div class="play-float-bar" id="playFloatBar" style="${posStyle}">
     <span class="drag-handle" id="playFloatHandle" title="Drag to move">${SVG_ICONS.dragHandle}</span>
     <button class="play-btn" onclick="togglePlay()">⏸</button>
     <div class="speed-group">
-      <button onclick="changeSpeed(-0.2)">−</button>
+      <button onclick="changeSpeed(0.2)" title="Faster">▲</button>
       <span>${playerState.speed.toFixed(1)}x</span>
-      <button onclick="changeSpeed(0.2)">+</button>
+      <button onclick="changeSpeed(-0.2)" title="Slower">▼</button>
     </div>
   </div>`;
 }
@@ -1642,6 +1650,7 @@ function initPlayFloatBar() {
     startX = e.clientX; startY = e.clientY;
     bar.style.transform = 'none';
     bar.style.bottom = 'auto';
+    bar.style.right = 'auto';
     bar.style.left = startLeft + 'px';
     bar.style.top = startTop + 'px';
     try { handle.setPointerCapture(e.pointerId); } catch (err) {}
