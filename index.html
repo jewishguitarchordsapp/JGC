@@ -359,6 +359,9 @@ const SVG_ICONS = {
   heartOutline: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>',
   // Song detail page's Print action tile.
   print: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>',
+  // Song detail page's Report action tile — an alert/error triangle, since
+  // this tile is for flagging something wrong with the chart.
+  error: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
 };
 
 /* ============================================================
@@ -1393,7 +1396,7 @@ function renderDetail() {
     `<div class="detail-tile action${isFav?' active':''}" onclick="toggleFavoriteFor('${song.id}')">${isFav?SVG_ICONS.heart:SVG_ICONS.heartOutline}<div class="tile-label">${isFav?'Favorited':'Favorite'}</div></div>`,
     `<div class="detail-tile action" onclick="openAddToPlaylist('${song.id}')">${SVG_ICONS.playlists}<div class="tile-label">+ Playlist</div></div>`
   ];
-  if (!viewAsUser) actionTiles.push(`<div class="detail-tile action" onclick="showReportForm=!showReportForm;renderDetail();"><img src="${ICONS.report}" alt=""><div class="tile-label">Report</div></div>`);
+  if (!viewAsUser) actionTiles.push(`<div class="detail-tile action" onclick="showReportForm=!showReportForm;renderDetail();">${SVG_ICONS.error}<div class="tile-label">Report</div></div>`);
   actionTiles.push(`<div class="detail-tile action" onclick="window.print()">${SVG_ICONS.print}<div class="tile-label">Print</div></div>`);
 
   const chordChips = contentReady
