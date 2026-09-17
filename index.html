@@ -638,6 +638,26 @@ const NOTES_FLAT  = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
 
 function noteIndex(note) { let i = NOTES_SHARP.indexOf(note); if (i >= 0) return i; return NOTES_FLAT.indexOf(note); }
 
+// Chord names use a plain lowercase "b" for a flat (Bb, Ebmaj7, C7b9, C/Bb…)
+// — easy to misread next to the note name "B" itself. This is purely a
+// display-time touch-up: it turns just the accidental positions (root,
+// bass note after "/", and altered extensions like "b5"/"b9") into the real
+// ♭ symbol. Never applied to stored/compared chord data (COMMON_CHORDS,
+// knownChords, chordsUsedIn's matching path) — only at the point a chord
+// name is rendered to the screen, so "Bb" the data and "B♭" the display
+// stay two different things on purpose.
+function formatChordSymbol(chord) {
+  if (!chord) return chord;
+  const m = String(chord).match(/^([A-Ga-g])(#|b)?(.*)$/);
+  if (!m) return chord;
+  let [, root, acc, rest] = m;
+  root = root.toUpperCase() + (acc === 'b' ? '♭' : (acc || ''));
+  rest = rest.replace(/\/([A-Ga-g])(#|b)?/, (full, bassNote, bassAcc) =>
+    '/' + bassNote.toUpperCase() + (bassAcc === 'b' ? '♭' : (bassAcc || '')));
+  rest = rest.replace(/b(\d)/g, '♭$1');
+  return root + rest;
+}
+
 function transposeChord(chord, semitones) {
   if (!chord || !semitones) return chord;
   const m = chord.match(/^([A-Ga-g])(#|b)?(.*)$/);
@@ -708,7 +728,7 @@ function transposeChordHtmlFragment(html, semitones) {
   const parts = protectedHtml.split(/(&nbsp;| |\s+)/);
   const out = parts.map(part => {
     if (part === '' || /^(&nbsp;| |\s+)$/.test(part)) return part;
-    if (/^[A-Ga-g]/.test(part)) return transposeChord(part, semitones);
+    if (/^[A-Ga-g]/.test(part)) return formatChordSymbol(transposeChord(part, semitones));
     return part;
   }).join('');
   return out.replace(new RegExp(SUP_PLACEHOLDER + '(\\d+)' + SUP_PLACEHOLDER, 'g'), (m, idx) => stash[Number(idx)]);
@@ -784,7 +804,7 @@ function renderChart(chordsLyrics, transposeSemitones) {
     if (line.trim() === '') return '<div class="chord-line">&nbsp;</div>';
     const segs = parseChordLine(line);
     const html = segs.map(seg => seg.chord
-      ? `<span class="cw"><span class="chord">${escapeHtml(transposeChord(seg.chord, transposeSemitones))}</span>${escapeHtml(seg.text)}</span>`
+      ? `<span class="cw"><span class="chord">${escapeHtml(formatChordSymbol(transposeChord(seg.chord, transposeSemitones)))}</span>${escapeHtml(seg.text)}</span>`
       : `<span class="cw">${escapeHtml(seg.text)}</span>`).join('');
     return `<div class="chord-line">${html}</div>`;
   }).join('');
@@ -883,7 +903,7 @@ const COMMON_CHORDS = ['C','C#','D','Eb','E','F','F#','G','Ab','A','Bb','B','Cm'
 // in "C7", "D7", etc.) as a superscript, e.g. C<sup>7</sup> — purely
 // cosmetic, so escapeHtml runs first and the sup tag is added after.
 function formatChordLabel(c) {
-  return escapeHtml(c).replace(/(\d+)$/, '<sup>$1</sup>');
+  return escapeHtml(formatChordSymbol(c)).replace(/(\d+)$/, '<sup>$1</sup>');
 }
 
 /* ============================================================
@@ -1317,7 +1337,7 @@ function renderDetail() {
 
     ${showReportForm ? renderReportForm(song) : ''}
 
-    <div class="chords-used">${contentReady ? ('Chords in song: ' + (chordsUsedIn(song.chords_lyrics, transpose).map(c=>`<span class="chip">${escapeHtml(c)}</span>`).join(' ') || '<span class="muted">none tagged</span>')) : '<span class="muted">Loading chords…</span>'}</div>
+    <div class="chords-used">${contentReady ? ('Chords in song: ' + (chordsUsedIn(song.chords_lyrics, transpose).map(c=>`<span class="chip">${escapeHtml(formatChordSymbol(c))}</span>`).join(' ') || '<span class="muted">none tagged</span>')) : '<span class="muted">Loading chords…</span>'}</div>
     <div id="chartScroll">${contentReady ? renderChart(song.chords_lyrics, transpose) : '<div class="muted" style="padding:24px 4px">Loading chart…</div>'}</div>
     ${ytId ? `<div class="yt-wrap"><iframe src="https://www.youtube.com/embed/${ytId}" allowfullscreen></iframe></div>` : ''}
     <div class="grid-cats" style="margin-top:10px">${tags.map(t=>`<span class="chip">${escapeHtml(t)}</span>`).join('')}${language ? `<span class="chip">${escapeHtml(language)}</span>` : ''}</div>`;
