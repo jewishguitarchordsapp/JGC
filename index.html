@@ -644,7 +644,13 @@ async function loadSongs(showSpinner) {
     playlists = pl.playlists || [];
     lastSynced = new Date();
     renderFooter();
-    render();
+    // Admin's own tabs (Requests/Messages/Errors/Users) don't read the
+    // songs/playlists globals at all, so re-running render() for them here
+    // was pure disruption: every periodic tick (see AUTO_REFRESH_SECONDS)
+    // wiped the whole admin panel back to "Loading…" and re-fired whichever
+    // tab's fetch was current, even mid-click — this is what admins were
+    // seeing as "always loading" / "jumps to a different tab".
+    if (view.name !== 'admin') render();
     saveCatalogCache();
   } catch (err) {
     footer.textContent = 'Could not load songs: ' + err.message;
@@ -2006,8 +2012,8 @@ function renderAdminNav() {
 function loadAdminRequests() {
   api('getRequests', {}).then(data => {
     requestsCache = data.requests || [];
-    renderAdminRequests();
-  }).catch(err => { document.getElementById('adminBody').innerHTML = `<div class="error">${err.message}</div>`; });
+    if (adminTab === 'requests') renderAdminRequests();
+  }).catch(err => { if (adminTab === 'requests') document.getElementById('adminBody').innerHTML = `<div class="error">${err.message}</div>`; });
 }
 function filterRequests(list) {
   const wantArchived = requestsFilter.includes('archived');
@@ -2048,9 +2054,9 @@ function loadAdminMessages() {
   api('getMessages', {}).then(data => {
     messagesCache = data.messages || [];
     messagesLoaded = true;
-    renderAdminMessages();
+    if (adminTab === 'messages') renderAdminMessages();
     renderAdminNav();
-  }).catch(err => { document.getElementById('adminBody').innerHTML = `<div class="error">${err.message}</div>`; });
+  }).catch(err => { if (adminTab === 'messages') document.getElementById('adminBody').innerHTML = `<div class="error">${err.message}</div>`; });
 }
 function filterThreads(threads) {
   if (messagesFilter === 'archived') return threads.filter(t => t.archived);
@@ -2129,8 +2135,8 @@ function sendAdminReply() {
 function loadAdminErrors() {
   api('getErrors', {}).then(data => {
     errorsCache = data.errors || [];
-    renderAdminErrors();
-  }).catch(err => { document.getElementById('adminBody').innerHTML = `<div class="error">${err.message}</div>`; });
+    if (adminTab === 'errors') renderAdminErrors();
+  }).catch(err => { if (adminTab === 'errors') document.getElementById('adminBody').innerHTML = `<div class="error">${err.message}</div>`; });
 }
 function filterErrors(list) {
   const wantArchived = errorsFilter.includes('archived');
@@ -2177,8 +2183,8 @@ function loadAdminUsers() {
     // fills messagesCache (for the unread dots/badges) without a second,
     // separate getMessages round-trip every time the Users tab is opened.
     if (data.messages) { messagesCache = data.messages; messagesLoaded = true; renderAdminNav(); }
-    renderUsersTable();
-  }).catch(err => { document.getElementById('adminBody').innerHTML = `<div class="error">${err.message}</div>`; });
+    if (adminTab === 'users') renderUsersTable();
+  }).catch(err => { if (adminTab === 'users') document.getElementById('adminBody').innerHTML = `<div class="error">${err.message}</div>`; });
 }
 function renderUsersTable() {
   const body = document.getElementById('adminBody');
