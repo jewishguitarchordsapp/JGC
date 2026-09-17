@@ -67,9 +67,18 @@
   .song-row .artist{color:var(--muted);font-size:13px;}
   .song-row .star{color:#ccc;cursor:pointer;padding:8px 10px;margin:-8px -10px;display:inline-flex;align-items:center;justify-content:center;}
   .song-row .star svg{width:25px;height:23px;display:block;}
+  /* Drag-to-reorder handle (Playlist detail / unfiltered Favorites tab —
+     see makeReorderable in index.html). touch-action:none stops mobile
+     Safari/Chrome from treating the drag as a page-scroll gesture. */
+  .drag-handle{color:var(--muted);cursor:grab;touch-action:none;display:inline-flex;align-items:center;justify-content:center;padding:8px 6px;margin:-8px 0 -8px -6px;flex:none;}
+  .drag-handle svg{width:20px;height:20px;display:block;}
+  .song-row.dragging{opacity:0.6;background:#f0f4ff;}
   .song-row .star.on{color:#d9302f;}
   .new-badge{display:inline-flex;align-items:center;gap:3px;background:#e8f5e9;color:#2e7d32;font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px;margin-bottom:3px;letter-spacing:.3px;white-space:nowrap;}
   .new-badge-age{font-weight:500;opacity:.85;}
+  /* Persistent "you're offline" banner — see setOffline/renderOfflineBanner. */
+  .offline-banner{position:sticky;top:0;z-index:500;background:#fff3cd;color:#7a5b00;border-bottom:1px solid #f0d98c;padding:9px 14px;font-size:13px;text-align:center;}
+  .offline-toggle-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
   .chip{display:inline-block;background:#eef4f4;color:var(--accent);border-radius:20px;padding:5px 12px;font-size:13px;margin:3px;cursor:pointer;border:1px solid #d7e6e6;}
   .chip.active{background:var(--teal);color:#fff;border-color:var(--teal);}
   .chip.icon-chip{display:inline-flex;align-items:center;justify-content:center;padding:7px 10px;}
@@ -427,6 +436,13 @@ let editChordAlign = 'left'; // 'left' | 'right'
 let chatTarget = null;     // {email,name} admin is viewing/replying to
 let refreshTimer = null;
 let dataStarted = false; // gate: don't fetch songs/content until someone signs in
+// True once we know we have no working connection to the backend — either
+// the browser told us so (the 'offline' event / navigator.onLine) or a live
+// request actually failed at the network level. Drives the read-only
+// banner (renderOfflineBanner) and the single choke point in api()/apiList()
+// that blocks writes and live reads instead of letting them hang on a fetch
+// that can only fail — see OFFLINE AVAILABILITY below.
+let isOffline = !navigator.onLine;
 // Set once loadMyData() has actually populated favorites/knownChords from
 // the server this session — lets handleCredentialResponse (see GOOGLE
 // SIGN-IN below) tell a real first sign-in apart from Google's later silent
@@ -617,8 +633,20 @@ async function loadMyData() {
 /* ============================================================
    DATA LAYER
    ============================================================ */
+// Both apiList() and api() below share one offline choke point: while
+// isOffline is true, every write AND every live read is refused up front
+// with a clear message, instead of letting a fetch that can only fail hang
+// for however long the network stack takes to give up. Nearly every caller
+// in this file already does .catch(err => alert(err.message)) (or similar)
+// on these, so this one change surfaces "you're offline" everywhere for
+// free — see OFFLINE AVAILABILITY below for how isOffline itself gets set.
+function offlineError_() { return new Error("You're offline — this isn't available until you're back online."); }
+
 async function apiList() {
-  const res = await fetch(CONFIG.SCRIPT_URL + '?action=list');
+  if (isOffline) throw offlineError_();
+  let res;
+  try { res = await fetch(CONFIG.SCRIPT_URL + '?action=list'); }
+  catch (networkErr) { setOffline(true); throw offlineError_(); }
   const data = await res.json();
   if (!data.success) throw new Error(data.error || 'Failed to load songs');
   return data.songs;
@@ -627,9 +655,12 @@ async function apiList() {
 // No custom Content-Type header — keeps this a CORS "simple request" since
 // Apps Script can't handle an OPTIONS preflight.
 async function api(action, fields) {
+  if (isOffline) throw offlineError_();
   const payload = Object.assign({ action }, fields || {});
   if (currentUser) payload.idToken = currentUser.idToken;
-  const res = await fetch(CONFIG.SCRIPT_URL, { method: 'POST', body: JSON.stringify(payload) });
+  let res;
+  try { res = await fetch(CONFIG.SCRIPT_URL, { method: 'POST', body: JSON.stringify(payload) }); }
+  catch (networkErr) { setOffline(true); throw offlineError_(); }
   const data = await res.json();
   if (!data.success) {
     // A sign-in error usually means the Google ID token has expired (it's
@@ -667,16 +698,27 @@ async function loadSongs(showSpinner) {
     if (view.name !== 'admin') render();
     saveCatalogCache();
   } catch (err) {
-    footer.textContent = 'Could not load songs: ' + err.message;
+    if (isOffline && songs.length === 0) {
+      // Cold boot with no network at all and nothing loaded yet this
+      // session — fall back to whatever's been saved for offline viewing
+      // (see OFFLINE AVAILABILITY below) instead of just sitting on an
+      // error. loadFromOfflineCache() re-renders itself once it's done.
+      await loadFromOfflineCache();
+      footer.textContent = "You're offline — showing content saved for offline use.";
+    } else {
+      footer.textContent = 'Could not load songs: ' + err.message;
+    }
   }
 }
 
 // The bulk song list is lightweight on purpose (see doGet 'list' in Code.gs) —
 // it leaves out each song's chords/lyrics text so the app is interactive fast
-// even with thousands of songs. This fetches that full text for every song
-// in the background, once, and merges it in; only needed for "Known Songs"
-// filtering and lyric search across the whole library.
+// even with thousands of songs. This fetches that full text for every song,
+// once, and merges it in; only needed for lyric search across the whole
+// library (Known Songs filtering uses the precomputed chords_used field
+// instead — see songKnown — and never needs this at all).
 async function loadSongContentAll() {
+  if (isOffline) return;
   try {
     const res = await fetch(CONFIG.SCRIPT_URL + '?action=listContent');
     const data = await res.json();
@@ -684,21 +726,35 @@ async function loadSongContentAll() {
     data.content.forEach(c => { songContentById[c.id] = { chords_lyrics: c.chords_lyrics, lyrics_only: c.lyrics_only }; });
     songs.forEach(s => { const c = songContentById[s.id]; if (c) { s.chords_lyrics = c.chords_lyrics; s.lyrics_only = c.lyrics_only; } });
     songContentLoaded = true;
-    if (view.name === 'list' && (songTab === 'known' || filters.q)) renderSongListBody();
+    if (view.name === 'list' && filters.q) renderSongListBody();
     if (view.name === 'detail') renderDetail();
     saveCatalogCache();
   } catch (err) { console.error('Failed to load full song text', err); }
 }
 
-// Only start pulling the song catalog, its full text, and the periodic
-// refresh once someone has actually signed in — these previously fired
-// unconditionally at page load, hitting the backend before we even knew
-// whether a visitor was signed in.
+// Kicks off loadSongContentAll() the first time it's actually needed —
+// lyric search typed into the Songs search box — instead of unconditionally
+// on every sign-in. Safe to call repeatedly; only ever fetches once (per
+// page load) thanks to the songContentLoading/songContentLoaded guards.
+let songContentLoading = false;
+function ensureSongContentLoaded() {
+  if (songContentLoaded || songContentLoading || isOffline) return;
+  songContentLoading = true;
+  loadSongContentAll().finally(() => { songContentLoading = false; });
+}
+
+// Only start pulling the song catalog and the periodic refresh once someone
+// has actually signed in — these previously fired unconditionally at page
+// load, hitting the backend before we even knew whether a visitor was
+// signed in. The full lyrics/chords corpus (loadSongContentAll) is no
+// longer kicked off here at all — see ensureSongContentLoaded() below; it's
+// only needed for lyric search, and fetching ~13MB of text for every single
+// sign-in (whether or not anyone ever searches) was the biggest single
+// contributor to backend slow-loads and intermittent failures.
 function startAfterSignIn() {
   if (dataStarted) return;
   dataStarted = true;
   loadSongs(true);
-  loadSongContentAll();
   refreshTimer = setInterval(() => loadSongs(false), CONFIG.AUTO_REFRESH_SECONDS * 1000);
 }
 
@@ -706,6 +762,7 @@ function startAfterSignIn() {
 // opened before the background fetch above has finished, so viewing a chart
 // is never stuck waiting on every other song's text too.
 async function loadSongContentFor(id) {
+  if (isOffline) return;
   try {
     const res = await fetch(CONFIG.SCRIPT_URL + '?action=songContent&id=' + encodeURIComponent(id));
     const data = await res.json();
@@ -725,6 +782,173 @@ function renderFooter() {
   const time = lastSynced ? lastSynced.toLocaleTimeString() : '—';
   footer.innerHTML = `Synced at ${time} &nbsp;·&nbsp; <a href="#" onclick="loadSongs(true);return false;">Refresh now</a>`;
 }
+
+/* ============================================================
+   OFFLINE AVAILABILITY — a user can mark their Favorites, and/or any
+   individual playlist, "available offline": every one of those songs' full
+   chart text gets saved into this browser's IndexedDB, so opening the app
+   with no connection at all still shows that saved content (read-only —
+   nothing can be changed until back online, per api()/apiList()'s shared
+   offline guard above).
+   ============================================================ */
+const OFFLINE_DB_NAME = 'jgc_offline_v1';
+function offlineDbOpen_() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(OFFLINE_DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains('songs')) db.createObjectStore('songs', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('sets')) db.createObjectStore('sets', { keyPath: 'id' });
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+// sets: {id: 'favorites' | 'playlist:<playlistId>', title, songIds: [...], savedAt}
+// songs: full song objects (incl. chords_lyrics/lyrics_only), keyed by id,
+// shared across every set — a song saved by two different offline sets is
+// only stored once.
+const offlineDb = {
+  async getAllSets() {
+    const db = await offlineDbOpen_();
+    return new Promise((resolve, reject) => {
+      const req = db.transaction('sets', 'readonly').objectStore('sets').getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+  },
+  async getSet(id) {
+    const db = await offlineDbOpen_();
+    return new Promise((resolve, reject) => {
+      const req = db.transaction('sets', 'readonly').objectStore('sets').get(id);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  },
+  async getSongs(ids) {
+    if (!ids.length) return [];
+    const db = await offlineDbOpen_();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('songs', 'readonly');
+      const store = tx.objectStore('songs');
+      const out = [];
+      let remaining = ids.length;
+      ids.forEach(id => {
+        const req = store.get(id);
+        req.onsuccess = () => { if (req.result) out.push(req.result); if (--remaining === 0) resolve(out); };
+        req.onerror = () => { if (--remaining === 0) resolve(out); };
+      });
+    });
+  },
+  async putSongsAndSet(songList, setObj) {
+    const db = await offlineDbOpen_();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(['songs', 'sets'], 'readwrite');
+      const songStore = tx.objectStore('songs');
+      songList.forEach(s => songStore.put(s));
+      tx.objectStore('sets').put(setObj);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  },
+  async deleteSet(id) {
+    const db = await offlineDbOpen_();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('sets', 'readwrite');
+      tx.objectStore('sets').delete(id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+};
+
+function offlineSetIdForPlaylist(playlistId) { return 'playlist:' + playlistId; }
+
+// True if this exact set (Favorites, or a given playlist) is currently
+// saved for offline use. Used to decide the toggle button's label.
+async function isOfflineAvailable(setId) {
+  try { return !!(await offlineDb.getSet(setId)); } catch (e) { return false; }
+}
+
+// Makes sure every one of these song ids has its full chart text in memory
+// (songContentById), fetching whichever ones are missing — needed before
+// saving them offline, since the lightweight 'list' payload alone doesn't
+// include chords_lyrics/lyrics_only.
+async function ensureContentFor(ids) {
+  const missing = ids.filter(id => !songContentById[id]);
+  await Promise.all(missing.map(id => loadSongContentFor(id)));
+}
+
+// Saves the given songs into IndexedDB under setId/title, available offline
+// from then on. Throws if fetching any song's full text fails (e.g. no
+// connection right now) — the caller shows that as an alert.
+async function setOfflineAvailable(setId, title, songIds) {
+  await ensureContentFor(songIds);
+  const fullSongs = songIds.map(id => songs.find(s => s.id === id)).filter(Boolean).map(s => ({
+    id: s.id, title: s.title, title_hebrew: s.title_hebrew || '', artist: s.artist || '',
+    categories: s.categories || '', capo: s.capo || 0, youtube_url: s.youtube_url || '',
+    chords_lyrics: (songContentById[s.id] || {}).chords_lyrics || s.chords_lyrics || '',
+    lyrics_only: (songContentById[s.id] || {}).lyrics_only || s.lyrics_only || '',
+    date_added: s.date_added || '', chords_used: s.chords_used || []
+  }));
+  await offlineDb.putSongsAndSet(fullSongs, { id: setId, title, songIds: songIds.slice(), savedAt: Date.now() });
+}
+async function removeOfflineAvailable(setId) {
+  await offlineDb.deleteSet(setId);
+  // Deliberately leaves each song's cached text in IndexedDB even if no
+  // remaining set references it — a few stray KB of leftover chart text
+  // costs nothing, and skipping a full-store reachability scan keeps this
+  // instant. (It'll simply be overwritten if a set ever saves that song again.)
+}
+
+// Rebuilds songs/playlists/favorites from whatever's been saved offline —
+// used on a cold boot with no connection at all (see loadSongs()'s catch
+// above). Every existing view (song rows, chart rendering, playlist detail)
+// reads these same globals, so nothing else has to change to work offline.
+async function loadFromOfflineCache() {
+  try {
+    const sets = await offlineDb.getAllSets();
+    const allIds = new Set();
+    sets.forEach(s => (s.songIds || []).forEach(id => allIds.add(id)));
+    songs = await offlineDb.getSongs(Array.from(allIds));
+    songs.forEach(s => { songContentById[s.id] = { chords_lyrics: s.chords_lyrics, lyrics_only: s.lyrics_only }; });
+    songContentLoaded = true;
+    const favSet = sets.find(s => s.id === 'favorites');
+    favorites.length = 0; if (favSet) favorites.push(...favSet.songIds);
+    playlists = sets.filter(s => s.id.indexOf('playlist:') === 0).map(s => ({
+      id: s.id.slice('playlist:'.length), title: s.title, song_ids: s.songIds,
+      visibility: 'private', owner_email: currentUser ? currentUser.email : '', owner_name: 'Saved offline'
+    }));
+    render();
+  } catch (e) { console.error('Could not load offline content', e); }
+}
+
+// Shows/hides the persistent "you're offline" banner and flips isOffline.
+function setOffline(value) {
+  const changed = isOffline !== value;
+  isOffline = value;
+  renderOfflineBanner();
+  if (changed && !isOffline) {
+    // Back online — do a full, clean resync rather than trying to patch up
+    // whatever partial/offline state is currently in memory.
+    if (dataStarted) { loadSongs(true); refreshPlaylistsOnly().catch(()=>{}); }
+    if (currentUser) loadMyData();
+  }
+}
+function renderOfflineBanner() {
+  let el = document.getElementById('offlineBanner');
+  if (isOffline) {
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'offlineBanner';
+      el.className = 'offline-banner';
+      el.textContent = "📡 You're offline — showing saved content. Changes can't be made until you're back online.";
+      document.body.insertBefore(el, document.body.firstChild);
+    }
+  } else if (el) { el.remove(); }
+}
+window.addEventListener('offline', () => setOffline(true));
+window.addEventListener('online', () => setOffline(false));
 
 /* ============================================================
    CHORD PARSING + TRANSPOSE
@@ -1191,7 +1415,11 @@ function refreshPlaylistsOnly() {
 }
 
 function songKnown(song) {
-  const used = chordsUsedIn(song.chords_lyrics, 0);
+  // chords_used comes precomputed from the server on every 'list' call (see
+  // Code.gs) so this never has to wait on the full-corpus listContent fetch;
+  // falls back to computing it client-side only for a song that somehow
+  // lacks it (e.g. a very stale cached catalog from before this shipped).
+  const used = song.chords_used || chordsUsedIn(song.chords_lyrics, 0);
   if (used.length === 0) return false;
   return used.every(c => effectiveKnownChords().includes(c));
 }
@@ -1230,7 +1458,22 @@ function filteredSongs() {
     list = list.filter(isNewSong);
     return list.sort((a,b) => new Date(b.date_added) - new Date(a.date_added));
   }
+  if (songTab === 'favorites' && favoritesReorderable()) {
+    // Preserve the user's own custom drag order (see reorderFavorites in
+    // Code.gs) instead of the usual alphabetical sort — only when viewing
+    // the plain, unfiltered Favorites tab (see favoritesReorderable): a
+    // search/filter within Favorites still sorts alphabetically, since a
+    // partial view isn't something "reorder" meaningfully applies to.
+    const favOrder = effectiveFavorites();
+    return list.slice().sort((a,b) => favOrder.indexOf(a.id) - favOrder.indexOf(b.id));
+  }
   return list.sort((a,b) => String(a.title||'').localeCompare(String(b.title||'')));
+}
+// True only for the plain Favorites tab view — signed in, no active
+// search/artist/language/tag filter — which is exactly when custom drag
+// order applies and drag handles are shown (see renderSongListBody).
+function favoritesReorderable() {
+  return songTab === 'favorites' && !!currentUser && !filters.q && !filters.artist && !filters.language && !filters.tag;
 }
 
 // Builds the goTo(...) call for opening a song. When queueIds is given (the
@@ -1243,9 +1486,10 @@ function detailGoTo(songId, queueIds) {
   const arr = '[' + queueIds.map(id => `'${id}'`).join(',') + ']';
   return `goTo('detail',{id:'${songId}',queue:${arr},queueIdx:${idx}})`;
 }
-function songRowHtml(s, queueIds) {
+function songRowHtml(s, queueIds, reorderable) {
   const newBadge = isNewSong(s) ? `<div class="new-badge">NEW <span class="new-badge-age">· ${songDaysAgoLabel(s)}</span></div>` : '';
-  return `<div class="song-row">
+  return `<div class="song-row"${reorderable ? ` data-reorder-id="${s.id}"` : ''}>
+        ${reorderable ? `<span class="drag-handle" title="Drag to reorder">${SVG_ICONS.dragHandle}</span>` : ''}
         <div style="display:flex;align-items:center;gap:10px;flex:1;cursor:pointer;" onclick="${detailGoTo(s.id, queueIds)}">
           <div>${newBadge}<div class="title">${escapeHtml(s.title)}</div><div class="artist">${escapeHtml(s.artist||'')}</div></div>
         </div>
@@ -1267,10 +1511,43 @@ function renderList() {
       ${effectiveIsAdmin() ? `<button class="btn" onclick="goTo('edit')">+ Add Song</button>` : ''}
     </div>`;
   if (activeFilterChip) html += `<div style="margin-bottom:10px"><span class="chip active" onclick="filters.artist='';filters.language='';filters.tag='';songListPage=0;render()">${escapeHtml(activeFilterChip)} ✕</span></div>`;
+  if (songTab === 'favorites' && currentUser && !isOffline) {
+    html += `<div style="margin-bottom:10px"><button id="favOfflineBtn" class="btn secondary offline-toggle-btn" onclick="toggleFavoritesOffline()">📥 Available Offline</button></div>`;
+  }
   html += `<div id="songListBody"></div>`;
   document.getElementById('app').innerHTML = html;
-  document.getElementById('searchBox').addEventListener('input', e => { filters.q = e.target.value; songListPage = 0; renderSongListBody(); });
+  document.getElementById('searchBox').addEventListener('input', e => { filters.q = e.target.value; songListPage = 0; if (filters.q) ensureSongContentLoaded(); renderSongListBody(); });
   renderSongListBody();
+  if (songTab === 'favorites' && currentUser && !isOffline) refreshFavOfflineButton();
+}
+
+// Toggles whether the signed-in (or, during View As, impersonated) user's
+// current Favorites are saved for offline viewing — see setOfflineAvailable/
+// removeOfflineAvailable above.
+async function toggleFavoritesOffline() {
+  const btn = document.getElementById('favOfflineBtn');
+  const already = await isOfflineAvailable('favorites');
+  if (already) {
+    await removeOfflineAvailable('favorites');
+  } else {
+    const ids = effectiveFavorites().slice();
+    if (!ids.length) { alert('Favorite a few songs first.'); return; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+    try {
+      await setOfflineAvailable('favorites', 'Favorites', ids);
+    } catch (e) {
+      alert('Could not save offline: ' + e.message);
+    }
+    if (btn) btn.disabled = false;
+  }
+  refreshFavOfflineButton();
+}
+async function refreshFavOfflineButton() {
+  const btn = document.getElementById('favOfflineBtn');
+  if (!btn) return;
+  const on = await isOfflineAvailable('favorites');
+  btn.textContent = on ? '✓ Saved Offline (tap to remove)' : '📥 Available Offline';
+  btn.classList.toggle('active', on);
 }
 function renderSongListBody() {
   const body = document.getElementById('songListBody');
@@ -1278,13 +1555,17 @@ function renderSongListBody() {
   const list = filteredSongs();
   let html;
   if (list.length === 0) {
-    if (songTab === 'known' && !songContentLoaded) {
-      html = `<div class="empty">Loading your song data — known-song matching will finish shortly…</div>`;
-    } else if (filters.q && !songContentLoaded) {
+    if (filters.q && !songContentLoaded) {
       html = `<div class="empty">No matches yet — lyric search is still loading the full song text.</div>`;
     } else {
       html = `<div class="empty">${songTab==='favorites' ? (currentUser? 'No favorites yet — tap the heart on a song.' : 'Sign in to save favorites.') : songTab==='known' ? 'No songs match your known chords yet.' : songTab==='new' ? 'No new songs in the last 30 days.' : 'No songs match your search/filter.'}</div>`;
     }
+  } else if (favoritesReorderable()) {
+    // The whole point of drag-reordering is seeing (and rearranging) the
+    // complete list at once, so this skips pagination — Favorites lists are
+    // small enough that showing them all on one page is no hardship.
+    const queueIds = list.map(s => s.id);
+    html = `<div id="favoritesSongList">` + list.map(s => songRowHtml(s, queueIds, true)).join('') + `</div>`;
   } else {
     // Every song tab (and Artists/Categories browsing, which funnels through
     // here too via filters + goTo('list')) gets a Next/Prev-Song queue now —
@@ -1293,6 +1574,19 @@ function renderSongListBody() {
     html = pageSlice(list, songListPage).map(s => songRowHtml(s, queueIds)).join('') + pagerHtml(list.length, songListPage, 'changeSongPage');
   }
   body.innerHTML = html;
+  if (favoritesReorderable() && list.length > 1) {
+    makeReorderable(document.getElementById('favoritesSongList'), (newIds) => {
+      // Optimistic local reorder — the drag already shows the new order in
+      // the DOM, so just update the underlying array (View As mutates the
+      // impersonated user's own snapshot, same pattern as toggleFavoriteFor)
+      // and persist it; a failure re-renders from the last-known-good order.
+      const favList = viewAsUser ? viewAsData.favorites : favorites;
+      const prevOrder = favList.slice();
+      favList.length = 0; favList.push(...newIds);
+      api('reorderFavorites', Object.assign({ song_ids: newIds }, viewAsFields()))
+        .catch(err => { favList.length = 0; favList.push(...prevOrder); alert(err.message); renderSongListBody(); });
+    });
+  }
 }
 function changeSongPage(p) { songListPage = p; renderSongListBody(); document.getElementById('songListBody').scrollIntoView({ behavior: 'smooth', block: 'start' }); }
 
@@ -1848,6 +2142,61 @@ function saveSong(evt, id) {
 }
 
 /* ============================================================
+   DRAG-TO-REORDER — a small, dependency-free helper shared by the
+   Playlist detail view and the (unfiltered) Favorites tab. Uses Pointer
+   Events so the same code handles mouse and touch; only a row's
+   .drag-handle (see SVG_ICONS.dragHandle) starts a drag, so the rest of
+   the row keeps its normal tap-to-open behavior. Physically swaps DOM rows
+   as the pointer crosses each neighbor's midpoint (rather than animating a
+   floating copy) — a deliberately simple, low-risk approach: no dependency
+   on getting spring-physics or drop-shadows right, just an immediate,
+   unambiguous "this is the new order" as you drag.
+   ============================================================ */
+function makeReorderable(containerEl, onDrop) {
+  if (!containerEl || containerEl._reorderableBound) return;
+  containerEl._reorderableBound = true;
+  let dragEl = null;
+  function rows() { return Array.from(containerEl.children).filter(el => el.hasAttribute('data-reorder-id')); }
+  function onMove(e) {
+    if (!dragEl) return;
+    const y = e.clientY;
+    for (const r of rows()) {
+      if (r === dragEl) continue;
+      const rect = r.getBoundingClientRect();
+      const mid = rect.top + rect.height / 2;
+      // dragIsBefore: true if dragEl currently sits earlier in the list than r.
+      const dragIsBefore = !!(dragEl.compareDocumentPosition(r) & Node.DOCUMENT_POSITION_FOLLOWING);
+      // Dragging down past a later row r: move dragEl to just after it.
+      if (dragIsBefore && y > mid) { containerEl.insertBefore(dragEl, r.nextSibling); break; }
+      // Dragging up past an earlier row r: move dragEl to just before it.
+      if (!dragIsBefore && y < mid) { containerEl.insertBefore(dragEl, r); break; }
+    }
+  }
+  function onUp() {
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', onUp);
+    document.removeEventListener('pointercancel', onUp);
+    if (!dragEl) return;
+    dragEl.classList.remove('dragging');
+    const el = dragEl; dragEl = null;
+    const ids = rows().map(r => r.getAttribute('data-reorder-id'));
+    onDrop(ids, el);
+  }
+  containerEl.addEventListener('pointerdown', e => {
+    const handle = e.target.closest('.drag-handle');
+    if (!handle) return;
+    const row = handle.closest('[data-reorder-id]');
+    if (!row || row.parentElement !== containerEl) return;
+    e.preventDefault();
+    dragEl = row;
+    row.classList.add('dragging');
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+    document.addEventListener('pointercancel', onUp);
+  });
+}
+
+/* ============================================================
    PLAYLISTS
    ============================================================ */
 function renderPlaylists() {
@@ -1902,12 +2251,55 @@ function renderPlaylistDetail() {
       <div><h2 style="margin-bottom:2px">${escapeHtml(p.title)}</h2><div class="meta">by ${escapeHtml(p.owner_name||p.owner_email)} · ${p.visibility}</div></div>
       ${canEdit ? `<div><button class="btn secondary" onclick="editPlaylistSettings('${p.id}')">Settings</button> <button class="btn danger" onclick="deletePlaylistConfirm('${p.id}')">Delete</button></div>` : ''}
     </div>`;
-  html += list.length ? list.map(s => `
-    <div class="song-row">
+  // Offline availability is a personal, on-this-device thing — not tied to
+  // owning/editing the playlist, so it's offered to anyone viewing it
+  // (public/shared included), same as Favorites.
+  if (!isOffline && list.length) {
+    html += `<div style="margin-bottom:10px"><button id="playlistOfflineBtn" class="btn secondary offline-toggle-btn" onclick="togglePlaylistOffline('${p.id}')">📥 Available Offline</button></div>`;
+  }
+  html += list.length ? `<div id="playlistSongList">` + list.map(s => `
+    <div class="song-row" data-reorder-id="${s.id}">
+      ${canEdit ? `<span class="drag-handle" title="Drag to reorder">${SVG_ICONS.dragHandle}</span>` : ''}
       <div style="cursor:pointer;flex:1" onclick="${detailGoTo(s.id, queueIds)}"><div class="title">${escapeHtml(s.title)}</div><div class="artist">${escapeHtml(s.artist||'')}</div></div>
       ${canEdit ? `<button class="btn secondary" onclick="removeFromPlaylist('${p.id}','${s.id}')">Remove</button>` : ''}
-    </div>`).join('') : '<div class="empty">No songs in this playlist yet.</div>';
+    </div>`).join('') + `</div>` : '<div class="empty">No songs in this playlist yet.</div>';
   document.getElementById('app').innerHTML = html;
+  if (canEdit && list.length > 1) {
+    makeReorderable(document.getElementById('playlistSongList'), (newIds) => {
+      api('updatePlaylist', Object.assign({ id: p.id, song_ids: newIds }, viewAsFields()))
+        .then(() => refreshPlaylistsOnly())
+        .catch(err => { alert(err.message); renderPlaylistDetail(); }); // snap back to the server's order on failure
+    });
+  }
+  if (!isOffline && list.length) refreshPlaylistOfflineButton(p.id);
+}
+
+async function togglePlaylistOffline(playlistId) {
+  const setId = offlineSetIdForPlaylist(playlistId);
+  const btn = document.getElementById('playlistOfflineBtn');
+  const already = await isOfflineAvailable(setId);
+  if (already) {
+    await removeOfflineAvailable(setId);
+  } else {
+    const p = playlists.find(pl => pl.id === playlistId) || (viewAsUser && (viewAsData.playlists||[]).find(pl => pl.id === playlistId));
+    const ids = p ? (p.song_ids || []).slice() : [];
+    if (!ids.length) { alert('This playlist has no songs yet.'); return; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+    try {
+      await setOfflineAvailable(setId, (p && p.title) || 'Playlist', ids);
+    } catch (e) {
+      alert('Could not save offline: ' + e.message);
+    }
+    if (btn) btn.disabled = false;
+  }
+  refreshPlaylistOfflineButton(playlistId);
+}
+async function refreshPlaylistOfflineButton(playlistId) {
+  const btn = document.getElementById('playlistOfflineBtn');
+  if (!btn) return;
+  const on = await isOfflineAvailable(offlineSetIdForPlaylist(playlistId));
+  btn.textContent = on ? '✓ Saved Offline (tap to remove)' : '📥 Available Offline';
+  btn.classList.toggle('active', on);
 }
 function editPlaylistSettings(id) {
   const p = playlists.find(pl => pl.id === id) || (viewAsUser && (viewAsData.playlists||[]).find(pl => pl.id === id));
@@ -2453,6 +2845,7 @@ if (cachedCatalog) {
 }
 renderUserArea();
 render(); // show the sign-in gate (or restore a still-valid session's view) immediately
+renderOfflineBanner(); // in case the browser already knows we have no connection at load
 if (currentUser) { loadMyData(); startAfterSignIn(); }
 window.addEventListener('load', initGoogleSignIn);
 </script>
