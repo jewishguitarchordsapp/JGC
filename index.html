@@ -379,6 +379,32 @@ let userSearch = '';
 let usersPage = 0;
 let songContentById = {};  // {id: {chords_lyrics,lyrics_only}} — persists across periodic list refreshes
 let songContentLoaded = false; // true once the full-corpus background text fetch has completed
+
+// Mirrors the song catalog (songs/playlists/full chord+lyric text) to
+// localStorage so a reload can render the whole Songs/Artists/Categories/
+// Playlists experience — and open a song's chart — instantly from what was
+// there last time, instead of waiting on the Apps Script round trip (which
+// re-verifies the sign-in token and scans a sheet on every call, and can
+// take a second or more). loadSongs()/loadSongContentAll() below still run
+// exactly as before and silently refresh both the live data and this cache
+// once they land — this is a "show the old thing now, update it in the
+// background" cache, never the only copy of the truth.
+const CATALOG_CACHE_KEY = 'jgc_catalog_cache_v1';
+function saveCatalogCache() {
+  try {
+    const payload = JSON.stringify({ songs, playlists, songContentById });
+    // localStorage is good for a few MB per origin; the full chord+lyric
+    // text for a large catalog could approach that, so skip caching rather
+    // than risk a quota error wiping out a previously-good cache.
+    if (payload.length < 4 * 1024 * 1024) localStorage.setItem(CATALOG_CACHE_KEY, payload);
+  } catch (e) {}
+}
+function loadCatalogCache() {
+  try {
+    const raw = localStorage.getItem(CATALOG_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
 let songListPage = 0;
 let contactRequestsPage = 0; // paginates the Contact page's "My Song Requests" list, 10/page
 let contactChatOpen = false; // Contact page's "Message Admin" card starts collapsed; clicking it reveals the thread
@@ -571,6 +597,7 @@ async function loadSongs(showSpinner) {
     lastSynced = new Date();
     renderFooter();
     render();
+    saveCatalogCache();
   } catch (err) {
     footer.textContent = 'Could not load songs: ' + err.message;
   }
@@ -591,6 +618,7 @@ async function loadSongContentAll() {
     songContentLoaded = true;
     if (view.name === 'list' && (songTab === 'known' || filters.q)) renderSongListBody();
     if (view.name === 'detail') renderDetail();
+    saveCatalogCache();
   } catch (err) { console.error('Failed to load full song text', err); }
 }
 
@@ -2158,6 +2186,20 @@ if (cachedAuth && cachedAuth.idToken) currentUser = cachedAuth;
 // bouncing back to the start.
 const cachedView = loadViewCache();
 if (cachedView) view = cachedView;
+// Hydrate the song catalog from its own cache (see saveCatalogCache above)
+// before the real network fetch even starts, so whichever page comes back
+// (a song list, a chart, a playlist) has something real to show on this
+// very first render() a few lines down, instead of an empty "Loading…"
+// state. loadSongs()/loadSongContentAll(), kicked off below by
+// startAfterSignIn(), still run right away and quietly replace this with
+// fresh data (and re-save the cache) once they land.
+const cachedCatalog = loadCatalogCache();
+if (cachedCatalog) {
+  songs = cachedCatalog.songs || [];
+  playlists = cachedCatalog.playlists || [];
+  songContentById = cachedCatalog.songContentById || {};
+  songContentLoaded = Object.keys(songContentById).length > 0;
+}
 renderUserArea();
 render(); // show the sign-in gate (or restore a still-valid session's view) immediately
 if (currentUser) { loadMyData(); startAfterSignIn(); }
