@@ -92,8 +92,16 @@
   .song-header{display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;}
   .song-header .meta{color:var(--muted);font-size:14px;}
   .toolbar{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0;align-items:center;}
-  .toolbar .group{display:flex;align-items:center;gap:6px;background:#f0f2f3;border-radius:8px;padding:4px 8px;}
-  .toolbar button.icon{background:none;border:none;font-size:15px;cursor:pointer;padding:4px 8px;color:var(--teal-dark);}
+  /* Speed control pill next to the Play button (playback-row) - styled to
+     match the Advanced panel's .stepper-btn look (white rounded-square
+     buttons with a thin border and a hover state) instead of the bare,
+     unstyled default browser buttons these were rendering as: the
+     ".toolbar" ancestor these rules used to require doesn't exist anywhere
+     in the markup, so they never actually applied. */
+  .group{display:flex;align-items:center;gap:3px;background:#f0f2f3;border-radius:8px;padding:3px;}
+  .group button.icon{width:26px;height:26px;border-radius:6px;background:#fff;border:1px solid #d7dcdd;font-size:15px;font-weight:700;line-height:1;padding:0;cursor:pointer;color:var(--teal-dark);display:inline-flex;align-items:center;justify-content:center;flex:none;}
+  .group button.icon:hover{background:#eef4f4;}
+  .group span{font-size:13px;font-weight:600;color:var(--text);min-width:32px;text-align:center;}
   /* Song detail page redesign: capo-status tiles, the 4-across action row
      (Favorite/+Playlist/Report/Print), the simplified playback row and its
      collapsible Advanced panel (font size, bold, show/hide chords, capo,
@@ -495,6 +503,32 @@ function loadCatalogCache() {
     return raw ? JSON.parse(raw) : null;
   } catch (e) { return null; }
 }
+
+// Mirrors favorites/knownChords to localStorage the same way the song
+// catalog above is mirrored, keyed to whichever email last saved it so a
+// shared device never shows one person's favorites under another's
+// session. Without this, a reload (or a session that has to silently
+// re-authenticate - see expireSession_ below) always started from a blank
+// favorites/knownChords array until the getMyData round trip finished, so
+// anyone whose token needed refreshing saw "you have no favorites" for a
+// few seconds - or indefinitely, if that round trip failed. Now the last-
+// known list paints immediately and getMyData() just quietly corrects it
+// once it lands.
+const MYDATA_CACHE_KEY = 'jgc_mydata_cache_v1';
+function saveMyDataCache() {
+  try {
+    if (!currentUser) return;
+    localStorage.setItem(MYDATA_CACHE_KEY, JSON.stringify({ email: currentUser.email, favorites, knownChords }));
+  } catch (e) {}
+}
+function loadMyDataCache(email) {
+  try {
+    const raw = localStorage.getItem(MYDATA_CACHE_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw);
+    return (v && v.email === email) ? v : null;
+  } catch (e) { return null; }
+}
 let songListPage = 0;
 let contactRequestsPage = 0; // paginates the Contact page's "My Song Requests" list, 10/page
 let contactChatOpen = false; // Contact page's "Message Admin" card starts collapsed; clicking it reveals the thread
@@ -637,6 +671,7 @@ async function loadMyData() {
     knownChords.length = 0; knownChords.push(...(data.knownChords || []));
     currentUser.isAdmin = !!(data.user && data.user.isAdmin);
     myDataReady = true;
+    saveMyDataCache();
     renderUserArea();
     render();
   } catch (err) { console.error(err); }
@@ -696,12 +731,34 @@ async function api(action, fields) {
     // the stale session so the UI cleanly asks to sign in again, instead of
     // just showing a cryptic error while still looking "signed in".
     if (data.error && data.error.indexOf('sign in with Google') >= 0 && currentUser) {
-      currentUser = null; favorites = []; knownChords = []; viewAsUser = null; viewAsData = null;
-      renderUserArea();
+      expireSession_();
     }
     throw new Error(data.error || 'Request failed');
   }
   return data;
+}
+// Cleanly unwinds an expired/invalid session so the app ends up in exactly
+// the same state as an explicit Sign Out, instead of a half-updated one.
+// Before this, the expiry branch above only cleared currentUser and
+// repainted the header, leaving the rest of the page showing whatever was
+// already on screen until something else happened to re-render it - which
+// is what made this look like "it randomly wants me to sign in again". It
+// also left the stale idToken sitting in the auth cache, so the very next
+// reload just hydrated that same dead token and hit the same failure again
+// in a loop, and never reset myDataReady, so even a real, successful
+// re-sign-in afterward would skip loadMyData() entirely (see its
+// `if (!myDataReady)` guard in handleCredentialResponse) and leave
+// favorites/knownChords permanently empty for the rest of that page's life
+// - which is what made it look like "no favorites or playlists" even for
+// someone who very much has both.
+function expireSession_() {
+  currentUser = null; favorites = []; knownChords = []; viewAsUser = null; viewAsData = null;
+  saveAuthCache(null);
+  myDataReady = false;
+  if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+  dataStarted = false;
+  renderUserArea();
+  render();
 }
 
 async function loadSongs(showSpinner) {
@@ -2963,6 +3020,16 @@ document.getElementById('shareBtn').onclick = shareApp;
 // well before that ever surfaces to the user.
 const cachedAuth = loadAuthCache();
 if (cachedAuth && cachedAuth.idToken) currentUser = cachedAuth;
+// Paint the last-known favorites/knownChords immediately too (see
+// saveMyDataCache above) instead of starting from a blank array on every
+// reload — without this, the Favorites/Known Chords pages always looked
+// empty for the few seconds (or, if getMyData then failed, indefinitely)
+// until that round trip landed, which is what made it look like favorites
+// had gone missing.
+if (currentUser) {
+  const cachedMyData = loadMyDataCache(currentUser.email);
+  if (cachedMyData) { favorites = cachedMyData.favorites || []; knownChords = cachedMyData.knownChords || []; }
+}
 // Reopen whatever page was open before the reload (see saveViewCache above)
 // instead of always resetting to Home/Welcome — this is what makes a mobile
 // pull-to-refresh stay put on, say, the Known Chords page instead of
@@ -2992,6 +3059,23 @@ render(); // show the sign-in gate (or restore a still-valid session's view) imm
 renderOfflineBanner(); // in case the browser already knows we have no connection at load
 if (currentUser) { loadMyData(); startAfterSignIn(); }
 window.addEventListener('load', initGoogleSignIn);
+// Google's own silent sign-in only actually gets attempted once, at that
+// 'load' listener above. An ID token is only good for about an hour, so
+// any session left open longer than that — the overwhelmingly common case
+// for a phone that gets locked and reopened later, or a browser tab left
+// open overnight — was relying entirely on that single attempt from page
+// load, which by then could be long past. Re-attempting a silent prompt
+// every time the tab/app becomes visible again gives Google many more
+// chances to quietly refresh the token BEFORE it's actually used and fails
+// (the tokenPrompt call is already a documented no-op when there's nothing
+// eligible, e.g. mid-cooldown after a prompt was dismissed — see
+// initGoogleSignIn above — so calling it more often than strictly needed
+// is harmless).
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && currentUser && window.google) {
+    try { google.accounts.id.prompt(); } catch (e) {}
+  }
+});
 </script>
 </body>
 </html>
