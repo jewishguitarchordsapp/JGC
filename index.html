@@ -3058,7 +3058,20 @@ try { history.replaceState({ jgcView: view }, ''); } catch (e) {}
 // state. loadSongs()/loadSongContentAll(), kicked off below by
 // startAfterSignIn(), still run right away and quietly replace this with
 // fresh data (and re-save the cache) once they land.
-const cachedCatalog = loadCatalogCache();
+// Only for a session that's at least optimistically signed in (currentUser
+// set from the auth cache above) — render() only ever shows this restored
+// data behind that same currentUser check, but the raw chords/lyrics text
+// would otherwise still sit in this page's memory for anyone signed out to
+// find (e.g. via devtools), which defeats the point of gating everything
+// behind sign-in in the first place. Skipping the restore for a genuinely
+// signed-out visitor also means their browser stops carrying content from
+// whoever used this device before them the moment that earlier session's
+// own sign-out/expiry has cleared the cache (see signOut()/expireSession_).
+// A device that already had this cache saved from BEFORE that clearing
+// existed won't have had it wiped by either of those, so also sweep it
+// away right here, once, for a visitor who's (still, or already) signed out.
+if (!currentUser) { try { localStorage.removeItem(CATALOG_CACHE_KEY); } catch (e) {} }
+const cachedCatalog = currentUser ? loadCatalogCache() : null;
 if (cachedCatalog) {
   songs = cachedCatalog.songs || [];
   playlists = cachedCatalog.playlists || [];
