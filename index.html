@@ -1620,7 +1620,7 @@ function songRowHtml(s, queueIds, reorderable) {
         <div style="display:flex;align-items:center;gap:10px;flex:1;cursor:pointer;" onclick="${detailGoTo(s.id, queueIds)}">
           <div>${newBadge}<div class="title">${escapeHtml(s.title)}</div><div class="artist">${escapeHtml(s.artist||'')}</div></div>
         </div>
-        <span class="star ${effectiveFavorites().includes(s.id)?'on':''}" onclick="event.stopPropagation();toggleFavoriteFor('${s.id}')">${SVG_ICONS.heart}</span>
+        <span class="star ${effectiveFavorites().includes(s.id)?'on':''}" data-fav-star="${s.id}" onclick="event.stopPropagation();toggleFavoriteFor('${s.id}')">${SVG_ICONS.heart}</span>
       </div>`;
 }
 function renderList() {
@@ -1745,6 +1745,33 @@ function shareApp() {
 // makes a repeat tap on a song already mid-toggle a no-op until the first
 // request settles.
 const pendingFavoriteToggles = new Set();
+// Updates just the star(s)/tile for one song's favorite state directly in the
+// DOM, instead of calling the heavy full-page render(). This used to be the
+// real cause behind "I have to tap the heart 3 times before it sticks":
+// render() for the song list (renderList()) doesn't just redraw the rows —
+// it replaces the ENTIRE #app innerHTML, including the search box and
+// subtabs, on every single tap. Tearing down and recreating the very
+// element a tap just landed on, WHILE that tap's own click is still being
+// processed, is a well-known way for a phone's browser to lose the next tap
+// or two — the element the next physical tap lands on isn't the one that
+// existed when the finger went down, so nothing fires, and the person just
+// sees "nothing happened" and taps again (and again) until timing happens
+// to line up. Only touching the specific star/tile elements for this one
+// song avoids that churn entirely, no matter how many are on screen.
+function syncFavoriteUI_(songId, isFav) {
+  document.querySelectorAll(`[data-fav-star="${cssEscape_(songId)}"]`).forEach(el => el.classList.toggle('on', isFav));
+  const tile = document.querySelector(`[data-fav-tile="${cssEscape_(songId)}"]`);
+  if (tile) {
+    tile.classList.toggle('active', isFav);
+    tile.innerHTML = `${isFav?SVG_ICONS.heart:SVG_ICONS.heartOutline}<div class="tile-label">${isFav?'Favorited':'Favorite'}</div>`;
+  }
+}
+// CSS.escape isn't available in every WebView this app runs in (some older
+// Android in-app browsers) - song ids are plain UUID-ish strings with no
+// characters CSS.escape would ever need to touch, so this only exists as a
+// defensive fallback rather than because escaping is actually expected to
+// matter here.
+function cssEscape_(s) { return window.CSS && CSS.escape ? CSS.escape(s) : String(s).replace(/["\\]/g, '\\$&'); }
 function toggleFavoriteFor(songId) {
   if (!currentUser) { alert('Sign in with Google first to save favorites.'); return; }
   if (pendingFavoriteToggles.has(songId)) return;
@@ -1759,18 +1786,27 @@ function toggleFavoriteFor(songId) {
   const favList = viewAsUser ? viewAsData.favorites : favorites;
   const wasFavorited = favList.includes(songId);
   if (wasFavorited) favList.splice(favList.indexOf(songId), 1); else favList.push(songId);
-  render();
+  const nowFav = !wasFavorited;
+  // Unfavoriting while actually looking at the Favorites tab is the one case
+  // a targeted star/tile update isn't enough - the row needs to disappear
+  // from the list entirely. renderSongListBody() only replaces the list rows
+  // (not the search box/subtabs), so it's still far cheaper than the full
+  // render() this used to call for every single tap.
+  if (view.name === 'list' && songTab === 'favorites' && !nowFav) renderSongListBody();
+  else syncFavoriteUI_(songId, nowFav);
   api('toggleFavorite', Object.assign({ song_id: songId }, viewAsFields())).then(r => {
     const nowFavorited = favList.includes(songId);
     if (r.favorited !== nowFavorited) {
       if (r.favorited) { if (!favList.includes(songId)) favList.push(songId); }
       else { const i = favList.indexOf(songId); if (i >= 0) favList.splice(i, 1); }
-      render();
+      if (view.name === 'list' && songTab === 'favorites') renderSongListBody();
+      else syncFavoriteUI_(songId, r.favorited);
     }
   }).catch(err => {
     if (wasFavorited) { if (!favList.includes(songId)) favList.push(songId); }
     else { const i = favList.indexOf(songId); if (i >= 0) favList.splice(i, 1); }
-    render();
+    if (view.name === 'list' && songTab === 'favorites') renderSongListBody();
+    else syncFavoriteUI_(songId, wasFavorited);
     alert(err.message);
   }).finally(() => { pendingFavoriteToggles.delete(songId); });
 }
@@ -1831,7 +1867,7 @@ function renderCategories() {
 /* ============================================================
    SONG DETAIL
    ============================================================ */
-let playerState = { playing:false, paused:false, speed:1.0, delay:false, capo:0, myCapo:null, timer:null, songId:null, transpose:0, fontSize:0, bold:false, showChords:true, advancedOpen:false };
+let playerState = { playing:false, paused:false, speed:1.0, delay:false, capo:0, myCapo:null, timer:null, songId:null, transpose:0, fontSize:0, bold:false, showChords:true, advancedOpen:false, scrollRemainder:0 };
 let showReportForm = false;
 // Where the floating Play-Mode control strip was last dragged to (see
 // playFloatBarHtml/initPlayFloatBar) — deliberately outside playerState so
@@ -1865,7 +1901,7 @@ function renderDetail() {
   // unless we're viewing as another user (a report should come from the
   // real signed-in admin, not get attributed to whoever's being viewed-as).
   const actionTiles = [
-    `<div class="detail-tile action${isFav?' active':''}" onclick="toggleFavoriteFor('${song.id}')">${isFav?SVG_ICONS.heart:SVG_ICONS.heartOutline}<div class="tile-label">${isFav?'Favorited':'Favorite'}</div></div>`,
+    `<div class="detail-tile action${isFav?' active':''}" data-fav-tile="${song.id}" onclick="toggleFavoriteFor('${song.id}')">${isFav?SVG_ICONS.heart:SVG_ICONS.heartOutline}<div class="tile-label">${isFav?'Favorited':'Favorite'}</div></div>`,
     `<div class="detail-tile action" onclick="openAddToPlaylist('${song.id}')">${SVG_ICONS.playlists}<div class="tile-label">+ Playlist</div></div>`
   ];
   if (!viewAsUser) actionTiles.push(`<div class="detail-tile action" onclick="showReportForm=!showReportForm;renderDetail();">${SVG_ICONS.error}<div class="tile-label">Report</div></div>`);
@@ -2056,9 +2092,23 @@ function togglePlay() {
 function startScroll() {
   const el = document.getElementById('chartScroll'); if (!el) return;
   clearInterval(playerState.timer);
+  playerState.scrollRemainder = 0;
   playerState.timer = setInterval(() => {
     if (!el.isConnected) { stopPlayMode(); return; }
-    el.scrollTop += playerState.speed * 0.7;
+    // At slow speeds (e.g. 0.2x = 0.14px per tick) the per-tick amount is
+    // under a pixel, and some browsers' scrollTop rounds sub-pixel writes
+    // away on the very next read - so el.scrollTop += 0.14 keeps reading
+    // back 0, adding 0.14, and writing 0.14, forever rounding down to 0
+    // and never actually moving. Accumulating the fractional remainder
+    // here (instead of trusting scrollTop to remember it) means slow
+    // speeds still creep forward once enough ticks add up to a whole
+    // pixel, rather than getting stuck at the top forever.
+    playerState.scrollRemainder += playerState.speed * 0.7;
+    const wholePixels = Math.trunc(playerState.scrollRemainder);
+    if (wholePixels !== 0) {
+      el.scrollTop += wholePixels;
+      playerState.scrollRemainder -= wholePixels;
+    }
     if (el.scrollTop + el.clientHeight >= el.scrollHeight - 2) {
       // Reached the end of the chart - only PAUSE, don't exit Play Mode.
       // Someone can still be mid-song (about to repeat a chorus, flipping
