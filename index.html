@@ -628,6 +628,17 @@ function signOut() {
   dataStarted = false;
   myDataReady = false;
   saveViewCache(null);
+  // Every song/chord/lyric fetch now requires sign-in on the backend (see
+  // apiList/loadSongContentAll/loadSongContentFor above), but that cached
+  // copy of it (see saveCatalogCache) was still sitting in this browser's
+  // localStorage AND in the in-memory songs/playlists/songContentById
+  // arrays after signing out — on a shared/public computer, a second person
+  // opening the app right after wouldn't see a fresh gated fetch fail; they'd
+  // see whatever chart text this cache still had lying around, straight from
+  // memory, no network call needed at all. Signing out is exactly the moment
+  // that content should stop being available, so clear both copies here.
+  songs = []; playlists = []; songContentById = {}; songContentLoaded = false;
+  try { localStorage.removeItem(CATALOG_CACHE_KEY); } catch (e) {}
   if (view.name === 'edit' || view.name === 'admin' || view.name === 'playlistDetail') goTo('list');
   renderUserArea(); render();
 }
@@ -689,24 +700,16 @@ async function loadMyData() {
 // free — see OFFLINE AVAILABILITY below for how isOffline itself gets set.
 function offlineError_() { return new Error("You're offline — this isn't available until you're back online."); }
 
+// Now just a thin wrapper over the shared, authenticated api() helper below
+// — 'list' moved behind requireUser_ on the backend (see doPost in Code.gs),
+// since a signed-out visitor being able to fetch the song list straight from
+// this URL, no sign-in needed, was exactly what let someone "still see
+// everything" while the app was telling them to sign in. api() already
+// handles the offline guard, the network-error → offline-banner fallback,
+// attaching idToken, and clearing an expired session on a sign-in error —
+// this used to duplicate all of that for no reason.
 async function apiList() {
-  if (isOffline) throw offlineError_();
-  let res;
-  try { res = await fetch(CONFIG.SCRIPT_URL + '?action=list'); }
-  catch (networkErr) {
-    // A single failed fetch can mean lots of things that aren't "no
-    // internet" (Google's own script service hiccuping, a backgrounded
-    // mobile tab waking up, a momentary blip) - latching the persistent
-    // offline banner on any one of those, with no automatic way back short
-    // of the browser's own 'online' event (which only fires for a REAL
-    // disconnect/reconnect), was showing "you're offline" at random and
-    // leaving it stuck that way. Only treat this as real offline when the
-    // browser itself agrees there's no connection.
-    if (!navigator.onLine) setOffline(true);
-    throw offlineError_();
-  }
-  const data = await res.json();
-  if (!data.success) throw new Error(data.error || 'Failed to load songs');
+  const data = await api('list', {});
   return data.songs;
 }
 
@@ -757,6 +760,12 @@ function expireSession_() {
   myDataReady = false;
   if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
   dataStarted = false;
+  // Same reasoning as signOut() above: an expired token should leave this
+  // browser in exactly the state a fresh, never-signed-in visitor would be
+  // in — nothing left over from the cached song/chord/lyric text (see
+  // saveCatalogCache) either in memory or in localStorage.
+  songs = []; playlists = []; songContentById = {}; songContentLoaded = false;
+  try { localStorage.removeItem(CATALOG_CACHE_KEY); } catch (e) {}
   renderUserArea();
   render();
 }
@@ -805,9 +814,10 @@ async function loadSongs(showSpinner) {
 async function loadSongContentAll() {
   if (isOffline) return;
   try {
-    const res = await fetch(CONFIG.SCRIPT_URL + '?action=listContent');
-    const data = await res.json();
-    if (!data.success) return;
+    // 'listContent' now requires sign-in too (see doPost in Code.gs) — go
+    // through the shared, authenticated api() helper instead of a raw public
+    // fetch, same reasoning as apiList() above.
+    const data = await api('listContent', {});
     data.content.forEach(c => { songContentById[c.id] = { chords_lyrics: c.chords_lyrics, lyrics_only: c.lyrics_only }; });
     songs.forEach(s => { const c = songContentById[s.id]; if (c) { s.chords_lyrics = c.chords_lyrics; s.lyrics_only = c.lyrics_only; } });
     songContentLoaded = true;
@@ -849,13 +859,14 @@ function startAfterSignIn() {
 async function loadSongContentFor(id) {
   if (isOffline) return;
   try {
-    const res = await fetch(CONFIG.SCRIPT_URL + '?action=songContent&id=' + encodeURIComponent(id));
-    const data = await res.json();
-    if (data.success) {
-      songContentById[id] = { chords_lyrics: data.chords_lyrics, lyrics_only: data.lyrics_only };
-      const song = songs.find(s => s.id === id);
-      if (song) { song.chords_lyrics = data.chords_lyrics; song.lyrics_only = data.lyrics_only; }
-    }
+    // 'songContent' now requires sign-in too, and takes the id in the POST
+    // body rather than a GET query string (see doPost in Code.gs — query
+    // strings are also just the wrong place for anything identity-related,
+    // since they end up in logs/history). Same api() helper as above.
+    const data = await api('songContent', { id });
+    songContentById[id] = { chords_lyrics: data.chords_lyrics, lyrics_only: data.lyrics_only };
+    const song = songs.find(s => s.id === id);
+    if (song) { song.chords_lyrics = data.chords_lyrics; song.lyrics_only = data.lyrics_only; }
   } catch (err) { console.error('Failed to load song text', err); }
   const song2 = songs.find(s => s.id === id);
   if (song2) delete song2._contentPending;
