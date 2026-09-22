@@ -734,7 +734,16 @@ async function handleCredentialResponse(response) {
   // is never left half-set-up.
   if (CONFIG.USE_SUPABASE) {
     try { await supaSignInWithGoogleIdToken_(response.credential); }
-    catch (err) { console.error('Supabase sign-in failed:', err); }
+    catch (err) {
+      // A failure here used to be silent (console.error only) - everything
+      // downstream (favorites, known chords, playlists, messages) would then
+      // fail one call at a time with "Please sign in with Google to do
+      // that.", with no indication *why* a signed-in-looking session wasn't
+      // actually signed in to Supabase. Surface it once, loudly, instead.
+      console.error('Supabase sign-in failed:', err);
+      const footer = document.getElementById('footerStatus');
+      if (footer) footer.textContent = "Couldn't establish a Supabase session (" + err.message + ") — most actions won't work until this is fixed.";
+    }
   }
   // Google calls this same callback again later, silently, whenever its own
   // FedCM prompt (see initGoogleSignIn) reissues a fresh idToken in the
@@ -918,6 +927,49 @@ function getSupa_() {
 function supaBool_(v) { return v ? 'true' : 'false'; }
 function throwIfErr_(error) { if (error) throw new Error(error.message || String(error)); }
 
+// Supabase's REST API (PostgREST) caps an unpaginated .select() at 1,000
+// rows by default (the project's "Max Rows" API setting) - several tables
+// here now exceed that (songs: 2,626 · profiles: 5,039 · messages: 1,545 ·
+// playlist_songs: 15,467), so a plain .select() silently came back with
+// only the first 1,000 rows and nothing else - no error, just quietly
+// incomplete data. This pages through with .range() until a page comes
+// back short of a full page, so every caller below gets everything, the
+// same as a single .select() would if there were no cap.
+async function supaSelectAll_(buildQuery, pageSize) {
+  pageSize = pageSize || 1000;
+  let all = [];
+  let from = 0;
+  for (;;) {
+    const { data, error } = await buildQuery(from, from + pageSize - 1);
+    if (error) return { data: null, error };
+    all = all.concat(data || []);
+    if (!data || data.length < pageSize) break;
+    from += pageSize;
+  }
+  return { data: all, error: null };
+}
+
+// ---- short-lived cache for the two heaviest reads --------------------
+// The old Apps Script backend cached the full song list / playlist set
+// server-side (cacheGetChunked_/CACHE_TTL_SECONDS in Code.gs), so repeated
+// 'list'/'getPlaylists' calls (after nearly every write, via
+// refreshAfterWrite(), and on every AUTO_REFRESH_SECONDS tick) were nearly
+// free. Supabase has no equivalent here, so without this those same calls
+// were re-scanning the entire songs/playlists/playlist_songs tables from
+// scratch every time - the likely main cause of "everything takes forever"
+// - a few seconds of staleness on these two reads is a far better trade.
+let _supaListCache = null;      // { at, promise }
+let _supaPlaylistsCache = null; // { at, promise }
+const SUPA_CACHE_MS = 15000;
+function supaCached_(getCache, setCache, loader) {
+  const cached = getCache();
+  const now = Date.now();
+  if (cached && (now - cached.at) < SUPA_CACHE_MS) return cached.promise;
+  const promise = loader().catch(err => { setCache(null); throw err; });
+  setCache({ at: now, promise });
+  return promise;
+}
+
 // ---- identity -------------------------------------------------------
 let supaProfileCache = null; // this browser session's own profile row, or null if signed out
 
@@ -979,7 +1031,7 @@ async function supaHydratePlaylists_(rows) {
   const ids = rows.map(r => r.id);
   const ownerIds = Array.from(new Set(rows.map(r => r.owner_id)));
   const [songsRes, sharesRes, ownersRes] = await Promise.all([
-    getSupa_().from('playlist_songs').select('playlist_id,song_id,position').in('playlist_id', ids).order('position'),
+    supaSelectAll_((from, to) => getSupa_().from('playlist_songs').select('playlist_id,song_id,position').in('playlist_id', ids).order('position').range(from, to)),
     getSupa_().from('playlist_shares').select('playlist_id,email').in('playlist_id', ids),
     getSupa_().from('profiles').select('id,email,name').in('id', ownerIds),
   ]);
@@ -1034,9 +1086,13 @@ async function supaApi(action, fields) {
   // ================= reads =================
   if (action === 'list') {
     await supaRequireUser_();
-    const { data, error } = await getSupa_().from('songs')
-      .select('id,title,title_hebrew,artist,categories,capo,youtube_url,date_added,updated_at,chords_lyrics');
-    throwIfErr_(error);
+    const data = await supaCached_(() => _supaListCache, c => _supaListCache = c, async () => {
+      const { data, error } = await supaSelectAll_((from, to) => getSupa_().from('songs')
+        .select('id,title,title_hebrew,artist,categories,capo,youtube_url,date_added,updated_at,chords_lyrics')
+        .range(from, to));
+      throwIfErr_(error);
+      return data;
+    });
     return { success: true, songs: data.map(s => ({
       id: s.id, title: s.title, title_hebrew: s.title_hebrew || '', artist: s.artist || '',
       categories: s.categories || [], capo: s.capo || 0, youtube_url: s.youtube_url || '',
@@ -1047,7 +1103,7 @@ async function supaApi(action, fields) {
 
   if (action === 'listContent') {
     await supaRequireUser_();
-    const { data, error } = await getSupa_().from('songs').select('id,chords_lyrics,lyrics_only');
+    const { data, error } = await supaSelectAll_((from, to) => getSupa_().from('songs').select('id,chords_lyrics,lyrics_only').range(from, to));
     throwIfErr_(error);
     return { success: true, content: data.map(s => ({ id: s.id, chords_lyrics: s.chords_lyrics || '', lyrics_only: s.lyrics_only || '' })) };
   }
@@ -1066,9 +1122,12 @@ async function supaApi(action, fields) {
     // already restricts which rows come back (public, or yours, or shared
     // with you, or all of them if you're an admin), including for a signed-
     // out caller (who then only ever sees the public ones).
-    const { data, error } = await getSupa_().from('playlists').select('*');
-    throwIfErr_(error);
-    return { success: true, playlists: await supaHydratePlaylists_(data) };
+    const playlists = await supaCached_(() => _supaPlaylistsCache, c => _supaPlaylistsCache = c, async () => {
+      const { data, error } = await getSupa_().from('playlists').select('*');
+      throwIfErr_(error);
+      return await supaHydratePlaylists_(data);
+    });
+    return { success: true, playlists };
   }
 
   if (action === 'getMyData') {
@@ -1088,9 +1147,12 @@ async function supaApi(action, fields) {
 
   if (action === 'getRequests') {
     const me = await supaRequireUser_();
-    let q = getSupa_().from('requests').select('*');
-    if (!(me.is_admin && fields.scope !== 'mine')) q = q.eq('user_id', me.id);
-    const { data, error } = await q;
+    const scoped = !(me.is_admin && fields.scope !== 'mine');
+    const { data, error } = await supaSelectAll_((from, to) => {
+      let q = getSupa_().from('requests').select('*').range(from, to);
+      if (scoped) q = q.eq('user_id', me.id);
+      return q;
+    });
     throwIfErr_(error);
     const emailMap = await supaProfileMapByIds_(data.map(r => r.user_id));
     return { success: true, requests: data.map(r => supaRequestToOld_(r, emailMap)) };
@@ -1098,9 +1160,12 @@ async function supaApi(action, fields) {
 
   if (action === 'getMessages') {
     const me = await supaRequireUser_();
-    let q = getSupa_().from('messages').select('*');
-    if (!(me.is_admin && fields.scope !== 'mine')) q = q.eq('user_id', me.id);
-    const { data, error } = await q;
+    const scoped = !(me.is_admin && fields.scope !== 'mine');
+    const { data, error } = await supaSelectAll_((from, to) => {
+      let q = getSupa_().from('messages').select('*').range(from, to);
+      if (scoped) q = q.eq('user_id', me.id);
+      return q;
+    });
     throwIfErr_(error);
     const emailMap = await supaProfileMapByIds_(data.map(m => m.user_id));
     return { success: true, messages: data.map(m => supaMessageToOld_(m, emailMap)) };
@@ -1117,8 +1182,8 @@ async function supaApi(action, fields) {
   if (action === 'getUsers') {
     await supaRequireAdmin_();
     const [rosterRes, msgRes] = await Promise.all([
-      getSupa_().from('admin_user_roster').select('*'),
-      getSupa_().from('messages').select('*'),
+      supaSelectAll_((from, to) => getSupa_().from('admin_user_roster').select('*').range(from, to)),
+      supaSelectAll_((from, to) => getSupa_().from('messages').select('*').range(from, to)),
     ]);
     throwIfErr_(rosterRes.error); throwIfErr_(msgRes.error);
     const users = (rosterRes.data || []).map(u => ({
@@ -1174,12 +1239,14 @@ async function supaApi(action, fields) {
       const { error } = await getSupa_().from('songs').update(row).eq('id', s.id);
       throwIfErr_(error);
     }
+    _supaListCache = null; // catalog just changed - next 'list' call re-fetches instead of serving stale cache
     return { success: true };
   }
   if (action === 'deleteSong') {
     await supaRequireAdmin_();
     const { error } = await getSupa_().from('songs').delete().eq('id', fields.id);
     throwIfErr_(error);
+    _supaListCache = null;
     return { success: true };
   }
 
@@ -1194,6 +1261,7 @@ async function supaApi(action, fields) {
     await supaSetPlaylistSongs_(data.id, fields.song_ids || []);
     await supaSetPlaylistShares_(data.id, fields.shared_with || []);
     const [hydrated] = await supaHydratePlaylists_([data]);
+    _supaPlaylistsCache = null;
     return { success: true, playlist: hydrated };
   }
   if (action === 'updatePlaylist') {
@@ -1213,6 +1281,7 @@ async function supaApi(action, fields) {
     const { data: fresh, error: freshErr } = await getSupa_().from('playlists').select('*').eq('id', fields.id).single();
     throwIfErr_(freshErr);
     const [hydrated] = await supaHydratePlaylists_([fresh]);
+    _supaPlaylistsCache = null;
     return { success: true, playlist: hydrated };
   }
   if (action === 'deletePlaylist') {
@@ -1223,6 +1292,7 @@ async function supaApi(action, fields) {
     if (existing.owner_id !== deleter.id && !deleter.is_admin) return { success: false, error: 'Not your playlist' };
     const { error } = await getSupa_().from('playlists').delete().eq('id', fields.id);
     throwIfErr_(error);
+    _supaPlaylistsCache = null;
     return { success: true };
   }
 
@@ -3648,9 +3718,11 @@ function renderContactBody() {
       </table></div>
       ${pagerHtml(myRequests.length, contactRequestsPage, 'changeContactRequestsPage', 10)}`;
   // The chat card is a clickable preview that expands into the full thread —
-  // under View As it's always shown expanded (the admin is inspecting this
-  // user's conversation, not chatting themselves), see isOpen below. Skipped
-  // entirely when an admin is looking at their own Contact tab (not View
+  // starts open on entering View As (enterViewAs sets contactChatOpen=true,
+  // since the admin is there to inspect this user's conversation), but can
+  // still be collapsed/reopened from there like any other thread, see
+  // isOpen below. Skipped entirely when an admin is looking at their own
+  // Contact tab (not View
   // As) — "Message Admin" would just mean messaging themselves, which isn't
   // a real conversation; the Admin tab's Messages sub-tab is where they
   // handle everyone else's threads.
@@ -3659,7 +3731,7 @@ function renderContactBody() {
     const sortedMsgs = myMessages.slice().sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
     const lastMsg = sortedMsgs[0];
     const preview = lastMsg ? (escapeHtml(lastMsg.text).slice(0, 60) + (lastMsg.text.length > 60 ? '…' : '')) : 'No messages yet — tap to say hi!';
-    const isOpen = contactChatOpen || !!viewAsUser;
+    const isOpen = contactChatOpen;
     html += `<div class="chat-card" onclick="toggleContactChat()">
         <span class="chat-card-icon">${SVG_ICONS.message}</span>
         <div class="chat-card-text"><div class="chat-card-title">${chatTitle}</div><div class="chat-card-preview">${preview}</div></div>
@@ -4016,11 +4088,12 @@ function enterViewAs(email, name) {
     viewAsUser = { email: data.email, name: name || data.email };
     viewAsData = { favorites: data.favorites || [], knownChords: data.knownChords || [], playlists: data.playlists || [], requests: data.requests || [], messages: data.messages || [] };
     songTab = 'all';
+    contactChatOpen = true; // starts open on entering View As (see isOpen in renderContactBody) - but, unlike before, can now be collapsed
     goTo('list');
   }).catch(err => alert(err.message));
 }
 function exitViewAs() {
-  viewAsUser = null; viewAsData = null;
+  viewAsUser = null; viewAsData = null; contactChatOpen = false;
   goTo('admin');
 }
 
