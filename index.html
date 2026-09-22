@@ -233,6 +233,32 @@
   .modal-card{background:var(--card);border-radius:12px;padding:20px;max-width:420px;width:100%;box-shadow:0 10px 30px rgba(0,0,0,0.25);}
   .modal-card h2{margin-top:0;}
   .modal-actions{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:16px;flex-wrap:wrap;}
+  /* Print preview: a full-screen overlay (not the small .modal-card, which
+     is too narrow for a page-shaped preview) showing exactly what "Print"
+     will produce, with its own font/columns/capo/transpose controls above
+     it. The @media print block below hides everything else on the page and
+     the toolbar itself (.no-print), so printing this overlay prints only
+     the title/artist/capo header + chart - never the app chrome around it. */
+  .print-preview-overlay{position:fixed;inset:0;background:#54605f;z-index:110;overflow-y:auto;}
+  .print-preview-toolbar{position:sticky;top:0;background:var(--card);border-bottom:1px solid var(--border);padding:10px 14px;display:flex;gap:14px;flex-wrap:wrap;align-items:center;z-index:1;}
+  .ppt-row{display:flex;align-items:center;gap:6px;}
+  .ppt-label{font-size:12.5px;color:var(--muted);font-weight:600;}
+  .ppt-val{width:26px;text-align:center;font-size:13px;color:#444;}
+  .print-page-wrap{display:flex;justify-content:center;padding:22px 14px 60px;}
+  .print-page{background:#fff;width:100%;max-width:800px;padding:28px 32px;box-shadow:0 6px 24px rgba(0,0,0,0.3);border-radius:4px;}
+  .print-header{border-bottom:2px solid #222;padding-bottom:10px;margin-bottom:14px;}
+  .print-title{font-size:22px;font-weight:800;color:#111;}
+  .print-title-hebrew{font-size:17px;color:#444;font-weight:600;}
+  .print-meta{font-size:14px;color:#444;margin-top:3px;}
+  .print-columns.cols-2{column-count:2;column-gap:28px;column-rule:1px solid #ddd;}
+  .print-line-group{break-inside:avoid-column;}
+  @media print {
+    body > *:not(.print-preview-overlay){display:none !important;}
+    .print-preview-overlay{position:static !important;background:none !important;overflow:visible !important;}
+    .no-print{display:none !important;}
+    .print-page-wrap{padding:0 !important;display:block !important;}
+    .print-page{box-shadow:none !important;border:none !important;max-width:none !important;width:auto !important;padding:0 !important;border-radius:0 !important;}
+  }
   /* Mobile-only chrome: a hamburger (opens sign-in info in a drawer) and a
      fixed bottom tab bar, replacing the desktop top nav + inline user box on
      small screens. Hidden here, switched on inside the mobile media query
@@ -415,6 +441,23 @@ const SVG_ICONS = {
   // Play Mode's floating strip: a grip/handle icon marking the one spot on
   // the pill that actually starts a drag.
   dragHandle: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>',
+  // Available Offline toggle (Favorites list, playlist detail) — download
+  // tray icon, replacing the old 📥 emoji + text button.
+  download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+  // Same download-tray glyph, filled/checked, for "already saved offline".
+  downloadDone: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 11 14 7 10.5"/><line x1="11" y1="14" x2="11" y2="3"/></svg>',
+  // "Remove from playlist" row action — replacing the text "Remove" button.
+  trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>',
+  // Message-Admin tile / Error-Reports & Song-Requests status toggle.
+  message: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+  // Open/unresolved vs. resolved status glyphs (Error Reports, Song
+  // Requests admin grids) — an empty ring for open, a filled check for
+  // resolved, replacing the "Open"/"Resolved" text labels.
+  statusOpen: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/></svg>',
+  statusResolved: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="8 12.5 11 15.5 16 9.5"/></svg>',
+  // Archive action glyph — a box with a downward arrow into it.
+  archive: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><line x1="10" y1="13" x2="14" y2="13"/></svg>',
+  unarchive: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><polyline points="9 15 12 12 15 15"/><line x1="12" y1="12" x2="12" y2="17"/></svg>',
 };
 
 /* ============================================================
@@ -1127,6 +1170,79 @@ function closeModal() {
   const el = document.getElementById('modalBackdrop');
   if (el) el.remove();
   document.removeEventListener('keydown', modalEscHandler_);
+  // A pending customConfirmAsync/customPromptAsync (see below) being
+  // dismissed via Escape or a backdrop click - rather than one of its own
+  // Cancel/Confirm buttons, which resolve it themselves through
+  // resolveDialog_ before ever reaching here - needs to resolve to a
+  // "cancelled" value too, or the awaiting call site would hang forever.
+  if (window.__dialogResolve) {
+    const resolve_ = window.__dialogResolve;
+    window.__dialogResolve = null;
+    resolve_(false);
+  }
+}
+
+/* ------------------------------------------------------------------
+   Custom alert/confirm/prompt replacements for the browser's native
+   ones - those render as "jewishguitarchordsapp.github.io says: ..."
+   with a browser-owned OK/Cancel row that can't be restyled, which read
+   as a broken/unofficial popup rather than part of the app. These reuse
+   the same modal-card look as every other in-app form instead.
+   customAlert() is a drop-in, fire-and-forget replacement (window.alert
+   is overridden to call it below, so every existing alert(...) call site
+   in this file gets the new styling for free). customConfirmAsync/
+   customPromptAsync can't be drop-in replacements for window.confirm/
+   window.prompt, because a custom dialog can't pause script execution
+   and hand back a value the way the real synchronous ones do - so each
+   call site that used to do `if (!confirm(...)) return;` is instead
+   awaited inside an async function (see deleteSongConfirm etc. below). */
+function customAlert(message, title) {
+  openModal(`
+    ${title ? `<h2>${escapeHtml(title)}</h2>` : ''}
+    <p style="white-space:pre-wrap;">${escapeHtml(String(message))}</p>
+    <div class="modal-actions"><button class="btn" onclick="closeModal()">OK</button></div>
+  `);
+}
+window.alert = function (message) { customAlert(message); };
+// Settles a pending confirm/prompt dialog with its real answer. Clears
+// window.__dialogResolve BEFORE calling closeModal() - closeModal() has
+// its own fallback that resolves a still-pending dialog to `false` (for
+// Escape/backdrop dismissal, see above), and if that ran first here it
+// would win the race and silently turn every real "Confirm"/"Save" click
+// into a cancel.
+function resolveDialog_(val) {
+  const resolve_ = window.__dialogResolve;
+  window.__dialogResolve = null;
+  closeModal();
+  if (resolve_) resolve_(val);
+}
+function customConfirmAsync(message, opts) {
+  return new Promise(resolve => {
+    openModal(`
+      <h2>${escapeHtml((opts && opts.title) || 'Are you sure?')}</h2>
+      <p style="white-space:pre-wrap;">${escapeHtml(message)}</p>
+      <div class="modal-actions">
+        <button class="btn secondary" onclick="resolveDialog_(false)">Cancel</button>
+        <button class="btn${opts && opts.danger ? ' danger' : ''}" onclick="resolveDialog_(true)">${escapeHtml((opts && opts.confirmLabel) || 'OK')}</button>
+      </div>
+    `);
+    window.__dialogResolve = resolve;
+  });
+}
+function customPromptAsync(label, defaultValue, opts) {
+  return new Promise(resolve => {
+    openModal(`
+      ${opts && opts.title ? `<h2>${escapeHtml(opts.title)}</h2>` : ''}
+      ${label ? `<label>${escapeHtml(label)}</label>` : ''}
+      <input type="text" id="customPromptInput" value="${escapeHtml(defaultValue || '')}" placeholder="${escapeHtml((opts && opts.placeholder) || '')}" onkeydown="if(event.key==='Enter'){event.preventDefault();resolveDialog_(document.getElementById('customPromptInput').value);}">
+      <div class="modal-actions">
+        <button class="btn secondary" onclick="resolveDialog_(null)">Cancel</button>
+        <button class="btn" onclick="resolveDialog_(document.getElementById('customPromptInput').value)">${escapeHtml((opts && opts.submitLabel) || 'Save')}</button>
+      </div>
+    `);
+    window.__dialogResolve = resolve;
+    setTimeout(() => { const el = document.getElementById('customPromptInput'); if (el) { el.focus(); el.select(); } }, 0);
+  });
 }
 
 // Songs imported from the old app store their chart as HTML paragraph pairs
@@ -1231,6 +1347,135 @@ function chordsUsedIn(chordsLyrics, transposeSemitones) {
   const found = new Set(); const re = /\[([^\]]+)\]/g; let m;
   while ((m = re.exec(chordsLyrics || ''))) found.add(transposeChord(m[1], transposeSemitones));
   return Array.from(found);
+}
+
+/* ============================================================
+   PRINT PREVIEW
+   ============================================================
+   window.print() used to fire directly on the live detail page, so it
+   printed the whole app chrome (nav, tiles, advanced panel, YouTube embed,
+   everything) along with the chart. This instead builds a dedicated
+   full-screen preview showing only a title/artist/capo header + the chart,
+   with its own font/columns/capo/transpose controls - completely separate
+   from the live playerState, so previewing for print never disturbs
+   whatever the person was doing on the detail page underneath it. Actual
+   printing still uses window.print(); the @media print CSS above hides
+   everything on the page except this overlay's printable content. */
+let printPreviewState = null; // { songId, fontSize, bold, columns, rtl, capo, transpose }
+
+function openPrintPreview(songId) {
+  const song = songs.find(s => s.id === songId);
+  if (!song) return;
+  if (song.chords_lyrics === undefined) { alert('Still loading this song’s chart — try Print again in a moment.'); return; }
+  const sameSong = playerState.songId === songId;
+  printPreviewState = {
+    songId,
+    fontSize: sameSong ? (playerState.fontSize||0) : 0,
+    bold: sameSong ? !!playerState.bold : false,
+    columns: 1,
+    // Default the RTL-columns toggle on for a song whose chart or Hebrew
+    // title actually contains Hebrew/Yiddish text, rather than making
+    // every print start from the same LTR default regardless of language.
+    rtl: containsHebrew(song.chords_lyrics) || containsHebrew(song.title_hebrew),
+    capo: sameSong ? playerState.capo : (song.capo||0),
+    transpose: sameSong ? (playerState.transpose||0) : 0
+  };
+  renderPrintPreview();
+}
+function updatePrintPreview(patch) {
+  if (!printPreviewState) return;
+  Object.assign(printPreviewState, patch);
+  renderPrintPreview();
+}
+function closePrintPreview() {
+  const el = document.getElementById('printPreviewOverlay');
+  if (el) el.remove();
+  document.removeEventListener('keydown', printPreviewEscHandler_);
+  printPreviewState = null;
+}
+function printPreviewEscHandler_(e) { if (e.key === 'Escape') closePrintPreview(); }
+// Groups the chart's line-divs into break-inside:avoid-column wrappers so a
+// 2-column layout never splits a chord row from the lyric row right below
+// it (the imported-HTML chart format renders those as two separate
+// sibling divs - see renderChordHtmlBody above). The bracket-notation
+// format already keeps chord+lyric in one div per line, so this just wraps
+// each line singly there, which is harmless.
+function wrapChartForPrint(chartHtml) {
+  const container = document.createElement('div');
+  container.innerHTML = chartHtml;
+  const children = Array.from(container.children);
+  let out = '';
+  for (let i = 0; i < children.length; i++) {
+    const el = children[i];
+    const next = children[i + 1];
+    if (el.classList.contains('html-chord-row') && next && next.classList.contains('html-lyric-row')) {
+      out += `<div class="print-line-group">${el.outerHTML}${next.outerHTML}</div>`;
+      i++;
+    } else {
+      out += `<div class="print-line-group">${el.outerHTML}</div>`;
+    }
+  }
+  return out;
+}
+function renderPrintPreview() {
+  const st = printPreviewState;
+  if (!st) return;
+  const song = songs.find(s => s.id === st.songId);
+  if (!song) { closePrintPreview(); return; }
+  const transposeSemitones = (song.capo||0) - st.capo + (st.transpose||0);
+  const chartHtml = wrapChartForPrint(renderChart(song.chords_lyrics, transposeSemitones));
+  const existing = document.getElementById('printPreviewOverlay');
+  if (existing) existing.remove();
+  document.removeEventListener('keydown', printPreviewEscHandler_);
+  document.addEventListener('keydown', printPreviewEscHandler_);
+  const el = document.createElement('div');
+  el.className = 'print-preview-overlay';
+  el.id = 'printPreviewOverlay';
+  el.innerHTML = `
+    <div class="print-preview-toolbar no-print">
+      <div class="ppt-row">
+        <span class="ppt-label">Font</span>
+        <button class="stepper-btn" onclick="updatePrintPreview({fontSize:Math.max(-4,printPreviewState.fontSize-1)})">A&#8595;</button>
+        <span class="ppt-val">${17 + st.fontSize}</span>
+        <button class="stepper-btn" onclick="updatePrintPreview({fontSize:Math.min(8,printPreviewState.fontSize+1)})">A&#8593;</button>
+        <button class="stepper-btn${st.bold?' active':''}" onclick="updatePrintPreview({bold:!printPreviewState.bold})" title="Bold" style="font-weight:700;">B</button>
+      </div>
+      <div class="ppt-row">
+        <span class="ppt-label">Columns</span>
+        <button class="btn secondary${st.columns===1?' active':''}" onclick="updatePrintPreview({columns:1})">1</button>
+        <button class="btn secondary${st.columns===2?' active':''}" onclick="updatePrintPreview({columns:2})">2</button>
+        <label style="display:inline-flex;align-items:center;gap:5px;font-size:12.5px;margin-left:6px;">
+          <input type="checkbox" ${st.rtl?'checked':''} onchange="updatePrintPreview({rtl:this.checked})"> Hebrew: right-to-left columns
+        </label>
+      </div>
+      <div class="ppt-row">
+        <span class="ppt-label">Capo</span>
+        <button class="stepper-btn" onclick="updatePrintPreview({capo:Math.max(0,printPreviewState.capo-1)})">−</button>
+        <span class="ppt-val">${st.capo}</span>
+        <button class="stepper-btn" onclick="updatePrintPreview({capo:Math.min(11,printPreviewState.capo+1)})">+</button>
+        <span class="ppt-label" style="margin-left:10px;">Transpose</span>
+        <button class="stepper-btn" onclick="updatePrintPreview({transpose:printPreviewState.transpose-1})">−</button>
+        <span class="ppt-val">${st.transpose>0?'+':''}${st.transpose}</span>
+        <button class="stepper-btn" onclick="updatePrintPreview({transpose:printPreviewState.transpose+1})">+</button>
+      </div>
+      <div class="ppt-row" style="margin-left:auto;">
+        <button class="btn secondary" onclick="closePrintPreview()">Cancel</button>
+        <button class="btn" onclick="window.print()">Print</button>
+      </div>
+    </div>
+    <div class="print-page-wrap">
+      <div class="print-page">
+        <div class="print-header">
+          <div class="print-title">${escapeHtml(song.title)}${song.title_hebrew ? ` <span class="print-title-hebrew" dir="rtl">${escapeHtml(song.title_hebrew)}</span>` : ''}</div>
+          <div class="print-meta">${escapeHtml(song.artist||'')}${st.capo ? ` &middot; Capo ${st.capo}` : ''}</div>
+        </div>
+        <div class="print-columns${st.columns===2?' cols-2':''}" dir="${st.columns===2 && st.rtl ? 'rtl' : 'ltr'}" style="--chart-step:${st.fontSize}px;--chart-fw:${st.bold?700:400};">
+          ${chartHtml}
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(el);
 }
 
 // ------------------------------------------------------------------
@@ -1639,7 +1884,7 @@ function renderList() {
     </div>`;
   if (activeFilterChip) html += `<div style="margin-bottom:10px"><span class="chip active" onclick="filters.artist='';filters.language='';filters.tag='';songListPage=0;render()">${escapeHtml(activeFilterChip)} ✕</span></div>`;
   if (songTab === 'favorites' && currentUser && !isOffline) {
-    html += `<div style="margin-bottom:10px"><button id="favOfflineBtn" class="btn secondary offline-toggle-btn" onclick="toggleFavoritesOffline()">📥 Available Offline</button></div>`;
+    html += `<div style="margin-bottom:10px"><button id="favOfflineBtn" class="btn secondary icon-btn-round offline-toggle-btn" onclick="toggleFavoritesOffline()" title="Available Offline" aria-label="Available Offline" style="border-radius:50%;width:38px;height:38px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex:none;">${SVG_ICONS.download}</button></div>`;
   }
   html += `<div id="songListBody"></div>`;
   document.getElementById('app').innerHTML = html;
@@ -1655,11 +1900,13 @@ async function toggleFavoritesOffline() {
   const btn = document.getElementById('favOfflineBtn');
   const already = await isOfflineAvailable('favorites');
   if (already) {
+    if (!(await customConfirmAsync('Remove your favorites from offline storage on this device?', { title: 'Remove offline copy', confirmLabel: 'Remove', danger: true }))) return;
     await removeOfflineAvailable('favorites');
   } else {
     const ids = effectiveFavorites().slice();
     if (!ids.length) { alert('Favorite a few songs first.'); return; }
-    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+    if (!(await customConfirmAsync('Make favorites available offline on this device?', { title: 'Available Offline', confirmLabel: 'Make Available' }))) return;
+    if (btn) btn.disabled = true;
     try {
       await setOfflineAvailable('favorites', 'Favorites', ids);
     } catch (e) {
@@ -1673,7 +1920,9 @@ async function refreshFavOfflineButton() {
   const btn = document.getElementById('favOfflineBtn');
   if (!btn) return;
   const on = await isOfflineAvailable('favorites');
-  btn.textContent = on ? '✓ Saved Offline (tap to remove)' : '📥 Available Offline';
+  btn.innerHTML = on ? SVG_ICONS.downloadDone : SVG_ICONS.download;
+  btn.title = on ? 'Saved Offline (tap to remove)' : 'Available Offline';
+  btn.setAttribute('aria-label', btn.title);
   btn.classList.toggle('active', on);
 }
 function renderSongListBody() {
@@ -1728,10 +1977,23 @@ function shareApp() {
   const url = window.location.href;
   if (navigator.share) { navigator.share({ title: 'Jewish Guitar Chords App', url }).catch(()=>{}); return; }
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(url).then(() => alert('Link copied — paste it to share the app!')).catch(() => prompt('Copy this link to share the app:', url));
+    navigator.clipboard.writeText(url).then(() => alert('Link copied — paste it to share the app!')).catch(() => showCopyLinkDialog(url));
   } else {
-    prompt('Copy this link to share the app:', url);
+    showCopyLinkDialog(url);
   }
+}
+// Fallback for browsers without a working clipboard API: a read-only,
+// pre-selected field the person can copy manually - same idea as the old
+// prompt('Copy this link...', url), just without the native "site says"
+// dialog chrome.
+function showCopyLinkDialog(url) {
+  openModal(`
+    <h2>Share this app</h2>
+    <label>Copy this link:</label>
+    <input type="text" id="shareLinkInput" value="${escapeHtml(url)}" readonly onclick="this.select()">
+    <div class="modal-actions"><button class="btn" onclick="closeModal()">Done</button></div>
+  `);
+  setTimeout(() => { const el = document.getElementById('shareLinkInput'); if (el) el.select(); }, 0);
 }
 
 // Song ids with a toggleFavorite request currently in flight — guards
@@ -1874,6 +2136,11 @@ let showReportForm = false;
 // it isn't reset by the per-song capo/transpose bookkeeping above; null
 // means "use the default bottom-center position" (see .play-float-bar CSS).
 let floatBarPos = null;
+// Which of the current user's playlists are checked in the "Add to
+// Playlist" modal right now (see openAddToPlaylist) - lives outside the
+// modal's own re-renders (toggling a bubble, or creating a new playlist
+// inline) so the selection survives until Save/Cancel.
+let addToPlaylistSelection = new Set();
 
 function renderDetail() {
   const song = songs.find(s => s.id === view.id);
@@ -1905,7 +2172,7 @@ function renderDetail() {
     `<div class="detail-tile action" onclick="openAddToPlaylist('${song.id}')">${SVG_ICONS.playlists}<div class="tile-label">+ Playlist</div></div>`
   ];
   if (!viewAsUser) actionTiles.push(`<div class="detail-tile action" onclick="showReportForm=!showReportForm;renderDetail();">${SVG_ICONS.error}<div class="tile-label">Report</div></div>`);
-  actionTiles.push(`<div class="detail-tile action" onclick="window.print()">${SVG_ICONS.print}<div class="tile-label">Print</div></div>`);
+  actionTiles.push(`<div class="detail-tile action" onclick="openPrintPreview('${song.id}')">${SVG_ICONS.print}<div class="tile-label">Print</div></div>`);
 
   const chordChips = contentReady
     ? (chordsUsedIn(song.chords_lyrics, transpose).map(c=>`<span class="chip">${escapeHtml(formatChordSymbol(c))}</span>`).join(' ') || '<span class="muted">none tagged</span>')
@@ -2261,8 +2528,8 @@ function goToQueueSong(delta) {
   }, { passive: true });
 })();
 
-function deleteSongConfirm(id) {
-  if (!confirm('Delete this song? This cannot be undone.')) return;
+async function deleteSongConfirm(id) {
+  if (!(await customConfirmAsync('Delete this song? This cannot be undone.', { title: 'Delete song', confirmLabel: 'Delete', danger: true }))) return;
   api('deleteSong', { id }).then(() => loadSongs(false)).then(()=>goTo('list')).catch(err => alert('Could not delete: ' + err.message));
 }
 
@@ -2487,8 +2754,8 @@ function renderPlaylistCards(list) {
     <div class="muted">${(p.song_ids||[]).length} songs · ${p.visibility === 'public' ? 'Public' : p.visibility === 'shared' ? 'Shared' : 'Private'} · by ${escapeHtml(p.owner_name||p.owner_email)}</div>
   </div>`).join('');
 }
-function createPlaylistPrompt() {
-  const title = prompt('Playlist name?');
+async function createPlaylistPrompt() {
+  const title = await customPromptAsync('Playlist name', '', { title: 'New Playlist', submitLabel: 'Create' });
   if (!title) return;
   api('createPlaylist', Object.assign({ title, visibility: 'private', song_ids: [], shared_with: [] }, viewAsFields()))
     .then(() => refreshPlaylistsOnly()).then(() => goTo('playlists'))
@@ -2513,13 +2780,13 @@ function renderPlaylistDetail() {
   // owning/editing the playlist, so it's offered to anyone viewing it
   // (public/shared included), same as Favorites.
   if (!isOffline && list.length) {
-    html += `<div style="margin-bottom:10px"><button id="playlistOfflineBtn" class="btn secondary offline-toggle-btn" onclick="togglePlaylistOffline('${p.id}')">📥 Available Offline</button></div>`;
+    html += `<div style="margin-bottom:10px"><button id="playlistOfflineBtn" class="btn secondary icon-btn-round offline-toggle-btn" onclick="togglePlaylistOffline('${p.id}')" title="Available Offline" aria-label="Available Offline" style="border-radius:50%;width:38px;height:38px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex:none;">${SVG_ICONS.download}</button></div>`;
   }
   html += list.length ? `<div id="playlistSongList">` + list.map(s => `
     <div class="song-row" data-reorder-id="${s.id}">
       ${canEdit ? `<span class="drag-handle" title="Drag to reorder">${SVG_ICONS.dragHandle}</span>` : ''}
       <div style="cursor:pointer;flex:1" onclick="${detailGoTo(s.id, queueIds)}"><div class="title">${escapeHtml(s.title)}</div><div class="artist">${escapeHtml(s.artist||'')}</div></div>
-      ${canEdit ? `<button class="btn secondary" onclick="removeFromPlaylist('${p.id}','${s.id}')">Remove</button>` : ''}
+      ${canEdit ? `<button class="btn secondary icon-btn-round" onclick="removeFromPlaylist('${p.id}','${s.id}')" title="Remove from playlist" aria-label="Remove from playlist" style="border-radius:50%;width:34px;height:34px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex:none;">${SVG_ICONS.trash}</button>` : ''}
     </div>`).join('') + `</div>` : '<div class="empty">No songs in this playlist yet.</div>';
   document.getElementById('app').innerHTML = html;
   if (canEdit && list.length > 1) {
@@ -2536,15 +2803,18 @@ async function togglePlaylistOffline(playlistId) {
   const setId = offlineSetIdForPlaylist(playlistId);
   const btn = document.getElementById('playlistOfflineBtn');
   const already = await isOfflineAvailable(setId);
+  const p = playlists.find(pl => pl.id === playlistId) || (viewAsUser && (viewAsData.playlists||[]).find(pl => pl.id === playlistId));
+  const playlistName = (p && p.title) || 'this playlist';
   if (already) {
+    if (!(await customConfirmAsync(`Remove "${playlistName}" from offline storage on this device?`, { title: 'Remove offline copy', confirmLabel: 'Remove', danger: true }))) return;
     await removeOfflineAvailable(setId);
   } else {
-    const p = playlists.find(pl => pl.id === playlistId) || (viewAsUser && (viewAsData.playlists||[]).find(pl => pl.id === playlistId));
     const ids = p ? (p.song_ids || []).slice() : [];
     if (!ids.length) { alert('This playlist has no songs yet.'); return; }
-    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+    if (!(await customConfirmAsync(`Make "${playlistName}" available offline on this device?`, { title: 'Available Offline', confirmLabel: 'Make Available' }))) return;
+    if (btn) btn.disabled = true;
     try {
-      await setOfflineAvailable(setId, (p && p.title) || 'Playlist', ids);
+      await setOfflineAvailable(setId, playlistName, ids);
     } catch (e) {
       alert('Could not save offline: ' + e.message);
     }
@@ -2556,23 +2826,90 @@ async function refreshPlaylistOfflineButton(playlistId) {
   const btn = document.getElementById('playlistOfflineBtn');
   if (!btn) return;
   const on = await isOfflineAvailable(offlineSetIdForPlaylist(playlistId));
-  btn.textContent = on ? '✓ Saved Offline (tap to remove)' : '📥 Available Offline';
+  btn.innerHTML = on ? SVG_ICONS.downloadDone : SVG_ICONS.download;
+  btn.title = on ? 'Saved Offline (tap to remove)' : 'Available Offline';
+  btn.setAttribute('aria-label', btn.title);
   btn.classList.toggle('active', on);
 }
+// Full Playlist Settings form: name, visibility (private/shared/public),
+// and - only relevant/shown when shared - the list of emails it's shared
+// with, addable/removable one at a time. Replaces the old three
+// sequential native prompt() calls (name, then visibility typed as a raw
+// word, then a comma-separated email list) with one form, matching how
+// every other multi-field edit in this app works.
+let playlistSettingsState = null; // { id, title, visibility, sharedWith }
 function editPlaylistSettings(id) {
   const p = playlists.find(pl => pl.id === id) || (viewAsUser && (viewAsData.playlists||[]).find(pl => pl.id === id));
-  const title = prompt('Playlist name:', p.title); if (title === null) return;
-  const vis = prompt('Visibility — type private, shared, or public:', p.visibility) || p.visibility;
-  let sharedWith = p.shared_with || [];
-  if (vis === 'shared') {
-    const emails = prompt('Share with which email addresses? (comma separated)', sharedWith.join(', '));
-    sharedWith = (emails||'').split(',').map(e=>e.trim()).filter(Boolean);
-  }
-  api('updatePlaylist', Object.assign({ id, title, visibility: vis, shared_with: sharedWith }, viewAsFields()))
-    .then(() => refreshPlaylistsOnly()).then(() => render()).catch(err => alert(err.message));
+  if (!p) return;
+  playlistSettingsState = { id, title: p.title, visibility: p.visibility || 'private', sharedWith: (p.shared_with||[]).slice() };
+  renderPlaylistSettingsModal();
 }
-function deletePlaylistConfirm(id) {
-  if (!confirm('Delete this playlist?')) return;
+// The name field is a plain text input the person types into freely;
+// toggling visibility or adding/removing a shared email re-renders the
+// whole modal (simplest way to keep the chips/list in sync), which would
+// otherwise wipe out whatever they'd already typed in the name field - so
+// every other action reads the field's live value into state first.
+function syncPlaylistSettingsTitle_() {
+  const el = document.getElementById('playlistSettingsTitle');
+  if (el && playlistSettingsState) playlistSettingsState.title = el.value;
+}
+function setPlaylistSettingsVisibility(vis) {
+  syncPlaylistSettingsTitle_();
+  playlistSettingsState.visibility = vis;
+  renderPlaylistSettingsModal();
+}
+function addPlaylistSettingsEmail() {
+  syncPlaylistSettingsTitle_();
+  const input = document.getElementById('playlistSettingsEmailInput');
+  const email = (input && input.value || '').trim();
+  if (!email) return;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { alert('Enter a valid email address.'); return; }
+  if (!playlistSettingsState.sharedWith.includes(email)) playlistSettingsState.sharedWith.push(email);
+  renderPlaylistSettingsModal();
+}
+function removePlaylistSettingsEmail(email) {
+  syncPlaylistSettingsTitle_();
+  playlistSettingsState.sharedWith = playlistSettingsState.sharedWith.filter(e => e !== email);
+  renderPlaylistSettingsModal();
+}
+function renderPlaylistSettingsModal() {
+  const st = playlistSettingsState;
+  if (!st) return;
+  openModal(`
+    <h2>Playlist Settings</h2>
+    <label>Name</label>
+    <input type="text" id="playlistSettingsTitle" value="${escapeHtml(st.title)}" onkeydown="if(event.key==='Enter'){event.preventDefault();savePlaylistSettings();}">
+    <label style="margin-top:10px;display:block;">Visibility</label>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px;">
+      <span class="chip ${st.visibility==='private'?'toggle-on':''}" onclick="setPlaylistSettingsVisibility('private')">Private</span>
+      <span class="chip ${st.visibility==='shared'?'toggle-on':''}" onclick="setPlaylistSettingsVisibility('shared')">Shared</span>
+      <span class="chip ${st.visibility==='public'?'toggle-on':''}" onclick="setPlaylistSettingsVisibility('public')">Public</span>
+    </div>
+    ${st.visibility === 'shared' ? `
+      <label style="margin-top:6px;display:block;">Shared with</label>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;">
+        ${st.sharedWith.length ? st.sharedWith.map(e => `<span class="chip">${escapeHtml(e)} <span style="cursor:pointer;font-weight:700;margin-left:4px;" onclick="removePlaylistSettingsEmail('${e.replace(/'/g,"\\'")}')">&times;</span></span>`).join('') : `<span class="muted" style="font-size:13px;">No one yet.</span>`}
+      </div>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="playlistSettingsEmailInput" placeholder="Email address" onkeydown="if(event.key==='Enter'){event.preventDefault();addPlaylistSettingsEmail();}">
+        <button class="btn secondary" onclick="addPlaylistSettingsEmail()">Add</button>
+      </div>
+    ` : ''}
+    <div class="modal-actions"><button class="btn secondary" onclick="playlistSettingsState=null;closeModal()">Cancel</button><button class="btn" onclick="savePlaylistSettings()">Save</button></div>
+  `);
+}
+function savePlaylistSettings() {
+  syncPlaylistSettingsTitle_();
+  const st = playlistSettingsState;
+  if (!st) return;
+  const title = (st.title || '').trim();
+  if (!title) { alert('Enter a playlist name.'); return; }
+  api('updatePlaylist', Object.assign({ id: st.id, title, visibility: st.visibility, shared_with: st.visibility === 'shared' ? st.sharedWith : [] }, viewAsFields()))
+    .then(() => refreshPlaylistsOnly()).then(() => { playlistSettingsState = null; closeModal(); render(); })
+    .catch(err => alert(err.message));
+}
+async function deletePlaylistConfirm(id) {
+  if (!(await customConfirmAsync('Delete this playlist? This cannot be undone.', { title: 'Delete playlist', confirmLabel: 'Delete', danger: true }))) return;
   api('deletePlaylist', Object.assign({ id }, viewAsFields())).then(() => refreshPlaylistsOnly()).then(() => goTo('playlists')).catch(err => alert(err.message));
 }
 function removeFromPlaylist(playlistId, songId) {
@@ -2580,33 +2917,62 @@ function removeFromPlaylist(playlistId, songId) {
   const newIds = (p.song_ids||[]).filter(id => id !== songId);
   api('updatePlaylist', Object.assign({ id: playlistId, song_ids: newIds }, viewAsFields())).then(() => refreshPlaylistsOnly()).then(() => render()).catch(err => alert(err.message));
 }
+// Add to Playlist: playlist bubbles are multi-select toggles (pre-checked
+// for whichever playlists already contain this song, so toggling one off
+// is how you remove it too) instead of the old one-tap-and-close chips —
+// nothing is sent to the server until Save, so picking several playlists
+// is one round trip instead of one popup-and-reload per playlist.
 function openAddToPlaylist(songId) {
   if (!currentUser) { alert('Sign in with Google first to use playlists.'); return; }
   const mine = viewAsUser ? (viewAsData.playlists||[]) : playlists.filter(p => p.owner_email === currentUser.email);
+  addToPlaylistSelection = new Set(mine.filter(p => (p.song_ids||[]).includes(songId)).map(p => p.id));
+  renderAddToPlaylistModal(songId);
+}
+function renderAddToPlaylistModal(songId) {
+  const mine = viewAsUser ? (viewAsData.playlists||[]) : playlists.filter(p => p.owner_email === currentUser.email);
   openModal(`
     <h2>Add to Playlist</h2>
-    ${mine.length ? `<div class="grid-cats">${mine.map(p => `<span class="chip" onclick="addSongToPlaylist('${p.id}','${songId}')">${escapeHtml(p.title)}</span>`).join('')}</div>` : `<p class="muted">You have no playlists yet — create one below.</p>`}
+    ${mine.length ? `<div class="grid-cats">${mine.map(p => `<span class="chip ${addToPlaylistSelection.has(p.id)?'toggle-on':''}" onclick="toggleAddToPlaylistSelection('${p.id}','${songId}')">${escapeHtml(p.title)}</span>`).join('')}</div>` : `<p class="muted">You have no playlists yet — create one below.</p>`}
     <label>New playlist</label>
     <div style="display:flex;gap:8px;">
-      <input type="text" id="newPlaylistName" placeholder="Playlist name" onkeydown="if(event.key==='Enter'){createPlaylistAndAddSong('${songId}')}">
-      <button class="btn" onclick="createPlaylistAndAddSong('${songId}')">Create</button>
+      <input type="text" id="newPlaylistName" placeholder="Playlist name" onkeydown="if(event.key==='Enter'){event.preventDefault();createPlaylistForAdd('${songId}')}">
+      <button class="btn secondary" onclick="createPlaylistForAdd('${songId}')">Create</button>
     </div>
-    <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">Cancel</button></div>
+    <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveAddToPlaylist('${songId}')">Save</button></div>
   `);
 }
-function addSongToPlaylist(playlistId, songId) {
-  const p = playlists.find(pl => pl.id === playlistId) || (viewAsUser && (viewAsData.playlists||[]).find(pl => pl.id === playlistId));
-  if (!p) return;
-  const newIds = Array.from(new Set((p.song_ids||[]).concat([songId])));
-  api('updatePlaylist', Object.assign({ id: p.id, song_ids: newIds }, viewAsFields()))
-    .then(() => refreshPlaylistsOnly()).then(() => { closeModal(); alert('Added to "'+p.title+'".'); }).catch(err => alert(err.message));
+function toggleAddToPlaylistSelection(playlistId, songId) {
+  if (addToPlaylistSelection.has(playlistId)) addToPlaylistSelection.delete(playlistId); else addToPlaylistSelection.add(playlistId);
+  renderAddToPlaylistModal(songId);
 }
-function createPlaylistAndAddSong(songId) {
+function createPlaylistForAdd(songId) {
   const input = document.getElementById('newPlaylistName');
   const title = (input && input.value || '').trim();
   if (!title) { alert('Enter a playlist name.'); return; }
-  api('createPlaylist', Object.assign({ title, visibility:'private', song_ids:[songId], shared_with:[] }, viewAsFields()))
-    .then(() => refreshPlaylistsOnly()).then(() => { closeModal(); alert('Added to "'+title+'".'); }).catch(err => alert(err.message));
+  api('createPlaylist', Object.assign({ title, visibility:'private', song_ids:[], shared_with:[] }, viewAsFields()))
+    .then(r => refreshPlaylistsOnly().then(() => {
+      if (r && r.playlist && r.playlist.id) addToPlaylistSelection.add(r.playlist.id);
+      renderAddToPlaylistModal(songId);
+    }))
+    .catch(err => alert(err.message));
+}
+// Diffs the selected set against each of the user's playlists' current
+// song_ids and only sends an updatePlaylist for the ones that actually
+// changed (added or removed), all in parallel, then closes once every
+// request has settled.
+function saveAddToPlaylist(songId) {
+  const mine = viewAsUser ? (viewAsData.playlists||[]) : playlists.filter(p => p.owner_email === currentUser.email);
+  const ops = mine.map(p => {
+    const has = (p.song_ids||[]).includes(songId);
+    const shouldHave = addToPlaylistSelection.has(p.id);
+    if (has === shouldHave) return Promise.resolve();
+    const newIds = shouldHave ? Array.from(new Set((p.song_ids||[]).concat([songId]))) : (p.song_ids||[]).filter(id => id !== songId);
+    return api('updatePlaylist', Object.assign({ id: p.id, song_ids: newIds }, viewAsFields()));
+  });
+  Promise.all(ops)
+    .then(() => refreshPlaylistsOnly())
+    .then(() => { closeModal(); addToPlaylistSelection = new Set(); })
+    .catch(err => alert(err.message));
 }
 
 /* ============================================================
