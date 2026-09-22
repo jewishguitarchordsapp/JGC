@@ -621,9 +621,22 @@ let songContentLoaded = false; // true once the full-corpus background text fetc
 const CATALOG_CACHE_KEY = 'jgc_catalog_cache_v1';
 function saveCatalogCache() {
   try {
-    const payload = JSON.stringify({ songs, playlists, songContentById });
-    // localStorage is good for a few MB per origin; the full chord+lyric
-    // text for a large catalog could approach that, so skip caching rather
+    // Deliberately excludes chords_lyrics/lyrics_only and songContentById.
+    // Once a lyrics search has run once this session (ensureSongContentLoaded),
+    // loadSongs() re-attaches the full chord+lyric text for EVERY song onto
+    // `songs` on every subsequent refresh (see its own comment) - measured,
+    // that's an ~11-13MB string for this catalog. This used to
+    // JSON.stringify that whole thing, synchronously, on the main thread,
+    // every single time a refresh landed (every write, every periodic
+    // auto-refresh) - a real, repeated, multi-MB stringify that's a
+    // plausible contributor to the browser/machine slowdowns and crashes
+    // reported testing this. The instant-repaint-on-reload this cache
+    // exists for only ever needed the lightweight fields anyway - full-text
+    // search still works fine, it just does one fresh listContent fetch the
+    // first time it's used per page load, same as a first-time visitor.
+    const slimSongs = songs.map(({ chords_lyrics, lyrics_only, ...rest }) => rest);
+    const payload = JSON.stringify({ songs: slimSongs, playlists });
+    // localStorage is good for a few MB per origin - skip caching rather
     // than risk a quota error wiping out a previously-good cache.
     if (payload.length < 4 * 1024 * 1024) localStorage.setItem(CATALOG_CACHE_KEY, payload);
   } catch (e) {}
@@ -1115,9 +1128,19 @@ async function supaApi(action, fields) {
   // ================= reads =================
   if (action === 'list') {
     await supaRequireUser_();
+    // Measured: chords_lyrics (the full chord chart text) averages ~4.2KB
+    // per song - across all 2,626 songs that's an ~11MB chunk of an ~15.5MB
+    // total payload, on EVERY 'list' call, just to compute the small
+    // chords_used tag array (a handful of chord names) via chordsUsedIn().
+    // songs.chords_used is a precomputed column (see createSong/updateSong
+    // below, which keep it in sync on every save) holding exactly that
+    // small array, so 'list' can select it directly and skip chords_lyrics
+    // entirely - full chart text is still fetched separately and lazily,
+    // only for the one song actually being viewed (songContent) or once
+    // lyrics search is actually used (listContent).
     const data = await supaCached_(() => _supaListCache, c => _supaListCache = c, async () => {
       const { data, error } = await supaSelectAll_((from, to) => getSupa_().from('songs')
-        .select('id,title,title_hebrew,artist,categories,capo,youtube_url,date_added,updated_at,chords_lyrics')
+        .select('id,title,title_hebrew,artist,categories,capo,youtube_url,date_added,updated_at,chords_used')
         .order('id').range(from, to));
       throwIfErr_(error);
       return data;
@@ -1126,7 +1149,7 @@ async function supaApi(action, fields) {
       id: s.id, title: s.title, title_hebrew: s.title_hebrew || '', artist: s.artist || '',
       categories: s.categories || [], capo: s.capo || 0, youtube_url: s.youtube_url || '',
       date_added: s.date_added, updated_at: s.updated_at,
-      chords_used: chordsUsedIn(s.chords_lyrics || '', 0), // reuses the client's own existing helper — same logic Code.gs mirrored
+      chords_used: s.chords_used || [],
     })) };
   }
 
@@ -1259,6 +1282,10 @@ async function supaApi(action, fields) {
       title: s.title || '', title_hebrew: s.title_hebrew || '', artist: s.artist || '',
       categories: Array.isArray(s.categories) ? s.categories : [], capo: Number(s.capo) || 0,
       youtube_url: s.youtube_url || '', chords_lyrics: s.chords_lyrics || '', lyrics_only: s.lyrics_only || '',
+      // Kept in sync with chords_lyrics on every save so 'list' (above) never
+      // has to fetch/parse the full chart text just to get this - see the
+      // comment on 'list' for why that matters.
+      chords_used: chordsUsedIn(s.chords_lyrics || '', 0),
       updated_at: new Date().toISOString(),
     };
     if (action === 'createSong') {
@@ -1528,7 +1555,19 @@ function expireSession_() {
   render();
 }
 
-async function loadSongs(showSpinner) {
+// Guards against two full catalog loads running at once (e.g. the periodic
+// auto-refresh firing while a write's own refresh is still in flight) -
+// each one is a real multi-hundred-KB-to-MB fetch now, so overlapping ones
+// only add peak memory/network pressure for no benefit; the second caller
+// just waits for the one already in progress instead of starting a
+// redundant twin.
+let loadSongsInFlight = null;
+function loadSongs(showSpinner) {
+  if (loadSongsInFlight) return loadSongsInFlight;
+  loadSongsInFlight = loadSongsInner_(showSpinner).finally(() => { loadSongsInFlight = null; });
+  return loadSongsInFlight;
+}
+async function loadSongsInner_(showSpinner) {
   const footer = document.getElementById('footerStatus');
   if (showSpinner) footer.textContent = 'Loading songs…';
   try {
