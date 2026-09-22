@@ -13,6 +13,12 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="JGC Chords">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<!-- Supabase backend (task #72) — loaded async/defer, same as the Google
+     script above; getSupa_() in the SUPABASE BACKEND ADAPTER further down
+     only touches window.supabase the first time it's actually needed
+     (well after this has had time to load), not at parse time, so there's
+     no race even though this loads in the background. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" async defer></script>
 <style>
   @font-face{
     font-family:"CustomCourier";
@@ -396,7 +402,24 @@
 const CONFIG = {
   SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbzrDMvutkLExX_8iZwSIM1T81Ter5iWF-Q687z-1R-VoqT5azW_T4-zcAI6jEwGotYT/exec',
   CLIENT_ID: '112967885872-mvfriestjivf5lguhrhhmd68k8buev72.apps.googleusercontent.com',
-  AUTO_REFRESH_SECONDS: 60
+  AUTO_REFRESH_SECONDS: 60,
+  // --- Supabase backend (task #72) — see the SUPABASE BACKEND ADAPTER
+  // section below for everything this actually drives. ---
+  SUPABASE_URL: 'https://elzjljcwpjlixirajcrj.supabase.co',
+  SUPABASE_ANON_KEY: 'sb_publishable_Mt9Z4G2GlVLxDN8JkFiukQ_Kx9kAHYr',
+  // Testing switch, deliberately NOT a permanent site-wide setting: visiting
+  // ?backend=supabase once opts THIS BROWSER into the new backend (recorded
+  // in localStorage so it survives a reload/new tab); ?backend=sheets
+  // switches back. Nobody else visiting the live site is affected either
+  // way — the shipped default below is 'sheets' until an actual cutover.
+  USE_SUPABASE: (function () {
+    try {
+      const p = new URLSearchParams(location.search).get('backend');
+      if (p === 'supabase') localStorage.setItem('jgc_backend', 'supabase');
+      if (p === 'sheets') localStorage.removeItem('jgc_backend');
+      return localStorage.getItem('jgc_backend') === 'supabase';
+    } catch (e) { return false; }
+  })()
 };
 
 /* ============================================================
@@ -695,11 +718,24 @@ function loadAuthCache() {
   } catch (e) { return null; }
 }
 
-function handleCredentialResponse(response) {
+async function handleCredentialResponse(response) {
   const claims = decodeJwt(response.credential);
   currentUser = { idToken: response.credential, email: (claims.email||'').toLowerCase(), name: claims.name || claims.email, picture: claims.picture || '', isAdmin: currentUser ? currentUser.isAdmin : false };
   saveAuthCache(currentUser);
   renderUserArea();
+  // On the Supabase backend, the same Google idToken that used to go
+  // straight to Code.gs for verification instead establishes a real
+  // Supabase Auth session here (supabase.auth.signInWithIdToken) — this is
+  // what links this sign-in to this person's pre-migrated profile row (by
+  // email, via the handle_new_user trigger in schema.sql) and is a
+  // prerequisite for every supaApi() call below, all of which need a live
+  // session. A failure here is logged, not thrown - the rest of this
+  // function still runs the same way it always did, so a signed-in state
+  // is never left half-set-up.
+  if (CONFIG.USE_SUPABASE) {
+    try { await supaSignInWithGoogleIdToken_(response.credential); }
+    catch (err) { console.error('Supabase sign-in failed:', err); }
+  }
   // Google calls this same callback again later, silently, whenever its own
   // FedCM prompt (see initGoogleSignIn) reissues a fresh idToken in the
   // background — not just on a real sign-in. Only kick off the full
@@ -722,6 +758,10 @@ function initGoogleSignIn() {
 
 function signOut() {
   if (window.google) google.accounts.id.disableAutoSelect();
+  // Fire-and-forget: signOut() itself isn't async and nothing below depends
+  // on waiting for this network round trip - the local UI resets immediately
+  // either way, same as it always has.
+  if (CONFIG.USE_SUPABASE) supaSignOut_();
   currentUser = null; favorites = []; knownChords = [];
   saveAuthCache(null);
   if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
@@ -817,17 +857,28 @@ async function apiList() {
 // Apps Script can't handle an OPTIONS preflight.
 async function api(action, fields) {
   if (isOffline) throw offlineError_();
-  const payload = Object.assign({ action }, fields || {});
-  if (currentUser) payload.idToken = currentUser.idToken;
-  let res;
-  try { res = await fetch(CONFIG.SCRIPT_URL, { method: 'POST', body: JSON.stringify(payload) }); }
-  catch (networkErr) {
-    // See the matching comment in apiList() above - only a real, browser-
-    // confirmed disconnect should latch the persistent offline banner.
-    if (!navigator.onLine) setOffline(true);
-    throw offlineError_();
+  // See CONFIG.USE_SUPABASE above and the SUPABASE BACKEND ADAPTER section
+  // right below this function - when set, every action is answered by
+  // supaApi() (talking to Postgres/Supabase directly) instead of a fetch to
+  // the old Apps Script backend. Both paths funnel through the exact same
+  // success/error handling below, so a caller of api() never needs to know
+  // or care which backend actually answered it.
+  let data;
+  if (CONFIG.USE_SUPABASE) {
+    data = await supaApi(action, fields);
+  } else {
+    const payload = Object.assign({ action }, fields || {});
+    if (currentUser) payload.idToken = currentUser.idToken;
+    let res;
+    try { res = await fetch(CONFIG.SCRIPT_URL, { method: 'POST', body: JSON.stringify(payload) }); }
+    catch (networkErr) {
+      // See the matching comment in apiList() above - only a real, browser-
+      // confirmed disconnect should latch the persistent offline banner.
+      if (!navigator.onLine) setOffline(true);
+      throw offlineError_();
+    }
+    data = await res.json();
   }
-  const data = await res.json();
   if (!data.success) {
     // A sign-in error usually means the Google ID token has expired (it's
     // only valid ~1 hour and this app doesn't silently refresh it) — clear
@@ -840,6 +891,514 @@ async function api(action, fields) {
   }
   return data;
 }
+
+/* ============================================================
+   SUPABASE BACKEND ADAPTER (task #72)
+   ============================================================
+   When CONFIG.USE_SUPABASE is true (see the toggle near CONFIG below), every
+   call to api(action, fields) is routed through supaApi() here instead of
+   the old Apps Script backend (CONFIG.SCRIPT_URL) — nothing else in this
+   file changes. Every function below returns the EXACT SAME shape
+   Code.gs's doPost used to return for that action (including 'true'/'false'
+   STRINGS for archived/read_by_admin, since the rest of this file compares
+   against those strings, not real booleans — see e.g. r.archived==='true'
+   throughout the admin views), so no other code in index.html needs to be
+   touched to work against the new Postgres/Supabase backend.
+   ============================================================ */
+
+let _supaClient = null;
+function getSupa_() {
+  if (_supaClient) return _supaClient;
+  if (!window.supabase) throw new Error('Supabase library did not load yet — check your connection and try again.');
+  if (!CONFIG.SUPABASE_URL || CONFIG.SUPABASE_URL.indexOf('PASTE_YOUR') === 0) throw new Error('CONFIG.SUPABASE_URL is not set.');
+  _supaClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+  return _supaClient;
+}
+
+function supaBool_(v) { return v ? 'true' : 'false'; }
+function throwIfErr_(error) { if (error) throw new Error(error.message || String(error)); }
+
+// ---- identity -------------------------------------------------------
+let supaProfileCache = null; // this browser session's own profile row, or null if signed out
+
+async function supaCurrentProfile_(forceRefresh) {
+  if (supaProfileCache && !forceRefresh) return supaProfileCache;
+  const { data: sessionData } = await getSupa_().auth.getSession();
+  const authUser = sessionData && sessionData.session && sessionData.session.user;
+  if (!authUser) { supaProfileCache = null; return null; }
+  const { data, error } = await getSupa_().from('profiles').select('*').eq('auth_user_id', authUser.id).maybeSingle();
+  throwIfErr_(error);
+  supaProfileCache = data || null;
+  return supaProfileCache;
+}
+async function supaRequireUser_() {
+  const p = await supaCurrentProfile_();
+  if (!p) throw new Error('Please sign in with Google to do that.');
+  return p;
+}
+async function supaRequireAdmin_() {
+  const p = await supaRequireUser_();
+  if (!p.is_admin) throw new Error('Admin only.');
+  return p;
+}
+// Called from handleCredentialResponse/signOut in the main script above,
+// only when CONFIG.USE_SUPABASE is true.
+async function supaSignInWithGoogleIdToken_(idToken) {
+  const { error } = await getSupa_().auth.signInWithIdToken({ provider: 'google', token: idToken });
+  if (error) throw new Error(error.message);
+  await supaCurrentProfile_(true); // refresh the cached profile now that a session exists
+}
+async function supaSignOut_() {
+  supaProfileCache = null;
+  try { await getSupa_().auth.signOut(); } catch (e) {}
+}
+// Mirrors effectiveIdentity_ in Code.gs: a write is attributed to the
+// caller's own profile, unless they're an admin acting via View As
+// (target_email + view_as sent together), in which case it's attributed to
+// the target's profile instead.
+async function supaEffectiveProfile_(me, fields) {
+  if (me.is_admin && fields.target_email && fields.view_as) {
+    const email = String(fields.target_email).toLowerCase();
+    const { data, error } = await getSupa_().from('profiles').select('*').eq('email', email).maybeSingle();
+    throwIfErr_(error);
+    if (!data) throw new Error('User not found: ' + email);
+    return data;
+  }
+  return me;
+}
+
+// ---- shared playlist hydration (join tables -> old flat shape) ------
+// Old shape (from Code.gs's Playlists tab): {id,owner_email,owner_name,
+// title,song_ids:[],visibility,shared_with:[],updated_at,icon}. The new
+// schema splits song_ids into playlist_songs and shared_with into
+// playlist_shares, and has owner_id (a profile id) instead of owner_email/
+// owner_name directly - this reassembles the old shape so nothing else in
+// this file has to change.
+async function supaHydratePlaylists_(rows) {
+  if (!rows.length) return [];
+  const ids = rows.map(r => r.id);
+  const ownerIds = Array.from(new Set(rows.map(r => r.owner_id)));
+  const [songsRes, sharesRes, ownersRes] = await Promise.all([
+    getSupa_().from('playlist_songs').select('playlist_id,song_id,position').in('playlist_id', ids).order('position'),
+    getSupa_().from('playlist_shares').select('playlist_id,email').in('playlist_id', ids),
+    getSupa_().from('profiles').select('id,email,name').in('id', ownerIds),
+  ]);
+  throwIfErr_(songsRes.error); throwIfErr_(sharesRes.error); throwIfErr_(ownersRes.error);
+  const songsByPl = {}, sharesByPl = {}, ownerById = {};
+  (songsRes.data || []).forEach(r => { (songsByPl[r.playlist_id] = songsByPl[r.playlist_id] || []).push(r.song_id); });
+  (sharesRes.data || []).forEach(r => { (sharesByPl[r.playlist_id] = sharesByPl[r.playlist_id] || []).push(r.email); });
+  (ownersRes.data || []).forEach(o => { ownerById[o.id] = o; });
+  return rows.map(p => {
+    const owner = ownerById[p.owner_id] || {};
+    return {
+      id: p.id, owner_email: owner.email || '', owner_name: owner.name || owner.email || '',
+      title: p.title, song_ids: songsByPl[p.id] || [], visibility: p.visibility,
+      shared_with: sharesByPl[p.id] || [], updated_at: p.updated_at, icon: p.icon || '',
+    };
+  });
+}
+// Rewrites a playlist's playlist_songs rows to match a new ordered array of
+// song ids (used by createPlaylist/updatePlaylist below) - simplest correct
+// approach given how infrequently playlists are edited: delete then re-insert
+// the whole set, inside no explicit transaction (Supabase's REST API doesn't
+// expose one from the client), but each step is idempotent enough that a
+// partial failure just means "re-save" fixes it - no risk of a duplicate or
+// orphaned row surviving since the delete always runs first.
+async function supaSetPlaylistSongs_(playlistId, songIds) {
+  const del = await getSupa_().from('playlist_songs').delete().eq('playlist_id', playlistId);
+  throwIfErr_(del.error);
+  const rows = (songIds || []).map((song_id, position) => ({ playlist_id: playlistId, song_id, position }));
+  if (rows.length) { const ins = await getSupa_().from('playlist_songs').insert(rows); throwIfErr_(ins.error); }
+}
+async function supaSetPlaylistShares_(playlistId, emails) {
+  const del = await getSupa_().from('playlist_shares').delete().eq('playlist_id', playlistId);
+  throwIfErr_(del.error);
+  const rows = (emails || []).map(email => ({ playlist_id: playlistId, email: String(email).toLowerCase() }));
+  if (rows.length) { const ins = await getSupa_().from('playlist_shares').insert(rows); throwIfErr_(ins.error); }
+}
+
+// ---- requests/messages/errors: user_id -> user_email/user_name --------
+async function supaProfileMapByIds_(ids) {
+  const uniq = Array.from(new Set(ids));
+  if (!uniq.length) return {};
+  const { data, error } = await getSupa_().from('profiles').select('id,email,name').in('id', uniq);
+  throwIfErr_(error);
+  const map = {};
+  (data || []).forEach(p => { map[p.id] = p; });
+  return map;
+}
+
+async function supaApi(action, fields) {
+  fields = fields || {};
+
+  // ================= reads =================
+  if (action === 'list') {
+    await supaRequireUser_();
+    const { data, error } = await getSupa_().from('songs')
+      .select('id,title,title_hebrew,artist,categories,capo,youtube_url,date_added,updated_at,chords_lyrics');
+    throwIfErr_(error);
+    return { success: true, songs: data.map(s => ({
+      id: s.id, title: s.title, title_hebrew: s.title_hebrew || '', artist: s.artist || '',
+      categories: s.categories || [], capo: s.capo || 0, youtube_url: s.youtube_url || '',
+      date_added: s.date_added, updated_at: s.updated_at,
+      chords_used: chordsUsedIn(s.chords_lyrics || '', 0), // reuses the client's own existing helper — same logic Code.gs mirrored
+    })) };
+  }
+
+  if (action === 'listContent') {
+    await supaRequireUser_();
+    const { data, error } = await getSupa_().from('songs').select('id,chords_lyrics,lyrics_only');
+    throwIfErr_(error);
+    return { success: true, content: data.map(s => ({ id: s.id, chords_lyrics: s.chords_lyrics || '', lyrics_only: s.lyrics_only || '' })) };
+  }
+
+  if (action === 'songContent') {
+    await supaRequireUser_();
+    const { data, error } = await getSupa_().from('songs').select('id,chords_lyrics,lyrics_only').eq('id', fields.id).maybeSingle();
+    throwIfErr_(error);
+    if (!data) return { success: false, error: 'Song not found' };
+    return { success: true, id: data.id, chords_lyrics: data.chords_lyrics || '', lyrics_only: data.lyrics_only || '' };
+  }
+
+  if (action === 'getPlaylists') {
+    // No sign-in check here on purpose, matching the old behavior (an
+    // unauthenticated caller could still see public playlists) - RLS itself
+    // already restricts which rows come back (public, or yours, or shared
+    // with you, or all of them if you're an admin), including for a signed-
+    // out caller (who then only ever sees the public ones).
+    const { data, error } = await getSupa_().from('playlists').select('*');
+    throwIfErr_(error);
+    return { success: true, playlists: await supaHydratePlaylists_(data) };
+  }
+
+  if (action === 'getMyData') {
+    const me = await supaRequireUser_();
+    const [favRes, kcRes] = await Promise.all([
+      getSupa_().from('favorites').select('song_id,position').eq('user_id', me.id).order('position'),
+      getSupa_().from('known_chords').select('chords').eq('user_id', me.id).maybeSingle(),
+    ]);
+    throwIfErr_(favRes.error); throwIfErr_(kcRes.error);
+    return {
+      success: true,
+      favorites: (favRes.data || []).map(f => f.song_id),
+      knownChords: (kcRes.data && kcRes.data.chords) || [],
+      user: { email: me.email, name: me.name, isAdmin: !!me.is_admin },
+    };
+  }
+
+  if (action === 'getRequests') {
+    const me = await supaRequireUser_();
+    let q = getSupa_().from('requests').select('*');
+    if (!(me.is_admin && fields.scope !== 'mine')) q = q.eq('user_id', me.id);
+    const { data, error } = await q;
+    throwIfErr_(error);
+    const emailMap = await supaProfileMapByIds_(data.map(r => r.user_id));
+    return { success: true, requests: data.map(r => supaRequestToOld_(r, emailMap)) };
+  }
+
+  if (action === 'getMessages') {
+    const me = await supaRequireUser_();
+    let q = getSupa_().from('messages').select('*');
+    if (!(me.is_admin && fields.scope !== 'mine')) q = q.eq('user_id', me.id);
+    const { data, error } = await q;
+    throwIfErr_(error);
+    const emailMap = await supaProfileMapByIds_(data.map(m => m.user_id));
+    return { success: true, messages: data.map(m => supaMessageToOld_(m, emailMap)) };
+  }
+
+  if (action === 'getErrors') {
+    await supaRequireAdmin_();
+    const { data, error } = await getSupa_().from('errors').select('*');
+    throwIfErr_(error);
+    const emailMap = await supaProfileMapByIds_(data.map(e => e.user_id));
+    return { success: true, errors: data.map(e => supaErrorToOld_(e, emailMap)) };
+  }
+
+  if (action === 'getUsers') {
+    await supaRequireAdmin_();
+    const [rosterRes, msgRes] = await Promise.all([
+      getSupa_().from('admin_user_roster').select('*'),
+      getSupa_().from('messages').select('*'),
+    ]);
+    throwIfErr_(rosterRes.error); throwIfErr_(msgRes.error);
+    const users = (rosterRes.data || []).map(u => ({
+      email: u.email, name: u.name || u.email, photo: u.photo || '', level: u.level || '', language: u.language || '',
+      favorites: u.favorites_count || 0, knownChords: !!u.known_chords, playlists: u.playlists_count || 0,
+      requests: u.requests_count || 0, messages: u.messages_count || 0, errors: u.errors_count || 0,
+      lastActivity: u.last_activity || '',
+    }));
+    const emailMap = {}; (rosterRes.data || []).forEach(u => { emailMap[u.id] = { email: u.email, name: u.name }; });
+    return { success: true, users, messages: (msgRes.data || []).map(m => supaMessageToOld_(m, emailMap)) };
+  }
+
+  if (action === 'getUserSnapshot') {
+    await supaRequireAdmin_();
+    const targetEmail = String(fields.target_email || '').toLowerCase();
+    if (!targetEmail) return { success: false, error: 'Missing target_email' };
+    const { data: target, error: targetErr } = await getSupa_().from('profiles').select('*').eq('email', targetEmail).maybeSingle();
+    throwIfErr_(targetErr);
+    if (!target) return { success: false, error: 'User not found' };
+    const [favRes, kcRes, plRes, reqRes, msgRes] = await Promise.all([
+      getSupa_().from('favorites').select('song_id,position').eq('user_id', target.id).order('position'),
+      getSupa_().from('known_chords').select('chords').eq('user_id', target.id).maybeSingle(),
+      getSupa_().from('playlists').select('*').eq('owner_id', target.id),
+      getSupa_().from('requests').select('*').eq('user_id', target.id),
+      getSupa_().from('messages').select('*').eq('user_id', target.id),
+    ]);
+    [favRes, kcRes, plRes, reqRes, msgRes].forEach(r => throwIfErr_(r.error));
+    const emailMap = { [target.id]: { email: target.email, name: target.name } };
+    return {
+      success: true, email: targetEmail,
+      favorites: (favRes.data || []).map(f => f.song_id),
+      knownChords: (kcRes.data && kcRes.data.chords) || [],
+      playlists: await supaHydratePlaylists_(plRes.data || []),
+      requests: (reqRes.data || []).map(r => supaRequestToOld_(r, emailMap)),
+      messages: (msgRes.data || []).map(m => supaMessageToOld_(m, emailMap)),
+    };
+  }
+
+  // ================= writes =================
+  if (action === 'createSong' || action === 'updateSong') {
+    await supaRequireAdmin_();
+    const s = fields.song || {};
+    const row = {
+      title: s.title || '', title_hebrew: s.title_hebrew || '', artist: s.artist || '',
+      categories: Array.isArray(s.categories) ? s.categories : [], capo: Number(s.capo) || 0,
+      youtube_url: s.youtube_url || '', chords_lyrics: s.chords_lyrics || '', lyrics_only: s.lyrics_only || '',
+      updated_at: new Date().toISOString(),
+    };
+    if (action === 'createSong') {
+      const { error } = await getSupa_().from('songs').insert(row);
+      throwIfErr_(error);
+    } else {
+      const { error } = await getSupa_().from('songs').update(row).eq('id', s.id);
+      throwIfErr_(error);
+    }
+    return { success: true };
+  }
+  if (action === 'deleteSong') {
+    await supaRequireAdmin_();
+    const { error } = await getSupa_().from('songs').delete().eq('id', fields.id);
+    throwIfErr_(error);
+    return { success: true };
+  }
+
+  if (action === 'createPlaylist') {
+    const me = await supaRequireUser_();
+    const eff = await supaEffectiveProfile_(me, fields);
+    const { data, error } = await getSupa_().from('playlists').insert({
+      owner_id: eff.id, title: fields.title || 'Untitled', visibility: fields.visibility || 'private',
+      icon: fields.icon || 'note', updated_at: new Date().toISOString(),
+    }).select().single();
+    throwIfErr_(error);
+    await supaSetPlaylistSongs_(data.id, fields.song_ids || []);
+    await supaSetPlaylistShares_(data.id, fields.shared_with || []);
+    const [hydrated] = await supaHydratePlaylists_([data]);
+    return { success: true, playlist: hydrated };
+  }
+  if (action === 'updatePlaylist') {
+    const editor = await supaRequireUser_();
+    const { data: existing, error: exErr } = await getSupa_().from('playlists').select('*').eq('id', fields.id).maybeSingle();
+    throwIfErr_(exErr);
+    if (!existing) return { success: false, error: 'Playlist not found' };
+    if (existing.owner_id !== editor.id && !editor.is_admin) return { success: false, error: 'Not your playlist' };
+    const patch = { updated_at: new Date().toISOString() };
+    if (fields.title !== undefined) patch.title = fields.title;
+    if (fields.visibility !== undefined) patch.visibility = fields.visibility;
+    if (fields.icon !== undefined) patch.icon = fields.icon;
+    const { error: upErr } = await getSupa_().from('playlists').update(patch).eq('id', fields.id);
+    throwIfErr_(upErr);
+    if (fields.song_ids !== undefined) await supaSetPlaylistSongs_(fields.id, fields.song_ids);
+    if (fields.shared_with !== undefined) await supaSetPlaylistShares_(fields.id, fields.shared_with);
+    const { data: fresh, error: freshErr } = await getSupa_().from('playlists').select('*').eq('id', fields.id).single();
+    throwIfErr_(freshErr);
+    const [hydrated] = await supaHydratePlaylists_([fresh]);
+    return { success: true, playlist: hydrated };
+  }
+  if (action === 'deletePlaylist') {
+    const deleter = await supaRequireUser_();
+    const { data: existing, error: exErr } = await getSupa_().from('playlists').select('owner_id').eq('id', fields.id).maybeSingle();
+    throwIfErr_(exErr);
+    if (!existing) return { success: false, error: 'Playlist not found' };
+    if (existing.owner_id !== deleter.id && !deleter.is_admin) return { success: false, error: 'Not your playlist' };
+    const { error } = await getSupa_().from('playlists').delete().eq('id', fields.id);
+    throwIfErr_(error);
+    return { success: true };
+  }
+
+  if (action === 'toggleFavorite') {
+    const me = await supaRequireUser_();
+    const eff = await supaEffectiveProfile_(me, fields);
+    const { data: existing, error: exErr } = await getSupa_().from('favorites').select('user_id').eq('user_id', eff.id).eq('song_id', fields.song_id).maybeSingle();
+    throwIfErr_(exErr);
+    if (existing) {
+      const { error } = await getSupa_().from('favorites').delete().eq('user_id', eff.id).eq('song_id', fields.song_id);
+      throwIfErr_(error);
+      return { success: true, favorited: false };
+    }
+    // Date.now() as the position, same reasoning as the old backend: always
+    // sorts after any existing favorite (including ones already renumbered
+    // to small sequential indices by a manual reorder), i.e. "append at the
+    // end" until the user drags it somewhere else.
+    const { error } = await getSupa_().from('favorites').insert({ user_id: eff.id, song_id: fields.song_id, position: Date.now() });
+    throwIfErr_(error);
+    return { success: true, favorited: true };
+  }
+  if (action === 'reorderFavorites') {
+    const me = await supaRequireUser_();
+    const eff = await supaEffectiveProfile_(me, fields);
+    const orderedIds = Array.isArray(fields.song_ids) ? fields.song_ids : [];
+    // Same "delete then re-insert" approach as playlist_songs above, and for
+    // the same reason - this is called rarely (a manual drag-reorder), so
+    // simplicity wins over a more surgical per-row update.
+    await Promise.all(orderedIds.map((song_id, idx) =>
+      getSupa_().from('favorites').update({ position: idx }).eq('user_id', eff.id).eq('song_id', song_id)
+    ));
+    return { success: true };
+  }
+  if (action === 'setKnownChords') {
+    const me = await supaRequireUser_();
+    const eff = await supaEffectiveProfile_(me, fields);
+    const { error } = await getSupa_().from('known_chords').upsert({
+      user_id: eff.id, chords: Array.isArray(fields.chords) ? fields.chords : [], updated_at: new Date().toISOString(),
+    });
+    throwIfErr_(error);
+    return { success: true };
+  }
+
+  if (action === 'createRequest') {
+    const me = await supaRequireUser_();
+    const eff = await supaEffectiveProfile_(me, fields);
+    const songTitle = String(fields.song_title || '').trim();
+    const artist = String(fields.artist || '').trim();
+    const youtubeUrl = String(fields.youtube_url || '').trim();
+    if (!songTitle) return { success: false, error: 'Song title is required.' };
+    if (!artist) return { success: false, error: 'Artist is required.' };
+    if (!youtubeUrl || !YOUTUBE_URL_RE.test(youtubeUrl)) return { success: false, error: 'Please enter a valid YouTube link.' };
+    // The 2-per-week limit is enforced server-side by a Postgres trigger
+    // (enforce_request_limit, in schema.sql) - it raises an exception that
+    // arrives here as a normal Supabase error, same as any other insert
+    // failure, so no separate client-side count check is needed.
+    const { error } = await getSupa_().from('requests').insert({
+      user_id: eff.id, song_title: songTitle, artist, note: fields.note || '', status: 'pending',
+      youtube_url: youtubeUrl, categories: Array.isArray(fields.categories) ? fields.categories : [], lyrics: fields.lyrics || '',
+    });
+    throwIfErr_(error);
+    return { success: true };
+  }
+  if (action === 'updateRequestStatus') {
+    await supaRequireAdmin_();
+    const { error } = await getSupa_().from('requests').update({ status: fields.status }).eq('id', fields.id);
+    throwIfErr_(error);
+    return { success: true };
+  }
+  if (action === 'archiveRequest') {
+    await supaRequireAdmin_();
+    const { error } = await getSupa_().from('requests').update({ archived: !!fields.archived }).eq('id', fields.id);
+    throwIfErr_(error);
+    return { success: true };
+  }
+
+  if (action === 'sendMessage') {
+    const me = await supaRequireUser_();
+    const isViewAsSend = me.is_admin && fields.target_email && fields.view_as;
+    let targetProfile;
+    if (isViewAsSend) {
+      const { data, error } = await getSupa_().from('profiles').select('*').eq('email', String(fields.target_email).toLowerCase()).maybeSingle();
+      throwIfErr_(error);
+      if (!data) throw new Error('User not found: ' + fields.target_email);
+      targetProfile = data;
+    } else if (me.is_admin && fields.target_email) {
+      const { data, error } = await getSupa_().from('profiles').select('*').eq('email', String(fields.target_email).toLowerCase()).maybeSingle();
+      throwIfErr_(error);
+      if (!data) throw new Error('User not found: ' + fields.target_email);
+      targetProfile = data;
+    } else {
+      targetProfile = me;
+    }
+    const sender = isViewAsSend ? 'user' : ((me.is_admin && fields.target_email) ? 'admin' : 'user');
+    const { error } = await getSupa_().from('messages').insert({
+      user_id: targetProfile.id, sender, text: fields.text || '',
+      read_by_admin: sender === 'admin', // an admin's own reply is implicitly already "read" by the admin who sent it
+    });
+    throwIfErr_(error);
+    return { success: true };
+  }
+  if (action === 'archiveThread') {
+    await supaRequireAdmin_();
+    const targetEmail = String(fields.user_email || '').toLowerCase();
+    const { data: target, error: tErr } = await getSupa_().from('profiles').select('id').eq('email', targetEmail).maybeSingle();
+    throwIfErr_(tErr);
+    if (!target) return { success: true }; // nothing to archive for an unknown email - matches the old backend's silent no-op here
+    const { error } = await getSupa_().from('messages').update({ archived: !!fields.archived }).eq('user_id', target.id);
+    throwIfErr_(error);
+    return { success: true };
+  }
+  if (action === 'markThreadRead') {
+    await supaRequireAdmin_();
+    const targetEmail = String(fields.user_email || '').toLowerCase();
+    const { data: target, error: tErr } = await getSupa_().from('profiles').select('id').eq('email', targetEmail).maybeSingle();
+    throwIfErr_(tErr);
+    if (!target) return { success: true };
+    const { error } = await getSupa_().from('messages').update({ read_by_admin: true }).eq('user_id', target.id).eq('sender', 'user');
+    throwIfErr_(error);
+    return { success: true };
+  }
+
+  if (action === 'createErrorReport') {
+    const me = await supaRequireUser_();
+    const { error } = await getSupa_().from('errors').insert({
+      user_id: me.id, song_id: fields.song_id || null, song_title: fields.song_title || '',
+      artist: fields.artist || '', description: fields.description || '', status: 'open',
+    });
+    throwIfErr_(error);
+    return { success: true };
+  }
+  if (action === 'updateErrorReport') {
+    await supaRequireAdmin_();
+    const { error } = await getSupa_().from('errors').update({ status: fields.status }).eq('id', fields.id);
+    throwIfErr_(error);
+    return { success: true };
+  }
+  if (action === 'archiveError') {
+    await supaRequireAdmin_();
+    const { error } = await getSupa_().from('errors').update({ archived: !!fields.archived }).eq('id', fields.id);
+    throwIfErr_(error);
+    return { success: true };
+  }
+
+  return { success: false, error: 'Unknown action: ' + action };
+}
+
+// ---- old-shape converters (Postgres row + {id:{email,name}} map -> the
+// exact object shape Code.gs used to return, including 'true'/'false'
+// STRING booleans since that's what the rest of this file compares against) ----
+function supaRequestToOld_(r, emailMap) {
+  const who = emailMap[r.user_id] || {};
+  return {
+    id: r.id, user_email: who.email || '', user_name: who.name || who.email || '',
+    song_title: r.song_title, artist: r.artist, note: r.note || '', status: r.status,
+    created_at: r.created_at, archived: supaBool_(r.archived),
+    youtube_url: r.youtube_url || '', categories: r.categories || [], lyrics: r.lyrics || '',
+  };
+}
+function supaMessageToOld_(m, emailMap) {
+  const who = emailMap[m.user_id] || {};
+  return {
+    id: m.id, user_email: who.email || '', user_name: who.name || who.email || '',
+    sender: m.sender, text: m.text, created_at: m.created_at,
+    archived: supaBool_(m.archived), read_by_admin: supaBool_(m.read_by_admin),
+  };
+}
+function supaErrorToOld_(e, emailMap) {
+  const who = emailMap[e.user_id] || {};
+  return {
+    id: e.id, user_email: who.email || '', user_name: who.name || who.email || '',
+    song_id: e.song_id || '', song_title: e.song_title || '', artist: e.artist || '',
+    description: e.description, status: e.status, created_at: e.created_at, archived: supaBool_(e.archived),
+  };
+}
+
 // Cleanly unwinds an expired/invalid session so the app ends up in exactly
 // the same state as an explicit Sign Out, instead of a half-updated one.
 // Before this, the expiry branch above only cleared currentUser and
@@ -3062,8 +3621,14 @@ function renderContact() {
   // when they're an admin — otherwise an admin's Contact tab would show
   // every user's requests/messages (the Admin tab's job, via the separate
   // unscoped requestsCache/messagesCache below).
-  Promise.all([api('getRequests', {scope:'mine'}), api('getMessages', {scope:'mine'})]).then(([reqData, msgData]) => {
-    contactRequestsCache = reqData.requests || []; contactMessagesCache = msgData.messages || [];
+  // An admin viewing their own Contact tab has no "Message Admin" card to
+  // fill (see renderContactBody) — that'd just be messaging themselves —
+  // so skip the getMessages round-trip entirely for that case.
+  const fetches = currentUser.isAdmin
+    ? [api('getRequests', {scope:'mine'})]
+    : [api('getRequests', {scope:'mine'}), api('getMessages', {scope:'mine'})];
+  Promise.all(fetches).then(([reqData, msgData]) => {
+    contactRequestsCache = reqData.requests || []; contactMessagesCache = msgData ? (msgData.messages || []) : [];
     renderContactBody();
   }).catch(err => { document.getElementById('app').innerHTML = `<div class="error">${err.message}</div>`; });
 }
@@ -3084,20 +3649,26 @@ function renderContactBody() {
       ${pagerHtml(myRequests.length, contactRequestsPage, 'changeContactRequestsPage', 10)}`;
   // The chat card is a clickable preview that expands into the full thread —
   // under View As it's always shown expanded (the admin is inspecting this
-  // user's conversation, not chatting themselves), see isOpen below.
-  const chatTitle = viewAsUser ? `${escapeHtml(viewAsUser.name)}'s Messages` : 'Message Admin';
-  const sortedMsgs = myMessages.slice().sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
-  const lastMsg = sortedMsgs[0];
-  const preview = lastMsg ? (escapeHtml(lastMsg.text).slice(0, 60) + (lastMsg.text.length > 60 ? '…' : '')) : 'No messages yet — tap to say hi!';
-  const isOpen = contactChatOpen || !!viewAsUser;
-  html += `<div class="chat-card" onclick="toggleContactChat()">
-      <span class="chat-card-icon">${SVG_ICONS.message}</span>
-      <div class="chat-card-text"><div class="chat-card-title">${chatTitle}</div><div class="chat-card-preview">${preview}</div></div>
-      <span class="chat-card-arrow">${isOpen ? '▾' : '▸'}</span>
-    </div>`;
-  if (isOpen) {
-    html += `<div class="chat-thread" id="chatThread">${renderChatMessages(myMessages)}</div>
-      <div style="display:flex;gap:8px"><input type="text" id="chatInput" placeholder="Type a message…" style="flex:1"><button class="btn" onclick="sendChatMessage()">Send</button></div>`;
+  // user's conversation, not chatting themselves), see isOpen below. Skipped
+  // entirely when an admin is looking at their own Contact tab (not View
+  // As) — "Message Admin" would just mean messaging themselves, which isn't
+  // a real conversation; the Admin tab's Messages sub-tab is where they
+  // handle everyone else's threads.
+  if (!effectiveIsAdmin()) {
+    const chatTitle = viewAsUser ? `${escapeHtml(viewAsUser.name)}'s Messages` : 'Message Admin';
+    const sortedMsgs = myMessages.slice().sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
+    const lastMsg = sortedMsgs[0];
+    const preview = lastMsg ? (escapeHtml(lastMsg.text).slice(0, 60) + (lastMsg.text.length > 60 ? '…' : '')) : 'No messages yet — tap to say hi!';
+    const isOpen = contactChatOpen || !!viewAsUser;
+    html += `<div class="chat-card" onclick="toggleContactChat()">
+        <span class="chat-card-icon">${SVG_ICONS.message}</span>
+        <div class="chat-card-text"><div class="chat-card-title">${chatTitle}</div><div class="chat-card-preview">${preview}</div></div>
+        <span class="chat-card-arrow">${isOpen ? '▾' : '▸'}</span>
+      </div>`;
+    if (isOpen) {
+      html += `<div class="chat-thread" id="chatThread">${renderChatMessages(myMessages)}</div>
+        <div style="display:flex;gap:8px"><input type="text" id="chatInput" placeholder="Type a message…" style="flex:1"><button class="btn" onclick="sendChatMessage()">Send</button></div>`;
+    }
   }
   document.getElementById('app').innerHTML = html;
   const thread = document.getElementById('chatThread'); if (thread) thread.scrollTop = thread.scrollHeight;
