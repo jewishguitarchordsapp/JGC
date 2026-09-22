@@ -402,7 +402,15 @@
 const CONFIG = {
   SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbzrDMvutkLExX_8iZwSIM1T81Ter5iWF-Q687z-1R-VoqT5azW_T4-zcAI6jEwGotYT/exec',
   CLIENT_ID: '112967885872-mvfriestjivf5lguhrhhmd68k8buev72.apps.googleusercontent.com',
-  AUTO_REFRESH_SECONDS: 60,
+  // Was 60 - harmless against the old Apps Script backend (server-side
+  // cache made a repeat 'list' call nearly free), but against Supabase this
+  // is a genuine full re-fetch of the whole songs/playlists tables every
+  // time it fires, for every open tab, whether or not anyone's using it.
+  // 300s (5 min) cuts that background cost by 5x with no real loss - a
+  // song/playlist someone else just added still shows up within a few
+  // minutes, and any of your OWN edits already refresh immediately anyway
+  // (see refreshPlaylistsOnly()/refreshAfterWrite() elsewhere in this file).
+  AUTO_REFRESH_SECONDS: 300,
   // --- Supabase backend (task #72) — see the SUPABASE BACKEND ADAPTER
   // section below for everything this actually drives. ---
   SUPABASE_URL: 'https://elzjljcwpjlixirajcrj.supabase.co',
@@ -935,16 +943,37 @@ function throwIfErr_(error) { if (error) throw new Error(error.message || String
 // incomplete data. This pages through with .range() until a page comes
 // back short of a full page, so every caller below gets everything, the
 // same as a single .select() would if there were no cap.
+// SAFETY: pagination like this is only correct if every page is ordered
+// deterministically (a plain .order('position') with duplicate position
+// values across different playlists, for instance, is NOT deterministic -
+// Postgres can re-split ties differently between two separate range
+// queries) - every caller below now orders by a genuinely unique column (or
+// column combination) for exactly that reason. On top of that, this also
+// hard-caps the number of pages it will ever fetch, no matter what a
+// caller's query does: a previous version of this had no such cap and
+// relied entirely on "the last page came back short" to know when to stop,
+// which is not something to bet a browser tab's memory on - if that signal
+// is ever wrong (non-deterministic ordering, a client/server range mismatch,
+// anything), an unbounded loop that keeps concatenating full-sized pages
+// forever will exhaust memory and can take the whole browser (and, in
+// practice, the machine it's running on) down with it. 200 pages at 1,000
+// rows is 200,000 rows - far beyond any table this app has - so hitting the
+// cap always means something is wrong, never a legitimately large table.
 async function supaSelectAll_(buildQuery, pageSize) {
   pageSize = pageSize || 1000;
+  const MAX_PAGES = 200;
   let all = [];
   let from = 0;
-  for (;;) {
+  for (let page = 0; page < MAX_PAGES; page++) {
     const { data, error } = await buildQuery(from, from + pageSize - 1);
     if (error) return { data: null, error };
-    all = all.concat(data || []);
-    if (!data || data.length < pageSize) break;
+    if (!data || data.length === 0) break;
+    all = all.concat(data);
+    if (data.length < pageSize) break;
     from += pageSize;
+    if (page === MAX_PAGES - 1) {
+      console.error('supaSelectAll_: hit the ' + MAX_PAGES + '-page safety cap - stopping early with ' + all.length + ' rows. This should never happen; something (non-deterministic ordering, a broken .range()) is wrong.');
+    }
   }
   return { data: all, error: null };
 }
@@ -1031,7 +1060,7 @@ async function supaHydratePlaylists_(rows) {
   const ids = rows.map(r => r.id);
   const ownerIds = Array.from(new Set(rows.map(r => r.owner_id)));
   const [songsRes, sharesRes, ownersRes] = await Promise.all([
-    supaSelectAll_((from, to) => getSupa_().from('playlist_songs').select('playlist_id,song_id,position').in('playlist_id', ids).order('position').range(from, to)),
+    supaSelectAll_((from, to) => getSupa_().from('playlist_songs').select('playlist_id,song_id,position').in('playlist_id', ids).order('playlist_id').order('position').order('song_id').range(from, to)),
     getSupa_().from('playlist_shares').select('playlist_id,email').in('playlist_id', ids),
     getSupa_().from('profiles').select('id,email,name').in('id', ownerIds),
   ]);
@@ -1089,7 +1118,7 @@ async function supaApi(action, fields) {
     const data = await supaCached_(() => _supaListCache, c => _supaListCache = c, async () => {
       const { data, error } = await supaSelectAll_((from, to) => getSupa_().from('songs')
         .select('id,title,title_hebrew,artist,categories,capo,youtube_url,date_added,updated_at,chords_lyrics')
-        .range(from, to));
+        .order('id').range(from, to));
       throwIfErr_(error);
       return data;
     });
@@ -1103,7 +1132,7 @@ async function supaApi(action, fields) {
 
   if (action === 'listContent') {
     await supaRequireUser_();
-    const { data, error } = await supaSelectAll_((from, to) => getSupa_().from('songs').select('id,chords_lyrics,lyrics_only').range(from, to));
+    const { data, error } = await supaSelectAll_((from, to) => getSupa_().from('songs').select('id,chords_lyrics,lyrics_only').order('id').range(from, to));
     throwIfErr_(error);
     return { success: true, content: data.map(s => ({ id: s.id, chords_lyrics: s.chords_lyrics || '', lyrics_only: s.lyrics_only || '' })) };
   }
@@ -1149,7 +1178,7 @@ async function supaApi(action, fields) {
     const me = await supaRequireUser_();
     const scoped = !(me.is_admin && fields.scope !== 'mine');
     const { data, error } = await supaSelectAll_((from, to) => {
-      let q = getSupa_().from('requests').select('*').range(from, to);
+      let q = getSupa_().from('requests').select('*').order('id').range(from, to);
       if (scoped) q = q.eq('user_id', me.id);
       return q;
     });
@@ -1162,7 +1191,7 @@ async function supaApi(action, fields) {
     const me = await supaRequireUser_();
     const scoped = !(me.is_admin && fields.scope !== 'mine');
     const { data, error } = await supaSelectAll_((from, to) => {
-      let q = getSupa_().from('messages').select('*').range(from, to);
+      let q = getSupa_().from('messages').select('*').order('id').range(from, to);
       if (scoped) q = q.eq('user_id', me.id);
       return q;
     });
@@ -1182,8 +1211,8 @@ async function supaApi(action, fields) {
   if (action === 'getUsers') {
     await supaRequireAdmin_();
     const [rosterRes, msgRes] = await Promise.all([
-      supaSelectAll_((from, to) => getSupa_().from('admin_user_roster').select('*').range(from, to)),
-      supaSelectAll_((from, to) => getSupa_().from('messages').select('*').range(from, to)),
+      supaSelectAll_((from, to) => getSupa_().from('admin_user_roster').select('*').order('id').range(from, to)),
+      supaSelectAll_((from, to) => getSupa_().from('messages').select('*').order('id').range(from, to)),
     ]);
     throwIfErr_(rosterRes.error); throwIfErr_(msgRes.error);
     const users = (rosterRes.data || []).map(u => ({
@@ -2445,24 +2474,32 @@ function effectiveIsAdmin() { return !viewAsUser && !!(currentUser && currentUse
 // to the impersonated user, not the admin doing the impersonating — merge
 // this into the payload of any such write so the backend does that.
 function viewAsFields() { return viewAsUser ? { target_email: viewAsUser.email, target_name: viewAsUser.name, view_as: true } : {}; }
-// After a write, refresh whatever data that write could have changed: the
-// impersonated user's own snapshot during View As, or the normal global
-// caches otherwise (same refresh every write already did before View As
-// could make real changes).
+// After a write (currently: sendMessage/createRequest, neither of which
+// touches songs or playlists), refresh whatever that write could actually
+// have changed: the impersonated user's own snapshot during View As, or
+// nothing at all otherwise - renderContact() (the only caller) already
+// re-fetches requests/messages itself in the non-View-As case, so there was
+// never anything here for it to depend on.
+//
+// This used to unconditionally call loadSongs(false) first - a full
+// re-fetch of the ENTIRE song catalog plus every playlist (and, under
+// Supabase, every playlist's playlist_songs rows), on every single chat
+// message or song request, regardless of View As. That was free-ish on the
+// old Apps Script backend (server-side cache), so it went unnoticed; it is
+// not free at all against Supabase, and was a real contributor to "everything
+// takes forever" - see refreshPlaylistsOnly() above for the same fix already
+// made for playlist edits.
 function refreshAfterWrite() {
-  const base = loadSongs(false);
-  if (!viewAsUser) return base;
-  return base.then(() => api('getUserSnapshot', { target_email: viewAsUser.email })).then(data => {
+  if (!viewAsUser) return Promise.resolve();
+  return api('getUserSnapshot', { target_email: viewAsUser.email }).then(data => {
     viewAsData = { favorites: data.favorites || [], knownChords: data.knownChords || [], playlists: data.playlists || [], requests: data.requests || [], messages: data.messages || [] };
   });
 }
 
 // Playlist edits (create/add/remove/delete song, rename, etc.) only ever
-// change playlist data — refreshAfterWrite() above re-pulls the ENTIRE song
-// catalog (apiList(), thousands of rows) just to also get the fresh
-// playlists list, which is why "Add to Playlist" felt very slow: tapping a
-// playlist pill sat waiting on a full catalog reload before the modal would
-// even close. This re-fetches only what actually changed.
+// change playlist data, never the song catalog - this re-fetches only
+// that, rather than the whole catalog too (refreshAfterWrite() above used
+// to do exactly that, for the same kind of reason, before it was fixed).
 function refreshPlaylistsOnly() {
   if (viewAsUser) {
     return api('getUserSnapshot', { target_email: viewAsUser.email }).then(data => {
@@ -2850,14 +2887,15 @@ function renderDetail() {
 
   const { language, tags } = splitCategories(song.categories);
 
-  // The 4 action tiles are always Favorite/+Playlist/Print, plus Report
-  // unless we're viewing as another user (a report should come from the
-  // real signed-in admin, not get attributed to whoever's being viewed-as).
+  // The 4 action tiles are always Favorite/+Playlist/Report/Print - Report
+  // always attributes to the real signed-in admin (createErrorReport uses
+  // the caller's own profile, never the View-As target - see supaApi), so
+  // it stays visible during View As too rather than disappearing.
   const actionTiles = [
     `<div class="detail-tile action${isFav?' active':''}" data-fav-tile="${song.id}" onclick="toggleFavoriteFor('${song.id}')">${isFav?SVG_ICONS.heart:SVG_ICONS.heartOutline}<div class="tile-label">${isFav?'Favorited':'Favorite'}</div></div>`,
-    `<div class="detail-tile action" onclick="openAddToPlaylist('${song.id}')">${SVG_ICONS.playlists}<div class="tile-label">+ Playlist</div></div>`
+    `<div class="detail-tile action" onclick="openAddToPlaylist('${song.id}')">${SVG_ICONS.playlists}<div class="tile-label">+ Playlist</div></div>`,
+    `<div class="detail-tile action" onclick="showReportForm=!showReportForm;renderDetail();">${SVG_ICONS.error}<div class="tile-label">Report</div></div>`
   ];
-  if (!viewAsUser) actionTiles.push(`<div class="detail-tile action" onclick="showReportForm=!showReportForm;renderDetail();">${SVG_ICONS.error}<div class="tile-label">Report</div></div>`);
   actionTiles.push(`<div class="detail-tile action" onclick="openPrintPreview('${song.id}')">${SVG_ICONS.print}<div class="tile-label">Print</div></div>`);
 
   const chordChips = contentReady
@@ -3462,7 +3500,7 @@ function renderPlaylistDetail() {
   let html = `<span class="backlink" onclick="goTo('playlists')">‹ Back to Playlists</span>
     <div class="song-header">
       <div style="display:flex;align-items:center;gap:10px;">${playlistIconHtml(p.icon, 36)}<div><h2 style="margin-bottom:2px">${escapeHtml(p.title)}</h2><div class="meta">by ${escapeHtml(p.owner_name||p.owner_email)} · ${p.visibility}</div></div></div>
-      ${canEdit ? `<div><button class="btn secondary" onclick="editPlaylistSettings('${p.id}')">Settings</button> <button class="btn danger" onclick="deletePlaylistConfirm('${p.id}')">Delete</button></div>` : ''}
+      ${canEdit ? `<div><button class="btn" onclick="openAddSongsToPlaylist('${p.id}')">+ Add Songs</button> <button class="btn secondary" onclick="editPlaylistSettings('${p.id}')">Settings</button> <button class="btn danger" onclick="deletePlaylistConfirm('${p.id}')">Delete</button></div>` : ''}
     </div>`;
   // Offline availability is a personal, on-this-device thing — not tied to
   // owning/editing the playlist, so it's offered to anyone viewing it
@@ -3667,6 +3705,66 @@ function saveAddToPlaylist(songId) {
   Promise.all(ops)
     .then(() => refreshPlaylistsOnly())
     .then(() => { closeModal(); addToPlaylistSelection = new Set(); })
+    .catch(err => alert(err.message));
+}
+
+// Add Songs (from a playlist's own page): the reverse direction of "Add to
+// Playlist" above (that one goes song -> pick playlist; this one goes
+// playlist -> search/pick songs). Only re-renders the results list on each
+// keystroke (not the whole modal via openModal, which would tear down and
+// recreate the search input, losing focus/cursor position mid-type) - same
+// reasoning as the main Songs search box (renderSongListBody vs renderList).
+let addSongsToPlaylistState = null; // { playlistId, query }
+function openAddSongsToPlaylist(playlistId) {
+  addSongsToPlaylistState = { playlistId, query: '' };
+  renderAddSongsToPlaylistModal();
+}
+function renderAddSongsToPlaylistModal() {
+  const st = addSongsToPlaylistState;
+  if (!st) return;
+  const p = playlists.find(pl => pl.id === st.playlistId) || (viewAsUser && (viewAsData.playlists||[]).find(pl => pl.id === st.playlistId));
+  openModal(`
+    <h2>Add Songs${p ? ' to "' + escapeHtml(p.title) + '"' : ''}</h2>
+    <input type="text" id="addSongsSearch" placeholder="Search by title or artist…" value="${escapeHtml(st.query)}">
+    <div id="addSongsResults" style="max-height:320px;overflow-y:auto;margin-top:8px;"></div>
+    <div class="modal-actions"><button class="btn" onclick="closeModal();renderPlaylistDetail();">Done</button></div>
+  `);
+  const input = document.getElementById('addSongsSearch');
+  if (input) {
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+    input.addEventListener('input', e => { addSongsToPlaylistState.query = e.target.value; renderAddSongsResultsOnly_(); });
+  }
+  renderAddSongsResultsOnly_();
+}
+function renderAddSongsResultsOnly_() {
+  const st = addSongsToPlaylistState;
+  const resultsEl = document.getElementById('addSongsResults');
+  if (!st || !resultsEl) return;
+  const p = playlists.find(pl => pl.id === st.playlistId) || (viewAsUser && (viewAsData.playlists||[]).find(pl => pl.id === st.playlistId));
+  const already = new Set((p && p.song_ids) || []);
+  const q = st.query.trim().toLowerCase();
+  if (!q) { resultsEl.innerHTML = '<div class="muted" style="padding:10px 0">Type to search the song database…</div>'; return; }
+  // Capped at 40 matches - this is a quick picker, not the full Songs list
+  // (which already exists for browsing); title/artist only (no lyrics
+  // search here, to keep it fast and not depend on the full-lyrics catalog
+  // being loaded yet).
+  const results = songs.filter(s => (s.title||'').toLowerCase().includes(q) || (s.artist||'').toLowerCase().includes(q)).slice(0, 40);
+  resultsEl.innerHTML = results.length ? results.map(s => `
+    <div class="song-row" style="display:flex;align-items:center;justify-content:space-between;">
+      <div><div class="title">${escapeHtml(s.title)}</div><div class="artist">${escapeHtml(s.artist||'')}</div></div>
+      ${already.has(s.id) ? '<span class="muted">Added ✓</span>' : `<button class="btn secondary" onclick="addSongToPlaylist_('${s.id}')">Add</button>`}
+    </div>`).join('') : '<div class="muted" style="padding:10px 0">No matching songs.</div>';
+}
+function addSongToPlaylist_(songId) {
+  const st = addSongsToPlaylistState;
+  if (!st) return;
+  const p = playlists.find(pl => pl.id === st.playlistId) || (viewAsUser && (viewAsData.playlists||[]).find(pl => pl.id === st.playlistId));
+  if (!p) return;
+  const newIds = Array.from(new Set((p.song_ids||[]).concat([songId])));
+  api('updatePlaylist', Object.assign({ id: st.playlistId, song_ids: newIds }, viewAsFields()))
+    .then(() => refreshPlaylistsOnly())
+    .then(() => renderAddSongsResultsOnly_())
     .catch(err => alert(err.message));
 }
 
