@@ -778,9 +778,33 @@ async function handleCredentialResponse(response) {
   startAfterSignIn(); // already a no-op after the first call (see dataStarted guard inside)
 }
 
-function initGoogleSignIn() {
+// Google's OpenID Connect "nonce" replay-protection handshake: Google needs
+// the SHA-256 hash (hex) of a random value in google.accounts.id.initialize
+// ({nonce}); it then embeds that same hash inside every id_token it issues
+// for this page's client config (including silent FedCM reissues, since
+// they all reuse this one initialize() call - see the 'load' listener at
+// the bottom of this file, which only ever calls initGoogleSignIn once).
+// Supabase's signInWithIdToken({nonce}) must then be given the ORIGINAL
+// (unhashed) value so it can hash it itself and check it matches the
+// token's claim - see supaSignInWithGoogleIdToken_ above. Skipping this
+// used to work fine (this file never set a nonce at all), right up until
+// Google's FedCM-based prompt started embedding its own nonce claim into
+// the id_token regardless of whether the app asked for one - at that point
+// Supabase sees a nonce claim with nothing to check it against and rejects
+// with "Passed nonce and nonce in id_token should either both exist or
+// not."
+let _googleSignInNonce = null; // the RAW value; only its hash ever goes to Google
+async function generateGoogleNonce_() {
+  const raw = Array.from(crypto.getRandomValues(new Uint8Array(32))).map(b => b.toString(16).padStart(2, '0')).join('');
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw));
+  const hashed = Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+  return { raw, hashed };
+}
+async function initGoogleSignIn() {
   if (!window.google || !CONFIG.CLIENT_ID || CONFIG.CLIENT_ID.indexOf('PASTE_YOUR') === 0) return;
-  google.accounts.id.initialize({ client_id: CONFIG.CLIENT_ID, callback: handleCredentialResponse, auto_select: true, use_fedcm_for_prompt: true });
+  const { raw, hashed } = await generateGoogleNonce_();
+  _googleSignInNonce = raw;
+  google.accounts.id.initialize({ client_id: CONFIG.CLIENT_ID, callback: handleCredentialResponse, auto_select: true, use_fedcm_for_prompt: true, nonce: hashed });
   renderUserArea();
   if (!currentUser) mountGateSignInButton();
   google.accounts.id.prompt(); // silent attempt; no-op if not eligible
@@ -1037,8 +1061,16 @@ async function supaRequireAdmin_() {
 }
 // Called from handleCredentialResponse/signOut in the main script above,
 // only when CONFIG.USE_SUPABASE is true.
+//
+// The `nonce` here MUST be the same raw value whose SHA-256 hash was handed
+// to google.accounts.id.initialize({nonce}) in initGoogleSignIn() below - see
+// the comment on _googleSignInNonce for why this pairing exists at all
+// (Supabase rejects the sign-in with "Passed nonce and nonce in id_token
+// should either both exist or not" otherwise, once Google's id_token embeds
+// a nonce claim, which the FedCM-based prompt now does even though this file
+// never used to have to think about nonces at all).
 async function supaSignInWithGoogleIdToken_(idToken) {
-  const { error } = await getSupa_().auth.signInWithIdToken({ provider: 'google', token: idToken });
+  const { error } = await getSupa_().auth.signInWithIdToken({ provider: 'google', token: idToken, nonce: _googleSignInNonce || undefined });
   if (error) throw new Error(error.message);
   await supaCurrentProfile_(true); // refresh the cached profile now that a session exists
 }
