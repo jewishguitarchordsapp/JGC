@@ -606,6 +606,8 @@ let viewAsData = null;     // {favorites,knownChords,playlists,requests,messages
 let usersCache = [];       // admin Users tab cache
 let userSearch = '';
 let usersPage = 0;
+let userSort = 'name';         // 'name' | 'email' | 'lastActive' - see sortUsersList_
+let expandedUserEmail = null;  // which row (by email) has its details open, if any
 let songContentById = {};  // {id: {chords_lyrics,lyrics_only}} — persists across periodic list refreshes
 let songContentLoaded = false; // true once the full-corpus background text fetch has completed
 
@@ -4297,38 +4299,89 @@ function loadAdminUsers() {
 function renderUsersTable() {
   const body = document.getElementById('adminBody');
   if (!body) return;
-  // The search box lives outside the part that re-renders on every
-  // keystroke (renderUsersList's #usersListContainer) — rebuilding this
-  // <input> itself on each keystroke (as one combined innerHTML used to)
-  // destroys and recreates the DOM node, which drops focus after every
-  // single character typed. Building it once here and only ever touching
-  // the container below it keeps focus (and cursor position) intact.
-  body.innerHTML = `<div style="margin-bottom:10px"><input type="text" id="userSearchBox" placeholder="Search by name or email…" value="${escapeHtml(userSearch)}" style="max-width:320px"></div>
+  // The search box (and now the sort picker) live outside the part that
+  // re-renders on every keystroke (renderUsersList's #usersListContainer) —
+  // rebuilding this <input> itself on each keystroke (as one combined
+  // innerHTML used to) destroys and recreates the DOM node, which drops
+  // focus after every single character typed. Building it once here and
+  // only ever touching the container below it keeps focus (and cursor
+  // position) intact.
+  body.innerHTML = `<div style="margin-bottom:10px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+      <input type="text" id="userSearchBox" placeholder="Search by name or email…" value="${escapeHtml(userSearch)}" style="max-width:320px;flex:1;min-width:180px;">
+      <select id="userSortSelect" style="max-width:220px;">
+        <option value="name" ${userSort==='name'?'selected':''}>Sort: Name (A–Z)</option>
+        <option value="email" ${userSort==='email'?'selected':''}>Sort: Email (A–Z)</option>
+        <option value="lastActive" ${userSort==='lastActive'?'selected':''}>Sort: Last active (newest)</option>
+      </select>
+    </div>
     <div id="usersListContainer"></div>`;
   const box = document.getElementById('userSearchBox');
   if (box) box.addEventListener('input', e => { userSearch = e.target.value; usersPage = 0; renderUsersList(); });
+  const sel = document.getElementById('userSortSelect');
+  if (sel) sel.addEventListener('change', e => { userSort = e.target.value; usersPage = 0; renderUsersList(); });
   renderUsersList();
 }
+function sortUsersList_(list) {
+  const arr = list.slice();
+  if (userSort === 'email') {
+    arr.sort((a, b) => a.email.toLowerCase().localeCompare(b.email.toLowerCase()));
+  } else if (userSort === 'lastActive') {
+    // Users who have never been active sort to the end regardless of
+    // direction - "newest first" is about surfacing recent activity, not
+    // about ranking "never active" as if it were the oldest possible date.
+    arr.sort((a, b) => {
+      if (!a.lastActivity && !b.lastActivity) return 0;
+      if (!a.lastActivity) return 1;
+      if (!b.lastActivity) return -1;
+      return new Date(b.lastActivity) - new Date(a.lastActivity);
+    });
+  } else {
+    arr.sort((a, b) => (a.name || a.email).toLowerCase().localeCompare((b.name || b.email).toLowerCase()));
+  }
+  return arr;
+}
+function toggleUserExpanded(email) {
+  expandedUserEmail = expandedUserEmail === email ? null : email;
+  renderUsersList();
+}
+// Compact by default (name, email, last active) - the "View As" button and
+// every other stat (favorites/known chords/playlists/requests/messages/
+// errors/level/language) only render for the one row that's expanded, so
+// scanning or sorting the full list doesn't mean scrolling past a wall of
+// per-user detail you didn't ask to see.
 function renderUsersList() {
   const container = document.getElementById('usersListContainer');
   if (!container) return;
   const q = userSearch.toLowerCase();
-  const list = usersCache.filter(u => !q || u.email.toLowerCase().includes(q) || (u.name||'').toLowerCase().includes(q));
-  // Card layout (not a wide table) so the "View As" button is always visible
-  // without needing to scroll sideways — it used to be the last column of a
-  // 10-column table and could end up off-screen.
-  container.innerHTML = `${list.length === 0 ? `<div class="empty">No users found.</div>` : pageSlice(list, usersPage).map(u => `
-      <div class="playlist-card" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
-        <div style="display:flex;gap:10px;align-items:flex-start;">
-          ${u.photo ? `<img src="${escapeHtml(u.photo)}" alt="" style="width:36px;height:36px;border-radius:50%;flex:0 0 auto;margin-top:2px;object-fit:cover;">` : ''}
-          <div>
-            <div class="title">${userHasUnreadMessage(u.email) ? '<span class="tab-dot"></span>' : ''}${escapeHtml(u.name||u.email)}</div>
-            <div class="muted">${escapeHtml(u.email)}${u.level ? ' · ' + escapeHtml(u.level) : ''}${u.language ? ' · ' + escapeHtml(u.language) : ''}</div>
-            <div class="muted" style="margin-top:4px">★ ${u.favorites||0} favorites · ${u.knownChords ? 'chords set' : 'no chords set'} · ${u.playlists||0} playlists · ${u.requests||0} requests · ${u.messages||0} messages · ${u.errors||0} error reports${u.lastActivity ? ' · last active ' + new Date(u.lastActivity).toLocaleDateString() : ''}</div>
+  const list = sortUsersList_(usersCache.filter(u => !q || u.email.toLowerCase().includes(q) || (u.name||'').toLowerCase().includes(q)));
+  container.innerHTML = `${list.length === 0 ? `<div class="empty">No users found.</div>` : pageSlice(list, usersPage).map(u => {
+      const expanded = expandedUserEmail === u.email;
+      return `
+      <div class="playlist-card" style="cursor:pointer;" onclick='toggleUserExpanded(${JSON.stringify(u.email)})'>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+          <div style="display:flex;gap:10px;align-items:center;min-width:0;flex:1;">
+            ${u.photo ? `<img src="${escapeHtml(u.photo)}" alt="" style="width:32px;height:32px;border-radius:50%;flex:0 0 auto;object-fit:cover;">` : ''}
+            <div style="min-width:0;">
+              <div class="title" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${userHasUnreadMessage(u.email) ? '<span class="tab-dot"></span>' : ''}${escapeHtml(u.name||u.email)}</div>
+              <div class="muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(u.email)}</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;flex:none;">
+            <span class="muted" style="white-space:nowrap;">${u.lastActivity ? new Date(u.lastActivity).toLocaleDateString() : 'never active'}</span>
+            <span class="adv-chevron${expanded?' open':''}">›</span>
           </div>
         </div>
-        <button class="btn secondary" onclick='enterViewAs(${JSON.stringify(u.email)},${JSON.stringify(u.name||u.email)})'>View As</button>
-      </div>`).join('')}
+        ${expanded ? `
+        <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
+          <div class="muted">
+            ${u.level ? escapeHtml(u.level) : ''}${u.level && u.language ? ' · ' : ''}${u.language ? escapeHtml(u.language) : ''}${(u.level||u.language) ? '<br>' : ''}
+            ★ ${u.favorites||0} favorites · ${u.knownChords ? 'chords set' : 'no chords set'} · ${u.playlists||0} playlists<br>
+            ${u.requests||0} requests · ${u.messages||0} messages · ${u.errors||0} error reports
+          </div>
+          <button class="btn secondary" onclick='event.stopPropagation();enterViewAs(${JSON.stringify(u.email)},${JSON.stringify(u.name||u.email)})'>View As</button>
+        </div>` : ''}
+      </div>`;
+    }).join('')}
     ${pagerHtml(list.length, usersPage, 'changeUsersPage')}
     <div class="muted" style="margin-top:8px">${list.length} user${list.length===1?'':'s'}${userSearch? ' matching "'+escapeHtml(userSearch)+'"':''} · ${usersCache.length} total</div>`;
 }
