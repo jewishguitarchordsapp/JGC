@@ -2633,6 +2633,28 @@ function refreshPlaylistsOnly() {
   }
   return api('getPlaylists', {}).then(pl => { playlists = pl.playlists || []; });
 }
+// Every createPlaylist/updatePlaylist call already returns that one
+// playlist, fully hydrated - patching it straight into the local
+// playlists/viewAsData arrays reflects the edit with zero extra requests.
+// Saving a single playlist edit used to call refreshPlaylistsOnly() above
+// instead, which re-fetches and re-hydrates EVERY playlist visible to this
+// user (all of them, for an admin - hundreds) just to show one change; that
+// full-list reload was why pressing Save on a playlist could "take a long
+// time". deletePlaylist has no such response to patch in, so its own
+// callers just splice the known id out locally (removePlaylistLocally_).
+function applyPlaylistPatch_(playlist) {
+  if (!playlist) return;
+  const list = viewAsUser ? (viewAsData && viewAsData.playlists) : playlists;
+  if (!list) return;
+  const idx = list.findIndex(p => p.id === playlist.id);
+  if (idx >= 0) list[idx] = playlist; else list.push(playlist);
+}
+function removePlaylistLocally_(id) {
+  const list = viewAsUser ? (viewAsData && viewAsData.playlists) : playlists;
+  if (!list) return;
+  const idx = list.findIndex(p => p.id === id);
+  if (idx >= 0) list.splice(idx, 1);
+}
 
 function songKnown(song) {
   // chords_used comes precomputed from the server on every 'list' call (see
@@ -3612,7 +3634,7 @@ async function createPlaylistPrompt() {
   const title = await customPromptAsync('Playlist name', '', { title: 'New Playlist', submitLabel: 'Create' });
   if (!title) return;
   api('createPlaylist', Object.assign({ title, visibility: 'private', song_ids: [], shared_with: [] }, viewAsFields()))
-    .then(() => refreshPlaylistsOnly()).then(() => goTo('playlists'))
+    .then(r => { applyPlaylistPatch_(r.playlist); goTo('playlists'); })
     .catch(err => alert(err.message));
 }
 function renderPlaylistDetail() {
@@ -3646,7 +3668,7 @@ function renderPlaylistDetail() {
   if (canEdit && list.length > 1) {
     makeReorderable(document.getElementById('playlistSongList'), (newIds) => {
       api('updatePlaylist', Object.assign({ id: p.id, song_ids: newIds }, viewAsFields()))
-        .then(() => refreshPlaylistsOnly())
+        .then(r => applyPlaylistPatch_(r.playlist))
         .catch(err => { alert(err.message); renderPlaylistDetail(); }); // snap back to the server's order on failure
     });
   }
@@ -3766,17 +3788,17 @@ function savePlaylistSettings() {
   const title = (st.title || '').trim();
   if (!title) { alert('Enter a playlist name.'); return; }
   api('updatePlaylist', Object.assign({ id: st.id, title, visibility: st.visibility, shared_with: st.visibility === 'shared' ? st.sharedWith : [], icon: st.icon }, viewAsFields()))
-    .then(() => refreshPlaylistsOnly()).then(() => { playlistSettingsState = null; closeModal(); render(); })
+    .then(r => { applyPlaylistPatch_(r.playlist); playlistSettingsState = null; closeModal(); render(); })
     .catch(err => alert(err.message));
 }
 async function deletePlaylistConfirm(id) {
   if (!(await customConfirmAsync('Delete this playlist? This cannot be undone.', { title: 'Delete playlist', confirmLabel: 'Delete', danger: true }))) return;
-  api('deletePlaylist', Object.assign({ id }, viewAsFields())).then(() => refreshPlaylistsOnly()).then(() => goTo('playlists')).catch(err => alert(err.message));
+  api('deletePlaylist', Object.assign({ id }, viewAsFields())).then(() => { removePlaylistLocally_(id); goTo('playlists'); }).catch(err => alert(err.message));
 }
 function removeFromPlaylist(playlistId, songId) {
   const p = playlists.find(pl => pl.id === playlistId) || (viewAsUser && (viewAsData.playlists||[]).find(pl => pl.id === playlistId));
   const newIds = (p.song_ids||[]).filter(id => id !== songId);
-  api('updatePlaylist', Object.assign({ id: playlistId, song_ids: newIds }, viewAsFields())).then(() => refreshPlaylistsOnly()).then(() => render()).catch(err => alert(err.message));
+  api('updatePlaylist', Object.assign({ id: playlistId, song_ids: newIds }, viewAsFields())).then(r => { applyPlaylistPatch_(r.playlist); render(); }).catch(err => alert(err.message));
 }
 // Add to Playlist: playlist bubbles are multi-select toggles (pre-checked
 // for whichever playlists already contain this song, so toggling one off
@@ -3811,10 +3833,11 @@ function createPlaylistForAdd(songId) {
   const title = (input && input.value || '').trim();
   if (!title) { alert('Enter a playlist name.'); return; }
   api('createPlaylist', Object.assign({ title, visibility:'private', song_ids:[], shared_with:[] }, viewAsFields()))
-    .then(r => refreshPlaylistsOnly().then(() => {
+    .then(r => {
+      applyPlaylistPatch_(r.playlist);
       if (r && r.playlist && r.playlist.id) addToPlaylistSelection.add(r.playlist.id);
       renderAddToPlaylistModal(songId);
-    }))
+    })
     .catch(err => alert(err.message));
 }
 // Diffs the selected set against each of the user's playlists' current
@@ -3826,13 +3849,15 @@ function saveAddToPlaylist(songId) {
   const ops = mine.map(p => {
     const has = (p.song_ids||[]).includes(songId);
     const shouldHave = addToPlaylistSelection.has(p.id);
-    if (has === shouldHave) return Promise.resolve();
+    if (has === shouldHave) return Promise.resolve(null);
     const newIds = shouldHave ? Array.from(new Set((p.song_ids||[]).concat([songId]))) : (p.song_ids||[]).filter(id => id !== songId);
     return api('updatePlaylist', Object.assign({ id: p.id, song_ids: newIds }, viewAsFields()));
   });
   Promise.all(ops)
-    .then(() => refreshPlaylistsOnly())
-    .then(() => { closeModal(); addToPlaylistSelection = new Set(); })
+    .then(results => {
+      results.forEach(r => { if (r && r.playlist) applyPlaylistPatch_(r.playlist); });
+      closeModal(); addToPlaylistSelection = new Set();
+    })
     .catch(err => alert(err.message));
 }
 
@@ -3891,8 +3916,7 @@ function addSongToPlaylist_(songId) {
   if (!p) return;
   const newIds = Array.from(new Set((p.song_ids||[]).concat([songId])));
   api('updatePlaylist', Object.assign({ id: st.playlistId, song_ids: newIds }, viewAsFields()))
-    .then(() => refreshPlaylistsOnly())
-    .then(() => renderAddSongsResultsOnly_())
+    .then(r => { applyPlaylistPatch_(r.playlist); renderAddSongsResultsOnly_(); })
     .catch(err => alert(err.message));
 }
 
