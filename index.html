@@ -1120,6 +1120,28 @@ async function supaEffectiveProfile_(me, fields) {
   return me;
 }
 
+// A plain PostgREST .in('col', ids) filter puts every one of those ids
+// directly in the request's URL - fine for a normal user's own handful of
+// playlists, but RLS lets an admin see EVERY playlist (943 of them, in this
+// app's data), and cramming 943 UUIDs into one URL's query string blows
+// past a length limit enforced by the layer in front of PostgREST (Kong/the
+// CDN) - the request gets rejected outright before it ever reaches Postgres,
+// coming back as a bare, detail-less "400 Bad Request" with no error body to
+// explain why. This is exactly what an admin hit loading playlists.
+// Splitting the id list into small batches (and paging each batch past the
+// existing 1,000-row cap too, same as supaSelectAll_) keeps every request's
+// URL a safe, bounded size no matter how many playlists/shares/owners exist.
+async function supaSelectAllByIdChunks_(buildQuery, ids, chunkSize) {
+  chunkSize = chunkSize || 150;
+  let all = [];
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize);
+    const { data, error } = await supaSelectAll_((from, to) => buildQuery(chunk, from, to));
+    if (error) return { data: null, error };
+    all = all.concat(data || []);
+  }
+  return { data: all, error: null };
+}
 // ---- shared playlist hydration (join tables -> old flat shape) ------
 // Old shape (from Code.gs's Playlists tab): {id,owner_email,owner_name,
 // title,song_ids:[],visibility,shared_with:[],updated_at,icon}. The new
@@ -1132,9 +1154,9 @@ async function supaHydratePlaylists_(rows) {
   const ids = rows.map(r => r.id);
   const ownerIds = Array.from(new Set(rows.map(r => r.owner_id)));
   const [songsRes, sharesRes, ownersRes] = await Promise.all([
-    supaSelectAll_((from, to) => getSupa_().from('playlist_songs').select('playlist_id,song_id,position').in('playlist_id', ids).order('playlist_id').order('position').order('song_id').range(from, to)),
-    getSupa_().from('playlist_shares').select('playlist_id,email').in('playlist_id', ids),
-    getSupa_().from('profiles').select('id,email,name').in('id', ownerIds),
+    supaSelectAllByIdChunks_((chunk, from, to) => getSupa_().from('playlist_songs').select('playlist_id,song_id,position').in('playlist_id', chunk).order('playlist_id').order('position').order('song_id').range(from, to), ids),
+    supaSelectAllByIdChunks_((chunk, from, to) => getSupa_().from('playlist_shares').select('playlist_id,email').in('playlist_id', chunk).order('playlist_id').range(from, to), ids),
+    supaSelectAllByIdChunks_((chunk, from, to) => getSupa_().from('profiles').select('id,email,name').in('id', chunk).order('id').range(from, to), ownerIds),
   ]);
   throwIfErr_(songsRes.error); throwIfErr_(sharesRes.error); throwIfErr_(ownersRes.error);
   const songsByPl = {}, sharesByPl = {}, ownerById = {};
@@ -1171,10 +1193,14 @@ async function supaSetPlaylistShares_(playlistId, emails) {
 }
 
 // ---- requests/messages/errors: user_id -> user_email/user_name --------
+// Same unbounded-.in()-URL risk as supaHydratePlaylists_ above (an admin's
+// getMessages/getRequests/getErrors can reference hundreds of distinct
+// users) - chunked the same way so this can never blow past the URL-length
+// limit that caused the "Bad Request" on playlists.
 async function supaProfileMapByIds_(ids) {
   const uniq = Array.from(new Set(ids));
   if (!uniq.length) return {};
-  const { data, error } = await getSupa_().from('profiles').select('id,email,name').in('id', uniq);
+  const { data, error } = await supaSelectAllByIdChunks_((chunk, from, to) => getSupa_().from('profiles').select('id,email,name').in('id', chunk).order('id').range(from, to), uniq);
   throwIfErr_(error);
   const map = {};
   (data || []).forEach(p => { map[p.id] = p; });
