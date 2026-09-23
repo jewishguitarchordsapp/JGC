@@ -1054,6 +1054,7 @@ async function supaSelectAll_(buildQuery, pageSize) {
 // - a few seconds of staleness on these two reads is a far better trade.
 let _supaListCache = null;      // { at, promise }
 let _supaPlaylistsCache = null; // { at, promise }
+let _supaUsersCache = null;     // { at, promise }
 const SUPA_CACHE_MS = 15000;
 function supaCached_(getCache, setCache, loader) {
   const cached = getCache();
@@ -1321,10 +1322,21 @@ async function supaApi(action, fields) {
 
   if (action === 'getUsers') {
     await supaRequireAdmin_();
-    const [rosterRes, msgRes] = await Promise.all([
-      supaSelectAll_((from, to) => getSupa_().from('admin_user_roster').select('*').order('id').range(from, to)),
-      supaSelectAll_((from, to) => getSupa_().from('messages').select('*').order('id').range(from, to)),
-    ]);
+    // Same 15s client cache as 'list'/'getPlaylists' above - this was the
+    // one heavy admin read that had no caching at all, so re-opening the
+    // Users tab (or switching tabs and back) inside that window re-showed
+    // the same data instantly instead of re-running the full roster query
+    // again. This does NOT fix a slow first load by itself - if the tab is
+    // slow the very first time it's opened, that's the admin_user_roster
+    // view itself (see fix_admin_user_roster_perf.sql) not yet having been
+    // applied on the live database, which this cache can't paper over.
+    const { rosterRes, msgRes } = await supaCached_(() => _supaUsersCache, c => _supaUsersCache = c, async () => {
+      const [rosterRes, msgRes] = await Promise.all([
+        supaSelectAll_((from, to) => getSupa_().from('admin_user_roster').select('*').order('id').range(from, to)),
+        supaSelectAll_((from, to) => getSupa_().from('messages').select('*').order('id').range(from, to)),
+      ]);
+      return { rosterRes, msgRes };
+    });
     throwIfErr_(rosterRes.error); throwIfErr_(msgRes.error);
     const users = (rosterRes.data || []).map(u => ({
       email: u.email, name: u.name || u.email, photo: u.photo || '', level: u.level || '', language: u.language || '',
