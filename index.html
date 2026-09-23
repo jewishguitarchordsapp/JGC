@@ -3092,12 +3092,18 @@ function submitReport(songId) {
 function changeCapo(delta) { playerState.capo = Math.max(0, Math.min(11, playerState.capo + delta)); renderDetail(); }
 // "My Capo" tile (detail-tiles-row): a friendlier one-tap way for the player
 // to record which capo fret is comfortable for THEM on this song, separate
-// from the song's own recommended default. Picking a number also sets
-// playerState.capo so the chart transposes to match immediately.
+// from the song's own recommended default. This is a personal note only —
+// per the user's explicit intent, picking a number here must NOT change the
+// displayed chart (that's what the separate capo stepper in the Advanced
+// panel, changeCapo() above, is for - it deliberately transposes). Earlier
+// versions of this function also set playerState.capo, which transposed
+// the chart as a side effect of just recording a preference - that was
+// reported as a bug ("setting my capo should not change the chords") and
+// is fixed by leaving playerState.capo alone here entirely.
 function openMyCapoPicker() {
   openModal(`
     <h2>Set your capo</h2>
-    <p class="muted">Pick the capo fret that's most comfortable for you on this song.</p>
+    <p class="muted">Pick the capo fret that's most comfortable for you on this song. This won't change how the chords are displayed.</p>
     <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">
       ${Array.from({length:10},(_,i)=>i+1).map(n => `<button class="stepper-btn" style="width:38px;height:38px;font-size:15px;${playerState.myCapo===n?'background:var(--teal);color:#fff;border-color:var(--teal);':''}" onclick="setMyCapo(${n})">${n}</button>`).join('')}
     </div>
@@ -3109,14 +3115,11 @@ function openMyCapoPicker() {
 }
 function setMyCapo(n) {
   playerState.myCapo = n;
-  playerState.capo = n;
   closeModal();
   renderDetail();
 }
 function clearMyCapo() {
-  const song = songs.find(s => s.id === view.id);
   playerState.myCapo = null;
-  playerState.capo = song ? (song.capo||0) : 0;
   closeModal();
   renderDetail();
 }
