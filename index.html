@@ -960,6 +960,32 @@ async function api(action, fields) {
    touched to work against the new Postgres/Supabase backend.
    ============================================================ */
 
+// The supabase-js UMD bundle loads via a plain <script async defer> tag
+// (see <head>) so this file's own inline script - which is NOT deferred,
+// and can fire off a Supabase call immediately at page load if a cached
+// signed-in session exists (see loadAuthCache/currentUser near INIT below)
+// - has no guarantee that bundle has actually finished downloading and
+// running yet, especially on a slow connection. getSupa_() used to just
+// throw the one time window.supabase wasn't there yet ("Supabase library
+// did not load yet"), which is exactly the race this was hitting. Every
+// real entry point into this adapter (supaApi, supaSignInWithGoogleIdToken_,
+// supaSignOut_) now awaits ensureSupabaseLib_() first, which resolves as
+// soon as the library actually shows up instead of failing immediately.
+let _supabaseLibReadyPromise = null;
+function ensureSupabaseLib_() {
+  if (window.supabase) return Promise.resolve();
+  if (_supabaseLibReadyPromise) return _supabaseLibReadyPromise;
+  _supabaseLibReadyPromise = new Promise((resolve, reject) => {
+    const start = Date.now();
+    const TIMEOUT_MS = 15000;
+    (function poll() {
+      if (window.supabase) { resolve(); return; }
+      if (Date.now() - start > TIMEOUT_MS) { reject(new Error('Could not load the Supabase library — check your connection and try again.')); return; }
+      setTimeout(poll, 100);
+    })();
+  });
+  return _supabaseLibReadyPromise;
+}
 let _supaClient = null;
 function getSupa_() {
   if (_supaClient) return _supaClient;
@@ -1070,13 +1096,14 @@ async function supaRequireAdmin_() {
 // a nonce claim, which the FedCM-based prompt now does even though this file
 // never used to have to think about nonces at all).
 async function supaSignInWithGoogleIdToken_(idToken) {
+  await ensureSupabaseLib_();
   const { error } = await getSupa_().auth.signInWithIdToken({ provider: 'google', token: idToken, nonce: _googleSignInNonce || undefined });
   if (error) throw new Error(error.message);
   await supaCurrentProfile_(true); // refresh the cached profile now that a session exists
 }
 async function supaSignOut_() {
   supaProfileCache = null;
-  try { await getSupa_().auth.signOut(); } catch (e) {}
+  try { await ensureSupabaseLib_(); await getSupa_().auth.signOut(); } catch (e) {}
 }
 // Mirrors effectiveIdentity_ in Code.gs: a write is attributed to the
 // caller's own profile, unless they're an admin acting via View As
@@ -1156,6 +1183,7 @@ async function supaProfileMapByIds_(ids) {
 
 async function supaApi(action, fields) {
   fields = fields || {};
+  await ensureSupabaseLib_();
 
   // ================= reads =================
   if (action === 'list') {
