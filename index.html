@@ -415,18 +415,20 @@ const CONFIG = {
   // section below for everything this actually drives. ---
   SUPABASE_URL: 'https://elzjljcwpjlixirajcrj.supabase.co',
   SUPABASE_ANON_KEY: 'sb_publishable_Mt9Z4G2GlVLxDN8JkFiukQ_Kx9kAHYr',
-  // Testing switch, deliberately NOT a permanent site-wide setting: visiting
-  // ?backend=supabase once opts THIS BROWSER into the new backend (recorded
-  // in localStorage so it survives a reload/new tab); ?backend=sheets
-  // switches back. Nobody else visiting the live site is affected either
-  // way — the shipped default below is 'sheets' until an actual cutover.
+  // CUTOVER: Supabase is now the default backend for the plain link, no
+  // query string needed - this used to default to 'sheets' with
+  // ?backend=supabase as an opt-in for testing only; now it's the reverse.
+  // ?backend=sheets is kept as an explicit, per-browser rollback switch
+  // (recorded in localStorage so it survives a reload/new tab) in case one
+  // specific device needs to go back to the old backend for any reason;
+  // ?backend=supabase explicitly re-opts a browser back in after that.
   USE_SUPABASE: (function () {
     try {
       const p = new URLSearchParams(location.search).get('backend');
       if (p === 'supabase') localStorage.setItem('jgc_backend', 'supabase');
-      if (p === 'sheets') localStorage.removeItem('jgc_backend');
-      return localStorage.getItem('jgc_backend') === 'supabase';
-    } catch (e) { return false; }
+      if (p === 'sheets') localStorage.setItem('jgc_backend', 'sheets');
+      return localStorage.getItem('jgc_backend') !== 'sheets';
+    } catch (e) { return true; }
   })()
 };
 
