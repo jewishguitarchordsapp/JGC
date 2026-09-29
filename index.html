@@ -624,14 +624,16 @@ let requestsCache = [];    // Admin tab only: ALL users' song requests
 let messagesCache = [];    // Admin tab only: ALL users' messages
 let contactRequestsCache = []; // Contact tab only: the signed-in user's own requests (scope:'mine')
 let contactMessagesCache = []; // Contact tab only: the signed-in user's own messages (scope:'mine')
-let messagesLoaded = false; // set once messagesCache has been populated at least once this admin-panel visit, so we don't re-fetch it on every tab switch
+let messagesLoaded = false; // set once messagesCache has been populated with the FULL messages history this admin-panel visit (Messages tab actually opened, or a reply sent) - not set by the lightweight unread-only fetch below
+let unreadInfo = { count: 0, emails: [] }; // cheap admin-badge/dot data (which threads have an unread user message) - populated by the lightweight getUnreadMessagesInfo action instead of downloading the entire messages table just to compute a badge count
+let unreadLoaded = false; // set once unreadInfo has been populated at least once this admin-panel visit
 let errorsCache = [];
 let currentUser = null;    // {idToken, email, name, picture, isAdmin}
 let lastSynced = null;
 let view = { name: 'home' };
 let filters = { q: '', artist: '', language: '', tag: '' };
 let songTab = 'new';        // 'new' | 'all' | 'favorites' | 'known' — Songs opens to "New Songs" by default
-let adminTab = 'requests'; // 'requests' | 'messages' | 'errors'
+let adminTab = 'requests'; // 'requests' | 'messages' | 'errors' | 'users' | 'topSongs'
 let editChordMode = 'simple'; // 'simple' | 'raw' — which chords+lyrics textarea is active on the Add/Edit Song form
 // Manual controls for the chords+lyrics textareas. Chord symbols (Em, C7...)
 // are always English even in a Hebrew/Yiddish song, so auto-detecting text
@@ -665,7 +667,7 @@ let viewAsData = null;     // {favorites,knownChords,playlists,requests,messages
 let usersCache = [];       // admin Users tab cache
 let userSearch = '';
 let usersPage = 0;
-let userSort = 'name';         // 'name' | 'email' | 'lastActive' - see sortUsersList_
+let userSort = 'lastActive';   // 'name' | 'email' | 'lastActive' - see sortUsersList_ (defaults to Last active so the most engaged/recent users surface first)
 let expandedUserEmail = null;  // which row (by email) has its details open, if any
 let songContentById = {};  // {id: {chords_lyrics,lyrics_only}} — persists across periodic list refreshes
 let songContentLoaded = false; // true once the full-corpus background text fetch has completed
@@ -740,6 +742,7 @@ let contactChatOpen = false; // Contact page's "Message Admin" card starts colla
 let adminRequestsPage = 0;
 let adminErrorsPage = 0;
 let adminMessagesPage = 0; // paginates the admin Messages tab's conversation list, 10/page
+let adminTopSongsPage = 0; // paginates the admin Top Songs tab
 let requestsFilter = [];  // multi-select subset of 'pending'/'added'/'declined'/'archived' — empty means all non-archived
 let errorsFilter = [];    // multi-select subset of 'open'/'resolved'/'archived' — empty means all non-archived
 let messagesFilter = 'all';  // 'all' | 'unread' | 'archived'
@@ -1297,7 +1300,7 @@ async function supaApi(action, fields) {
     // lyrics search is actually used (listContent).
     const data = await supaCached_(() => _supaListCache, c => _supaListCache = c, async () => {
       const { data, error } = await supaSelectAll_((from, to) => getSupa_().from('songs')
-        .select('id,title,title_hebrew,artist,categories,capo,youtube_url,date_added,updated_at,chords_used')
+        .select('id,title,title_hebrew,artist,categories,capo,youtube_url,date_added,updated_at,chords_used,view_count')
         .order('id').range(from, to));
       throwIfErr_(error);
       return data;
@@ -1307,6 +1310,7 @@ async function supaApi(action, fields) {
       categories: s.categories || [], capo: s.capo || 0, youtube_url: s.youtube_url || '',
       date_added: s.date_added, updated_at: s.updated_at,
       chords_used: s.chords_used || [],
+      view_count: s.view_count || 0,
     })) };
   }
 
@@ -1367,6 +1371,13 @@ async function supaApi(action, fields) {
     return { success: true, requests: data.map(r => supaRequestToOld_(r, emailMap)) };
   }
 
+  // Full messages-table read - deliberately still unscoped/un-paginated-away
+  // for an admin (every user's whole conversation history) because this is
+  // only ever called when the Messages tab is genuinely being opened, or a
+  // reply is being sent (see loadAdminMessages/sendAdminReply below) - NOT
+  // on every single admin-panel page load anymore. See getUnreadMessagesInfo
+  // just below for the cheap, badge-only read that replaced the old
+  // "fetch the entire table just to compute a badge count" pattern.
   if (action === 'getMessages') {
     const me = await supaRequireUser_();
     const scoped = !(me.is_admin && fields.scope !== 'mine');
@@ -1378,6 +1389,22 @@ async function supaApi(action, fields) {
     throwIfErr_(error);
     const emailMap = await supaProfileMapByIds_(data.map(m => m.user_id));
     return { success: true, messages: data.map(m => supaMessageToOld_(m, emailMap)) };
+  }
+
+  // Cheap replacement for "fetch the ENTIRE messages table just to render a
+  // badge count and a per-user unread dot" (which is what getUsers/renderAdmin
+  // used to do on every single admin-panel visit, regardless of which tab was
+  // open - see the fix_admin_page_perf.sql notes). Only ever returns unread,
+  // non-archived rows, which is a small, roughly-constant-size result no
+  // matter how much message history has piled up over the app's lifetime.
+  if (action === 'getUnreadMessagesInfo') {
+    await supaRequireAdmin_();
+    const { data, error } = await getSupa_().from('messages').select('user_id')
+      .eq('sender', 'user').eq('read_by_admin', false).eq('archived', false);
+    throwIfErr_(error);
+    const emailMap = await supaProfileMapByIds_(data.map(m => m.user_id));
+    const emails = Array.from(new Set(data.map(m => (emailMap[m.user_id] || {}).email).filter(Boolean)));
+    return { success: true, count: emails.length, emails };
   }
 
   if (action === 'getErrors') {
@@ -1398,22 +1425,38 @@ async function supaApi(action, fields) {
     // slow the very first time it's opened, that's the admin_user_roster
     // view itself (see fix_admin_user_roster_perf.sql) not yet having been
     // applied on the live database, which this cache can't paper over.
-    const { rosterRes, msgRes } = await supaCached_(() => _supaUsersCache, c => _supaUsersCache = c, async () => {
-      const [rosterRes, msgRes] = await Promise.all([
-        supaSelectAll_((from, to) => getSupa_().from('admin_user_roster').select('*').order('id').range(from, to)),
-        supaSelectAll_((from, to) => getSupa_().from('messages').select('*').order('id').range(from, to)),
-      ]);
-      return { rosterRes, msgRes };
-    });
-    throwIfErr_(rosterRes.error); throwIfErr_(msgRes.error);
+    //
+    // Used to also fetch the ENTIRE messages table here (every message ever
+    // sent, by every user) purely to populate the unread badge/dot - the
+    // per-user message COUNT shown in the table already comes pre-aggregated
+    // from admin_user_roster (messages_count) and never needed the raw rows.
+    // That full-table read is gone now; the unread dot is populated
+    // separately by the lightweight getUnreadMessagesInfo action (see
+    // renderAdmin()/loadAdminUsers() in the frontend), so opening the Users
+    // tab no longer scales with the total volume of message history.
+    const rosterRes = await supaCached_(() => _supaUsersCache, c => _supaUsersCache = c, () =>
+      supaSelectAll_((from, to) => getSupa_().from('admin_user_roster').select('*').order('id').range(from, to)));
+    throwIfErr_(rosterRes.error);
     const users = (rosterRes.data || []).map(u => ({
       email: u.email, name: u.name || u.email, photo: u.photo || '', level: u.level || '', language: u.language || '',
       favorites: u.favorites_count || 0, knownChords: !!u.known_chords, playlists: u.playlists_count || 0,
       requests: u.requests_count || 0, messages: u.messages_count || 0, errors: u.errors_count || 0,
       lastActivity: u.last_activity || '',
     }));
-    const emailMap = {}; (rosterRes.data || []).forEach(u => { emailMap[u.id] = { email: u.email, name: u.name }; });
-    return { success: true, users, messages: (msgRes.data || []).map(m => supaMessageToOld_(m, emailMap)) };
+    return { success: true, users };
+  }
+
+  // Fire-and-forget counter bump for the admin "Top Songs" tab - see
+  // increment_song_view() in schema.sql (security definer, only touches
+  // view_count, gated on auth.uid() is not null the same way songs' own
+  // select policy is) and recordSongView_() in the frontend, which calls
+  // this exactly once per real navigation into a song's detail page.
+  if (action === 'incrementSongView') {
+    await supaRequireUser_();
+    if (!fields.id) return { success: false, error: 'Missing id' };
+    const { error } = await getSupa_().rpc('increment_song_view', { p_song_id: fields.id });
+    throwIfErr_(error);
+    return { success: true };
   }
 
   if (action === 'getUserSnapshot') {
@@ -2822,6 +2865,18 @@ function loadViewCache() {
     return (v && typeof v.name === 'string') ? v : null;
   } catch (e) { return null; }
 }
+// Bumps a song's open/view counter for the admin "Top Songs" tab (see
+// renderAdminTopSongs()) - called once per real navigation into a song's
+// detail page, from goTo() and the Back/Forward popstate handler just below,
+// never from renderDetail() itself, since that re-renders many times per
+// visit (transposing, changing capo, favoriting...) and would wildly
+// over-count views if it fired there instead.
+function recordSongView_(id) {
+  if (!id) return;
+  api('incrementSongView', { id }).catch(() => {}); // best-effort - never blocks navigation or surfaces an error to the user
+  const song = songs.find(s => s.id === id);
+  if (song) song.view_count = (song.view_count || 0) + 1; // optimistic local bump so Admin > Top Songs feels live without waiting on the next periodic refresh
+}
 function goTo(name, extra) {
   // Leaving the Tuner page: always release the microphone rather than
   // leaving it listening in the background on whatever screen comes next.
@@ -2832,6 +2887,7 @@ function goTo(name, extra) {
   pushViewHistory_(view);
   render();
   window.scrollTo(0,0);
+  if (name === 'detail' && view.id) recordSongView_(view.id);
 }
 // Makes a phone's native Back button (and a desktop browser's Back button)
 // step back through whichever screens were actually visited inside the
@@ -2859,6 +2915,7 @@ window.addEventListener('popstate', (e) => {
   view = e.state.jgcView;
   render();
   window.scrollTo(0,0);
+  if (view.name === 'detail' && view.id) recordSongView_(view.id);
 });
 
 // Shared by the desktop top nav and the mobile bottom tab bar so the two
@@ -3453,8 +3510,11 @@ function renderDetail() {
   ];
   actionTiles.push(`<div class="detail-tile action" onclick="openPrintPreview('${song.id}')">${SVG_ICONS.print}<div class="tile-label">Print</div></div>`);
 
+  // Same chord-tap/data-chord wiring as the chart itself (see CHORD
+  // DIAGRAMS) so tapping one of these "chords used in this song" chips
+  // shows the same diagram popover, not just the chart below.
   const chordChips = contentReady
-    ? (chordsUsedIn(song.chords_lyrics, transpose).map(c=>`<span class="chip">${escapeHtml(formatChordSymbol(c))}</span>`).join(' ') || '<span class="muted">none tagged</span>')
+    ? (chordsUsedIn(song.chords_lyrics, transpose).map(c=>`<span class="chip chord-tap" data-chord="${escapeHtml(c)}">${escapeHtml(formatChordSymbol(c))}</span>`).join(' ') || '<span class="muted">none tagged</span>')
     : '<span class="muted">Loading chords…</span>';
 
   let html = `<span class="backlink" onclick="goTo('list')">‹ Back to Songs</span>
@@ -4491,8 +4551,17 @@ function computeThreads(list) {
     };
   }).sort((a,b) => new Date(b.lastAt) - new Date(a.lastAt));
 }
-function unreadThreadCount() { return computeThreads(messagesCache).filter(t => !t.archived && t.hasUnread).length; }
-function userHasUnreadMessage(email) { return messagesCache.some(m => m.user_email === email && m.sender === 'user' && m.read_by_admin !== 'true'); }
+function unreadThreadCount() {
+  // Prefer the real, already-loaded full data once we have it (free and
+  // always accurate); only fall back to the cheap lite fetch's numbers
+  // before that's happened.
+  if (messagesLoaded) return computeThreads(messagesCache).filter(t => !t.archived && t.hasUnread).length;
+  return unreadInfo.count;
+}
+function userHasUnreadMessage(email) {
+  if (messagesLoaded) return messagesCache.some(m => m.user_email === email && m.sender === 'user' && m.read_by_admin !== 'true');
+  return unreadInfo.emails.includes(email);
+}
 function tabBadgeHtml(count) { return count > 0 ? ` <span class="tab-badge">${count}</span>` : ''; }
 
 function renderAdmin() {
@@ -4502,18 +4571,25 @@ function renderAdmin() {
   if (adminTab === 'requests') loadAdminRequests();
   else if (adminTab === 'messages') loadAdminMessages();
   else if (adminTab === 'errors') loadAdminErrors();
+  else if (adminTab === 'topSongs') renderAdminTopSongs();
   else loadAdminUsers();
-  // Messages drive the badges on the Messages/Users tabs and the per-user
-  // dot in the Users list, so make sure they've been loaded at least once
-  // per admin-panel visit — but only once. The Messages tab and Users tab
-  // already load/refresh messagesCache themselves (Users gets it bundled
-  // into its getUsers response), so this extra fetch only ever runs when
-  // landing on Requests or Errors before either of those has been visited.
-  if (adminTab !== 'messages' && adminTab !== 'users' && !messagesLoaded) {
-    api('getMessages', {}).then(data => {
-      messagesCache = data.messages || [];
-      messagesLoaded = true;
+  // The unread badge (Messages tab) and the per-user unread dot (Users tab)
+  // used to require downloading the ENTIRE messages table — every message
+  // ever sent, by every user — on every single admin-panel visit, regardless
+  // of which tab was open. That scaled with the app's total message history
+  // forever and was the main reason the admin page got slower over time.
+  // getUnreadMessagesInfo only returns unread, non-archived rows (a small,
+  // roughly-constant-size result), so it's cheap enough to just always fetch
+  // once per admin-panel visit rather than special-casing which tab this is.
+  // Once the real Messages tab has actually been opened (messagesLoaded),
+  // unreadThreadCount()/userHasUnreadMessage() compute straight from that
+  // already-loaded full data instead, so this lite fetch is skipped then.
+  if (!messagesLoaded && !unreadLoaded) {
+    api('getUnreadMessagesInfo', {}).then(data => {
+      unreadInfo = { count: data.count || 0, emails: data.emails || [] };
+      unreadLoaded = true;
       renderAdminNav();
+      if (adminTab === 'users') renderUsersList();
     }).catch(() => {});
   }
 }
@@ -4525,7 +4601,8 @@ function renderAdminNav() {
       <button class="${adminTab==='requests'?'active':''}" onclick="adminTab='requests';render()">Song Requests</button>
       <button class="${adminTab==='messages'?'active':''}" onclick="adminTab='messages';render()">Messages${tabBadgeHtml(unread)}</button>
       <button class="${adminTab==='errors'?'active':''}" onclick="adminTab='errors';render()">Error Reports</button>
-      <button class="${adminTab==='users'?'active':''}" onclick="adminTab='users';render()">Users${tabBadgeHtml(unread)}</button>`;
+      <button class="${adminTab==='users'?'active':''}" onclick="adminTab='users';render()">Users${tabBadgeHtml(unread)}</button>
+      <button class="${adminTab==='topSongs'?'active':''}" onclick="adminTab='topSongs';render()">Top Songs</button>`;
 }
 function loadAdminRequests() {
   api('getRequests', {}).then(data => {
@@ -4588,6 +4665,7 @@ function loadAdminMessages() {
   api('getMessages', {}).then(data => {
     messagesCache = data.messages || [];
     messagesLoaded = true;
+    unreadLoaded = true; // messagesCache is now the real, full, authoritative source - see unreadThreadCount()/userHasUnreadMessage()
     if (adminTab === 'messages') renderAdminMessages();
     renderAdminNav();
   }).catch(err => { if (adminTab === 'messages') document.getElementById('adminBody').innerHTML = `<div class="error">${err.message}</div>`; });
@@ -4707,16 +4785,40 @@ function setErrorStatus(id, status) { api('updateErrorReport', { id, status }).t
 function setErrorArchived(id, archived) { api('archiveError', { id, archived }).then(loadAdminErrors).catch(err => alert(err.message)); }
 
 /* ============================================================
+   TOP SONGS (admin) — how often each song has actually been opened, per the
+   view_count column bumped by recordSongView_()/incrementSongView (see the
+   CHORD DIAGRAMS section and goTo() below). Reads straight from the `songs`
+   global that's already loaded for the rest of the app (no separate admin-
+   only fetch/tab-load needed) so opening this tab is just a client-side
+   sort - it never adds another network round trip.
+   ============================================================ */
+function renderAdminTopSongs() {
+  const body = document.getElementById('adminBody');
+  if (!body) return;
+  if (!songs.length) { body.innerHTML = '<div class="muted">Loading songs…</div>'; return; }
+  const sorted = songs.slice().sort((a, b) => (b.view_count || 0) - (a.view_count || 0));
+  body.innerHTML = `<div class="table-wrap"><table><tr><th>#</th><th>Song</th><th>Artist</th><th>Opens</th></tr>` +
+    (pageSlice(sorted, adminTopSongsPage).map((s, i) => `<tr>
+      <td class="muted">${adminTopSongsPage * PAGE_SIZE + i + 1}</td>
+      <td><span class="adv-link" onclick="goTo('detail',{id:'${s.id}'})">${escapeHtml(s.title)}</span></td>
+      <td>${escapeHtml(s.artist || '')}</td>
+      <td>${s.view_count || 0}</td>
+    </tr>`).join('') || `<tr><td colspan="4" class="muted">No songs yet.</td></tr>`) + `</table></div>` +
+    pagerHtml(sorted.length, adminTopSongsPage, 'changeAdminTopSongsPage');
+}
+function changeAdminTopSongsPage(p) { adminTopSongsPage = p; renderAdminTopSongs(); }
+
+/* ============================================================
    USERS (admin) + "View As" read-only impersonation
    ============================================================ */
 function loadAdminUsers() {
   api('getUsers', {}).then(data => {
     usersCache = data.users || [];
-    // getUsers already reads the whole Messages sheet server-side to tally
-    // per-user message counts, so it hands that same data back here — this
-    // fills messagesCache (for the unread dots/badges) without a second,
-    // separate getMessages round-trip every time the Users tab is opened.
-    if (data.messages) { messagesCache = data.messages; messagesLoaded = true; renderAdminNav(); }
+    // Per-user message COUNT comes pre-aggregated from admin_user_roster
+    // (see u.messages column below); the per-row unread DOT comes from the
+    // lightweight unreadInfo cache (see renderAdmin()/userHasUnreadMessage())
+    // — this tab no longer needs (and no longer fetches) the raw messages
+    // table at all.
     if (adminTab === 'users') renderUsersTable();
   }).catch(err => { if (adminTab === 'users') document.getElementById('adminBody').innerHTML = `<div class="error">${err.message}</div>`; });
 }
