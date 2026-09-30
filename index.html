@@ -626,6 +626,7 @@ let contactRequestsCache = []; // Contact tab only: the signed-in user's own req
 let contactMessagesCache = []; // Contact tab only: the signed-in user's own messages (scope:'mine')
 let messagesLoaded = false; // set once messagesCache has been populated with the FULL messages history this admin-panel visit (Messages tab actually opened, or a reply sent) - not set by the lightweight unread-only fetch below
 let unreadInfo = { count: 0, emails: [] }; // cheap admin-badge/dot data (which threads have an unread user message) - populated by the lightweight getUnreadMessagesInfo action instead of downloading the entire messages table just to compute a badge count
+let backupStatus = ''; // '' | 'running' | 'done' | 'error: <msg>' - drives the admin "Backup Now" button (see renderAdminToolbar()/runManualBackup())
 let unreadLoaded = false; // set once unreadInfo has been populated at least once this admin-panel visit
 let errorsCache = [];
 let currentUser = null;    // {idToken, email, name, picture, isAdmin}
@@ -1455,6 +1456,21 @@ async function supaApi(action, fields) {
     await supaRequireUser_();
     if (!fields.id) return { success: false, error: 'Missing id' };
     const { error } = await getSupa_().rpc('increment_song_view', { p_song_id: fields.id });
+    throwIfErr_(error);
+    return { success: true };
+  }
+
+  // Lets an admin manually kick off the same-database nightly_backup snapshot
+  // on demand (e.g. right before doing something risky on the live tables),
+  // instead of only ever running automatically at 05:00 UTC. Calls the
+  // public.trigger_manual_backup() wrapper (security definer, admin-gated via
+  // public.is_admin() - see nightly_db_snapshot_setup.sql), which itself just
+  // calls nightly_backup.snapshot(). This does NOT trigger the separate
+  // off-site GitHub Actions backup - that one still only runs on its own
+  // nightly schedule or a manual "Re-run" from the Actions tab.
+  if (action === 'triggerManualBackup') {
+    await supaRequireAdmin_();
+    const { error } = await getSupa_().rpc('trigger_manual_backup');
     throwIfErr_(error);
     return { success: true };
   }
@@ -4566,8 +4582,9 @@ function tabBadgeHtml(count) { return count > 0 ? ` <span class="tab-badge">${co
 
 function renderAdmin() {
   if (!effectiveIsAdmin()) { document.getElementById('app').innerHTML = '<div class="empty">Admin only.</div>'; return; }
-  document.getElementById('app').innerHTML = `<div class="subtabs" id="adminNav"></div><div id="adminBody">Loading…</div>`;
+  document.getElementById('app').innerHTML = `<div class="subtabs" id="adminNav"></div><div id="adminToolbar"></div><div id="adminBody">Loading…</div>`;
   renderAdminNav();
+  renderAdminToolbar();
   if (adminTab === 'requests') loadAdminRequests();
   else if (adminTab === 'messages') loadAdminMessages();
   else if (adminTab === 'errors') loadAdminErrors();
@@ -4603,6 +4620,36 @@ function renderAdminNav() {
       <button class="${adminTab==='errors'?'active':''}" onclick="adminTab='errors';render()">Error Reports</button>
       <button class="${adminTab==='users'?'active':''}" onclick="adminTab='users';render()">Users${tabBadgeHtml(unread)}</button>
       <button class="${adminTab==='topSongs'?'active':''}" onclick="adminTab='topSongs';render()">Top Songs</button>`;
+}
+// Small standalone toolbar under the admin tab strip - deliberately NOT one
+// of the subtabs buttons above, so it never looks like a tab you "switch
+// into" and stays visible/consistent no matter which admin tab is open.
+// Lets an admin fire the same-database nightly_backup snapshot on demand
+// (see the 'triggerManualBackup' action) without leaving the app or touching
+// GitHub at all. Button label/disabled state is driven by backupStatus.
+function renderAdminToolbar() {
+  const bar = document.getElementById('adminToolbar');
+  if (!bar) return;
+  const running = backupStatus === 'running';
+  const label = running ? 'Backing up…' : (backupStatus === 'done' ? 'Backed up ✓' : 'Backup Now');
+  const errMsg = backupStatus.startsWith('error') ? backupStatus.slice('error: '.length) : '';
+  bar.innerHTML = `
+      <button ${running ? 'disabled' : ''} onclick="runManualBackup()" style="font-size:13px;padding:6px 12px;">${label}</button>
+      ${errMsg ? `<span class="error" style="margin-left:10px;">${errMsg}</span>` : ''}
+  `;
+}
+function runManualBackup() {
+  if (backupStatus === 'running') return;
+  backupStatus = 'running';
+  renderAdminToolbar();
+  api('triggerManualBackup', {}).then(() => {
+    backupStatus = 'done';
+    renderAdminToolbar();
+    setTimeout(() => { if (backupStatus === 'done') { backupStatus = ''; renderAdminToolbar(); } }, 5000);
+  }).catch(err => {
+    backupStatus = 'error: ' + (err.message || 'Backup failed');
+    renderAdminToolbar();
+  });
 }
 function loadAdminRequests() {
   api('getRequests', {}).then(data => {
