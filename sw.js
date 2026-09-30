@@ -60,7 +60,17 @@ self.addEventListener('fetch', (event) => {
 
   event.respondWith(
     fetch(req).then(res => {
-      if (res.ok) caches.open(CACHE_NAME).then(cache => cache.put(req, res.clone()));
+      // Clone synchronously, right here, before any async gap — cache.put()
+      // below only actually reads the clone once caches.open()'s own promise
+      // resolves, which is a later microtask. If clone() were called inside
+      // that later .then() instead (as this used to do), it raced against
+      // the browser already starting to stream `res`'s body back to the
+      // page that requested it — whichever side touched the body first left
+      // the other with "Failed to execute 'clone' on 'Response': Response
+      // body is already used". Cloning immediately, before `res` is ever
+      // handed anywhere else, avoids the race entirely.
+      const resClone = res.ok ? res.clone() : null;
+      if (resClone) caches.open(CACHE_NAME).then(cache => cache.put(req, resClone));
       return res;
     }).catch(() => caches.match(req))
   );
