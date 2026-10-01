@@ -2610,11 +2610,13 @@ const SUP_PLACEHOLDER = '\u0001';
 // .cw/.chord above), which was never affected by this bug for exactly this
 // reason.
 //
-// isRtl picks which edge this row hugs - right for a row paired with a
-// Hebrew/Yiddish lyric line below it, left otherwise - but never changes
-// the chords' own left-to-right reading order among themselves (see the
-// longer comment further down, by edgeStyle, for the two different ways to
-// hug the right edge and why only one of them keeps that order intact).
+// isRtl is no longer used inside this function - every chord always
+// anchors its left edge within this row's own tightly-fit inner wrapper
+// (see the box this function returns), so the chords' left-to-right
+// reading order is never in question. Which side of the screen that whole
+// box sits on is instead decided by the caller (renderChordHtmlBody) via a
+// plain CSS text-align on the row, using this same isRtl/rtl value - kept
+// as a parameter here only so callers don't need to change.
 //
 // <sup> (a chord extension rendered as a superscript, e.g. C<sup>7</sup>)
 // is stashed as a same-length run of placeholder characters so it still
@@ -2648,6 +2650,10 @@ function renderFixedChordRow_(html, semitones, isRtl) {
   // than from `col` inside the loop below so it reflects the row's TRUE
   // full width regardless of which token the loop currently happens to be
   // on.
+  // Total width of the row (in characters), ignoring any trailing padding -
+  // used to size the tightly-fit inner wrapper below so a genuine CSS
+  // text-align (not a per-chord coordinate computation) can push the whole
+  // group flush to the row's right edge for an RTL-paired row.
   const totalLen = plain.replace(/\s+$/, '').length;
   let col = 0;
   const spans = [];
@@ -2660,36 +2666,27 @@ function renderFixedChordRow_(html, semitones, isRtl) {
     const rawTransposed = transposeChord(part, semitones || 0);
     const displayed = formatChordSymbol(rawTransposed)
       .replace(new RegExp(SUP_PLACEHOLDER + '+', 'g'), () => stash.shift());
-    // Each chord must keep reading left-to-right in the order it was typed
-    // (column 0 first, increasing after) - that's true regardless of which
-    // edge the row as a WHOLE hugs. There are two different ways to anchor
-    // an RTL-paired row to the right edge, and only one of them preserves
-    // that order:
-    //   - A straight horizontal SHIFT of the whole row - right:(totalLen -
-    //     startCol - tokenLen)ch - keeps every chord's position RELATIVE TO
-    //     THE OTHERS exactly as it was when left-anchored (startCol=0 is
-    //     still the leftmost chord, the highest startCol is still the
-    //     rightmost), just slides the entire group over so its right edge
-    //     meets the row's right edge - which is what a right-aligned Hebrew/
-    //     Yiddish lyric line below it does too, so the two lines sit on the
-    //     same side of the screen while each still reads correctly.
-    //   - A MIRROR of the whole row - right:${startCol}ch directly - instead
-    //     puts column 0 (the first-typed chord) flush against the right
-    //     edge and every later column further left, which REVERSES their
-    //     left-to-right order (confirmed on real songs: a row typed as
-    //     "Am ... Em" rendered with Em to the left of Am). That mirrored
-    //     form was tried before and caused exactly that reported bug, so
-    //     only the shifted form is used here.
-    // LTR (non-Hebrew-paired) rows have no reason to hug the right edge at
-    // all, so they keep the simple left:${startCol}ch anchor.
-    const edgeStyle = isRtl
-      ? `right:${totalLen - startCol - tokenLen}ch`
-      : `left:${startCol}ch`;
+    // Every chord always anchors its LEFT edge within this row's own inner
+    // wrapper (see below) - the same transpose-safe technique the plain
+    // [Chord]word bracket format already uses, which keeps the chords
+    // reading left-to-right in the order they were typed, full stop. Which
+    // SIDE OF THE SCREEN the row as a whole sits on is handled separately,
+    // by wrapping these spans in a box sized to fit them exactly and then
+    // letting the row's own text-align push that box to the right - not by
+    // computing a per-chord right offset here, which is what previously
+    // caused a reported reversal (right:${startCol}ch put the first-typed
+    // chord at the right edge and each later one further left - backwards).
     const realToken = (partsReal[idx] || part).trim();
     const dataChord = transposeChord(realToken, semitones || 0);
-    spans.push(`<span class="chord-tap" data-chord="${escapeHtml(dataChord)}" style="position:absolute;${edgeStyle};top:0;white-space:nowrap;">${displayed}</span>`);
+    spans.push(`<span class="chord-tap" data-chord="${escapeHtml(dataChord)}" style="position:absolute;left:${startCol}ch;top:0;white-space:nowrap;">${displayed}</span>`);
   });
-  return spans.join('');
+  // Wrapping in a box sized exactly to the row's own text width (totalLen)
+  // means the row's own text-align:right (set by renderChordHtmlBody, only
+  // for RTL-paired rows) pushes this whole group flush against the right
+  // edge as one unit, via ordinary CSS alignment - while every chord inside
+  // it keeps the ordinary left-to-right anchor above, so reading order is
+  // never affected by which side the box ends up on.
+  return `<span style="position:relative;display:inline-block;width:${totalLen}ch;height:1em;vertical-align:top;">${spans.join('')}</span>`;
 }
 
 // Hebrew/Yiddish text uses the Hebrew Unicode block - any such character
@@ -2724,16 +2721,17 @@ function renderChordHtmlBody(html, transposeSemitones) {
       // with runs of &nbsp; padding between them, positioning each chord
       // over a specific word (e.g. "C     F     Em"). renderFixedChordRow_
       // renders each chord as its own absolutely-positioned span (column
-      // computed once from the original, untransposed text) rather than one
-      // inline padded string, and always anchors the row's left edge so the
-      // chords read left-to-right in their own typed/played order - the
-      // `rtl` value is still passed through for backward compatibility but
-      // no longer affects which edge is used (see renderFixedChordRow_'s own
-      // comments for why: right-hugging RTL-paired rows used to align each
-      // chord exactly over its Hebrew word, but reversed the chords' reading
-      // order along the way).
+      // computed once from the original, untransposed text) inside a box
+      // sized to fit them exactly, rather than one inline padded string -
+      // the chords themselves always read left-to-right in their own typed/
+      // played order, regardless of which side of the screen that box ends
+      // up on. Which side it sits on is decided here, the ordinary CSS way:
+      // text-align:right for a row paired with a Hebrew/Yiddish lyric line
+      // (so the two sit on the same, right, side of the screen), left
+      // otherwise - not by shifting each chord's own coordinates, which is
+      // what previously caused a reported chord-order reversal.
       const inner = renderFixedChordRow_(p.innerHTML, transposeSemitones || 0, rtl);
-      return `<div class="html-chord-row" style="direction:ltr;">${inner}</div>`;
+      return `<div class="html-chord-row" style="direction:ltr;${rtl ? 'text-align:right;' : ''}">${inner}</div>`;
     }
     const lyricAlignStyle = rtl ? 'direction:rtl;text-align:right;' : 'direction:ltr;text-align:left;';
     return `<div class="html-lyric-row" style="${lyricAlignStyle}">${p.innerHTML}</div>`;
