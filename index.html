@@ -477,7 +477,7 @@
 
 <header>
   <button class="hamburger-btn" onclick="openMobileDrawer()" aria-label="Menu">☰</button>
-  <h1 style="cursor:pointer;" onclick="goTo('home')"><span id="headerTitle">Welcome</span></h1>
+  <h1 style="cursor:pointer;" onclick="goTo('home')" title="Go to Welcome"><span id="headerTitle">JGC App</span></h1>
   <nav id="mainNav"></nav>
   <div class="spacer"></div>
   <button id="tunerBtn" class="btn secondary" style="padding:6px 10px;" title="Guitar Tuner" onclick="goTo('tuner')"><span style="display:inline-flex;width:16px;height:16px;vertical-align:middle;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 1 1 9-9"/><line x1="12" y1="12" x2="12" y2="5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg></span></button>
@@ -5291,25 +5291,12 @@ function mountGateSignInButton() {
     if (container) { try { google.accounts.id.renderButton(container, { theme: 'filled_blue', size: 'large', text: 'signin_with' }); } catch (e) {} }
   }
 }
-// Top bar reads "Welcome" on Home and the current section's name elsewhere
-// (the song/playlist title for detail views) — kept in sync with view.name
-// from render() below, same place renderNav()/renderBottomNav() refresh.
+// Top bar always reads the app's name, regardless of which section the
+// user is viewing — it's a brand/home anchor, not a breadcrumb. The <h1>
+// it lives in is wired to onclick="goTo('home')" (see the <header> markup),
+// so this doubles as the "always-available way back to Welcome" control.
 function headerTitleText() {
-  switch (view.name) {
-    case 'home': return t('header_welcome');
-    case 'list': return t('nav_list');
-    case 'artists': return t('nav_artists');
-    case 'categories': return t('nav_categories');
-    case 'playlists': return t('nav_playlists');
-    case 'playlistDetail': { const pl = playlists.find(p => p.id === view.id); return pl ? pl.title : t('nav_playlists'); }
-    case 'tuner': return t('header_tuner');
-    case 'contact': return t('nav_contact');
-    case 'admin': return t('nav_admin');
-    case 'knownChords': return t('header_known');
-    case 'edit': return view.id ? t('header_edit_song') : t('header_add_song');
-    case 'detail': { const s = songs.find(x => x.id === view.id); return s ? s.title : t('nav_list'); }
-    default: return t('header_welcome');
-  }
+  return 'JGC App';
 }
 function renderHeaderTitle() {
   const el = document.getElementById('headerTitle');
