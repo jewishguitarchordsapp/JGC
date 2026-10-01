@@ -1665,8 +1665,28 @@ async function supaApi(action, fields) {
     // separately by the lightweight getUnreadMessagesInfo action (see
     // renderAdmin()/loadAdminUsers() in the frontend), so opening the Users
     // tab no longer scales with the total volume of message history.
+    //
+    // pageSize 20000 here (vs. the 1000 default elsewhere) - with the
+    // project's Data API "Max Rows" setting raised to 20000 to match,
+    // this now pulls the whole roster (~5,000 people) in ONE request
+    // instead of 6. That matters beyond just round trips: every one of
+    // those 6 requests re-ran admin_user_roster's joins/aggregates from
+    // scratch (there's no server-side caching between separate requests),
+    // so paginating this view was paying its full query cost 6 times
+    // over for no reason - one request now pays it exactly once.
+    //
+    // IMPORTANT: this relies on Max Rows actually being >= 20000 on the
+    // live project. supaSelectAll_ treats "got back fewer rows than I
+    // asked for" as "that was the last page" - which is correct when IT
+    // chose a smaller final page, but if Max Rows were ever lower than
+    // what's requested here, PostgREST would silently cap the response
+    // at ITS limit instead of erroring, and that same check would wrongly
+    // read the truncated page as "reached the end" - silently returning
+    // an incomplete roster rather than failing loudly. If the user count
+    // ever approaches 20,000, or Max Rows ever gets lowered, this number
+    // needs to go up (or come back down) to match.
     const rosterRes = await supaCached_(() => _supaUsersCache, c => _supaUsersCache = c, () =>
-      supaSelectAll_((from, to) => getSupa_().from('admin_user_roster').select('*').order('id').range(from, to)));
+      supaSelectAll_((from, to) => getSupa_().from('admin_user_roster').select('*').order('id').range(from, to), 20000));
     throwIfErr_(rosterRes.error);
     const users = (rosterRes.data || []).map(u => ({
       email: u.email, name: u.name || u.email, photo: u.photo || '', level: u.level || '', language: u.language || '',
