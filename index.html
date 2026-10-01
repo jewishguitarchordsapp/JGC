@@ -262,8 +262,8 @@
      this margin-right (meant to space an inline icon from its label) was
      leaking onto its icons too, pushing them off-center within their
      otherwise-centered 30px icon box. */
-  #mainNav button img{width:15px;height:15px;vertical-align:middle;margin-right:5px;opacity:0.9;}
-  #mainNav button svg{width:17px;height:17px;vertical-align:-3px;margin-right:5px;stroke:#fff;}
+  #mainNav button img{width:15px;height:15px;vertical-align:middle;margin-inline-end:5px;opacity:0.9;}
+  #mainNav button svg{width:17px;height:17px;vertical-align:-3px;margin-inline-end:5px;stroke:#fff;}
   .fav-btn svg{width:15px;height:14px;vertical-align:-2px;margin-right:5px;}
   .html-chord-row{position:relative;height:1.35em;font-family:"CustomCourier",'Courier New',monospace;color:var(--chord);font-weight:700;white-space:pre;line-height:1.35;font-size:calc(14px + var(--chart-step,0px));}
   .html-lyric-row{font-family:"CustomCourier",'Courier New',monospace;white-space:pre;line-height:1.35;font-size:calc(14px + var(--chart-step,0px));font-weight:var(--chart-fw,400);margin-bottom:5px;}
@@ -430,7 +430,7 @@
     header h1{font-size:15px;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;margin:0;white-space:nowrap;}
     nav{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;}
     nav button{flex:0 0 auto;padding:7px 9px;font-size:12.5px;}
-    #mainNav button svg{width:15px;height:15px;margin-right:4px;}
+    #mainNav button svg{width:15px;height:15px;margin-inline-end:4px;}
     .subtabs button{padding:8px 9px;font-size:12px;gap:4px;}
     .subtabs button svg{width:13px;height:13px;}
     .subtabs.song-tabs button{padding:7px 2px;font-size:10.5px;gap:3px;}
@@ -481,7 +481,7 @@
   <nav id="mainNav"></nav>
   <div class="spacer"></div>
   <button id="tunerBtn" class="btn secondary" style="padding:6px 10px;" title="Guitar Tuner" onclick="goTo('tuner')"><span style="display:inline-flex;width:16px;height:16px;vertical-align:middle;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 1 1 9-9"/><line x1="12" y1="12" x2="12" y2="5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg></span></button>
-  <button class="btn secondary lang-toggle-btn" style="padding:6px 10px;font-size:12.5px;" title="עברית / English" onclick="toggleUiLang()">עברית</button>
+  <button class="btn secondary lang-toggle-btn" style="padding:6px 10px;font-size:12.5px;line-height:16px;display:inline-flex;align-items:center;" title="עברית / English" onclick="toggleUiLang()">עברית</button>
   <button id="shareBtn" class="btn secondary" style="padding:6px 10px;" title="Share this app"><img id="shareIcon" alt="Share" style="width:16px;height:16px;vertical-align:middle;"></button>
   <div id="userArea" class="userbox"></div>
 </header>
@@ -3422,7 +3422,27 @@ function filteredSongs() {
     const favOrder = effectiveFavorites();
     return list.slice().sort((a,b) => favOrder.indexOf(a.id) - favOrder.indexOf(b.id));
   }
+  if (uiLang === 'he' && songsHaveHebrewTitles_()) {
+    // Hebrew-titled songs sort first (by their Hebrew title); anything
+    // without one falls to the end, as one block — that block is what the
+    // '#' sidebar letter targets below, same idea as the English '#' bucket.
+    return list.sort((a,b) => {
+      const ah = (a.title_hebrew||'').trim(), bh = (b.title_hebrew||'').trim();
+      if (ah && !bh) return -1;
+      if (!ah && bh) return 1;
+      if (ah && bh) return ah.localeCompare(bh, 'he');
+      return String(a.title||'').localeCompare(String(b.title||''));
+    });
+  }
   return list.sort((a,b) => String(a.title||'').localeCompare(String(b.title||'')));
+}
+// Whether any song in the catalog actually has a Hebrew title filled in yet
+// — used to decide whether the fast-scroll rail and sort order below switch
+// to Hebrew-alphabet mode, or keep behaving exactly as in English, so the
+// feature degrades gracefully (never a broken/confusing jump) until Hebrew
+// titles actually exist in the data.
+function songsHaveHebrewTitles_() {
+  return songs.some(s => (s.title_hebrew || '').trim().length > 0);
 }
 // True only for the plain Favorites tab view — signed in, no active
 // search/artist/language/tag filter — which is exactly when custom drag
@@ -3497,7 +3517,9 @@ function renderList() {
 function alphabetSidebarHtml_() {
   if (songTab === 'new') return '';
   if (songTab === 'favorites' && favoritesReorderable()) return '';
-  const letters = ['#','A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z'];
+  const letters = (uiLang === 'he' && songsHaveHebrewTitles_())
+    ? ['#','א','ב','ג','ד','ה','ו','ז','ח','ט','י','כ','ל','מ','נ','ס','ע','פ','צ','ק','ר','ש','ת']
+    : ['#','A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z'];
   return `<div class="az-sidebar">${letters.map(l => `<button onclick="alphabetJump_('${l}')">${l}</button>`).join('')}</div>`;
 }
 // Jumps to whichever page contains the first song whose title starts with
@@ -3509,7 +3531,16 @@ function alphabetSidebarHtml_() {
 function alphabetJump_(letter) {
   const list = filteredSongs();
   if (!list.length) return;
+  const heMode = uiLang === 'he' && songsHaveHebrewTitles_();
   let idx = list.findIndex(s => {
+    if (heMode) {
+      const h = (s.title_hebrew || '').trim();
+      if (letter === '#') return !h;
+      if (!h) return false;
+      // Hebrew letters' code points increase in alphabetical order (א...ת),
+      // same reasoning as the plain A-Z compare below.
+      return h.charAt(0) >= letter;
+    }
     const first = (s.title || '').trim().charAt(0).toUpperCase();
     if (letter === '#') return !(first >= 'A' && first <= 'Z');
     return first >= letter;
