@@ -377,7 +377,7 @@
      fixed bottom tab bar, replacing the desktop top nav + inline user box on
      small screens. Hidden here, switched on inside the mobile media query
      below, so desktop layout is completely unaffected. */
-  .hamburger-btn{display:none;background:transparent;border:none;color:#fff;font-size:22px;line-height:1;cursor:pointer;padding:2px 8px;}
+  .hamburger-btn{display:inline-flex;align-items:center;background:transparent;border:none;color:#fff;font-size:22px;line-height:1;cursor:pointer;padding:2px 8px;}
   .bottom-nav{display:none;}
   .mobile-drawer{display:none;}
   .mobile-drawer.open{display:block;position:fixed;inset:0;z-index:30;}
@@ -393,6 +393,12 @@
   .mobile-drawer-nav button:active{background:#f2f4f5;}
   .mobile-drawer-nav-icon{display:inline-flex;width:20px;height:20px;color:var(--teal);}
   .mobile-drawer-nav-icon svg{width:100%;height:100%;}
+  .mobile-drawer-section{margin:16px 0 0;border-top:1px solid var(--border);padding-top:12px;}
+  .mobile-drawer-heading{font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:0.02em;color:var(--muted);margin-bottom:4px;}
+  .switch-toggle{background:#ccd3d4;transition:background .15s;}
+  .switch-toggle .knob{left:2px;}
+  .switch-toggle.on{background:var(--teal);}
+  .switch-toggle.on .knob{left:18px;}
   /* Custom "install this app" banner — shown for a real install prompt on
      Android/Chrome, or manual Share-sheet instructions on iOS (Safari never
      fires beforeinstallprompt, so there's no programmatic install there). */
@@ -483,7 +489,6 @@
   <nav id="mainNav"></nav>
   <div class="spacer"></div>
   <button id="tunerBtn" class="btn secondary" style="padding:6px 10px;" title="Guitar Tuner" onclick="goTo('tuner')"><span style="display:inline-flex;width:16px;height:16px;vertical-align:middle;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 1 1 9-9"/><line x1="12" y1="12" x2="12" y2="5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg></span></button>
-  <button class="btn secondary lang-toggle-btn" style="box-sizing:border-box;height:28px;padding:0 10px;font-size:12.5px;display:inline-flex;align-items:center;justify-content:center;" title="עברית / English" onclick="toggleUiLang()">עברית</button>
   <button id="shareBtn" class="btn secondary" style="padding:6px 10px;" title="Share this app"><img id="shareIcon" alt="Share" style="width:16px;height:16px;vertical-align:middle;"></button>
   <div id="userArea" class="userbox"></div>
 </header>
@@ -497,8 +502,28 @@
     <div id="userAreaMobile" class="userbox"></div>
     <nav class="mobile-drawer-nav">
       <button onclick="closeMobileDrawer();goTo('tuner')"><span class="mobile-drawer-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 1 1 9-9"/><line x1="12" y1="12" x2="12" y2="5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg></span><span>Tuner</span></button>
+      <button onclick="closeMobileDrawer();goTo('knownChords')"><span class="mobile-drawer-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></span><span>My Chords &amp; Favorites</span></button>
       <button class="lang-toggle-btn" onclick="toggleUiLang()" style="font-weight:600;">עברית</button>
     </nav>
+    <div class="mobile-drawer-section">
+      <div class="mobile-drawer-heading">Display</div>
+      <div class="adv-row">
+        <span class="adv-label">Font size</span>
+        <span class="adv-controls">
+          <button class="stepper-btn" onclick="changeDisplayFontSize(-1)">A&#8595;</button>
+          <span class="ppt-val" id="prefFontSizeVal">17</span>
+          <button class="stepper-btn" onclick="changeDisplayFontSize(1)">A&#8593;</button>
+        </span>
+      </div>
+      <div class="adv-row">
+        <span class="adv-label">Bold chart text</span>
+        <span class="adv-controls"><div class="switch-toggle" id="prefBoldToggle" onclick="toggleDisplayBold()" role="button" aria-pressed="false"><span class="knob"></span></div></span>
+      </div>
+      <div class="adv-row">
+        <span class="adv-label">Show chords</span>
+        <span class="adv-controls"><div class="switch-toggle" id="prefShowChordsToggle" onclick="toggleDisplayShowChords()" role="button" aria-pressed="true"><span class="knob"></span></div></span>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -670,6 +695,30 @@ const UI_LANG_KEY = 'jgc_ui_lang';
 let uiLang = 'en';
 try { uiLang = localStorage.getItem(UI_LANG_KEY) === 'he' ? 'he' : 'en'; } catch (e) {}
 
+/* ============================================================
+   DISPLAY PREFERENCES — font size / bold / show-chords defaults, set from
+   the hamburger menu's Display section. These seed playerState (see
+   renderDetail) whenever a DIFFERENT song is opened, the same way the app
+   already seeds capo - they're the starting point for a fresh song, not a
+   lock: the player's own A+/-/bold/eye controls can still override them
+   for that one viewing without touching the saved default. Stored
+   per-browser (localStorage), same as the UI language choice.
+   ============================================================ */
+const DISPLAY_PREFS_KEY = 'jgc_display_prefs';
+let displayPrefs = { fontSize: 0, bold: false, showChords: true };
+try {
+  const rawPrefs = localStorage.getItem(DISPLAY_PREFS_KEY);
+  if (rawPrefs) {
+    const v = JSON.parse(rawPrefs);
+    displayPrefs.fontSize = Math.max(-4, Math.min(8, Number(v.fontSize) || 0));
+    displayPrefs.bold = !!v.bold;
+    displayPrefs.showChords = v.showChords !== false;
+  }
+} catch (e) {}
+function saveDisplayPrefs_() {
+  try { localStorage.setItem(DISPLAY_PREFS_KEY, JSON.stringify(displayPrefs)); } catch (e) {}
+}
+
 const I18N = {
   en: {
     nav_list: 'Songs', nav_artists: 'Artists', nav_categories: 'Categories', nav_playlists: 'Playlists', nav_contact: 'Contact', nav_admin: 'Admin',
@@ -773,6 +822,42 @@ function t(key) {
 function applyUiLangDir_() {
   document.documentElement.setAttribute('dir', uiLang === 'he' ? 'rtl' : 'ltr');
   document.documentElement.setAttribute('lang', uiLang === 'he' ? 'he' : 'en');
+}
+function renderMenuDrawerSettings_() {
+  const fontEl = document.getElementById('prefFontSizeVal');
+  if (fontEl) fontEl.textContent = String(17 + displayPrefs.fontSize);
+  const boldEl = document.getElementById('prefBoldToggle');
+  if (boldEl) { boldEl.classList.toggle('on', displayPrefs.bold); boldEl.setAttribute('aria-pressed', String(displayPrefs.bold)); }
+  const chordsEl = document.getElementById('prefShowChordsToggle');
+  if (chordsEl) { chordsEl.classList.toggle('on', displayPrefs.showChords); chordsEl.setAttribute('aria-pressed', String(displayPrefs.showChords)); }
+}
+// Applies a changed default to the song currently open (if any), on top of
+// saving it for every song opened from now on - so flipping a setting in
+// the menu is felt immediately, not just the next time you open a song.
+function applyDisplayPrefsToOpenSong_() {
+  if (view.name !== 'detail') return;
+  playerState.fontSize = displayPrefs.fontSize;
+  playerState.bold = displayPrefs.bold;
+  playerState.showChords = displayPrefs.showChords;
+  renderDetail();
+}
+function changeDisplayFontSize(delta) {
+  displayPrefs.fontSize = Math.max(-4, Math.min(8, displayPrefs.fontSize + delta));
+  saveDisplayPrefs_();
+  renderMenuDrawerSettings_();
+  applyDisplayPrefsToOpenSong_();
+}
+function toggleDisplayBold() {
+  displayPrefs.bold = !displayPrefs.bold;
+  saveDisplayPrefs_();
+  renderMenuDrawerSettings_();
+  applyDisplayPrefsToOpenSong_();
+}
+function toggleDisplayShowChords() {
+  displayPrefs.showChords = !displayPrefs.showChords;
+  saveDisplayPrefs_();
+  renderMenuDrawerSettings_();
+  applyDisplayPrefsToOpenSong_();
 }
 function updateLangToggleButtons_() {
   document.querySelectorAll('.lang-toggle-btn').forEach(btn => { btn.textContent = uiLang === 'he' ? 'EN' : 'עברית'; });
@@ -2525,13 +2610,11 @@ const SUP_PLACEHOLDER = '\u0001';
 // .cw/.chord above), which was never affected by this bug for exactly this
 // reason.
 //
-// isRtl mirrors renderChordHtmlBody's own choice of which edge this row
-// hugs - with everything now absolutely positioned, the parent's
-// text-align no longer has any effect on these children, so the edge has
-// to be chosen explicitly here instead: `right:Ncol` for a right-hugging
-// (RTL-paired) row, `left:Ncol` otherwise, each measured as a distance from
-// the row's own left/right edge so it's exactly as stable under
-// transposition as the left-anchored case.
+// isRtl is accepted for backward compatibility with callers but no longer
+// changes anything here - every chord row anchors its left edge and reads
+// left-to-right in the chords' own typed/played order (see the longer
+// comment further down, by edgeStyle, for why a prior right-hugging
+// behavior for RTL-paired rows was reverted).
 //
 // <sup> (a chord extension rendered as a superscript, e.g. C<sup>7</sup>)
 // is stashed as a same-length run of placeholder characters so it still
@@ -2570,24 +2653,20 @@ function renderFixedChordRow_(html, semitones, isRtl) {
     const rawTransposed = transposeChord(part, semitones || 0);
     const displayed = formatChordSymbol(rawTransposed)
       .replace(new RegExp(SUP_PLACEHOLDER + '+', 'g'), () => stash.shift());
-    // RTL (Hebrew/Yiddish-lyric) rows hug the row's right edge instead of its
-    // left, but must NOT reverse the chords' own left-to-right order among
-    // themselves (see the big comment above - a chord symbol like "C7"
-    // always reads left-to-right; only the whole row's anchor side flips).
-    // The previous formula here, right:(totalLen-startCol-tokenLen)ch, did
-    // exactly that unwanted reversal: it placed whichever chord was typed
-    // FIRST (smallest startCol) furthest from the right edge and the chord
-    // typed LAST closest to it - backwards, since in a right-to-left line,
-    // column 0 (the first character typed, matching the first/rightmost
-    // Hebrew word) belongs at the right edge, not the left. right:${startCol}ch
-    // - the exact mirror of the left-anchored case, just measured from the
-    // opposite edge - puts column 0 flush against the right edge and each
-    // later column progressively further left, matching how the RTL lyric
-    // line below it actually renders, while staying just as stable across a
-    // transpose-driven chord-name-length change as the left-anchored case
-    // already was (it's still computed from the ORIGINAL untransposed
-    // startCol).
-    const edgeStyle = isRtl ? `right:${startCol}ch` : `left:${startCol}ch`;
+    // Chord rows always hug the LEFT edge and read left-to-right in the
+    // chords' own typed/played order, even over a Hebrew/Yiddish lyric line
+    // below (isRtl is accepted for backward compatibility but no longer
+    // changes this). An earlier version of this code right-anchored RTL-
+    // paired rows (right:${startCol}ch) so each chord sat pixel-aligned over
+    // its corresponding Hebrew word - but that meant scanning the row
+    // left-to-right, as any guitarist naturally does to read "what do I play
+    // next", showed the chords in the REVERSE of their actual play order
+    // (confirmed on real songs: a row typed as "Am ... Em" rendered with Em
+    // to the left of Am). Reading the chord sequence in the correct order is
+    // more important than exact word-level alignment, so every chord row -
+    // regardless of the lyric line's direction - now anchors like the plain
+    // [Chord]word bracket format already unconditionally does.
+    const edgeStyle = `left:${startCol}ch`;
     const realToken = (partsReal[idx] || part).trim();
     const dataChord = transposeChord(realToken, semitones || 0);
     spans.push(`<span class="chord-tap" data-chord="${escapeHtml(dataChord)}" style="position:absolute;${edgeStyle};top:0;white-space:nowrap;">${displayed}</span>`);
@@ -2628,14 +2707,13 @@ function renderChordHtmlBody(html, transposeSemitones) {
       // over a specific word (e.g. "C     F     Em"). renderFixedChordRow_
       // renders each chord as its own absolutely-positioned span (column
       // computed once from the original, untransposed text) rather than one
-      // inline padded string, so which edge it hugs is now passed in
-      // explicitly (isRtl) instead of being handled via text-align, which
-      // has no effect on absolutely-positioned children. Still always
-      // left-to-right internally either way - reordering the chord symbols
-      // relative to each other (as direction:rtl would) was never wanted,
-      // only which edge the whole row hugs, keeping chords over Hebrew/
-      // Yiddish lyrics right-aligned and chords over English lyrics
-      // left-aligned.
+      // inline padded string, and always anchors the row's left edge so the
+      // chords read left-to-right in their own typed/played order - the
+      // `rtl` value is still passed through for backward compatibility but
+      // no longer affects which edge is used (see renderFixedChordRow_'s own
+      // comments for why: right-hugging RTL-paired rows used to align each
+      // chord exactly over its Hebrew word, but reversed the chords' reading
+      // order along the way).
       const inner = renderFixedChordRow_(p.innerHTML, transposeSemitones || 0, rtl);
       return `<div class="html-chord-row" style="direction:ltr;">${inner}</div>`;
     }
@@ -3276,7 +3354,7 @@ function renderBottomNav() {
     return `<button class="${view.name===name?'active':''}" data-tab="${name}" onclick="goTo('${name}')"><span class="nav-icon-wrap">${icon}</span><span>${label}</span></button>`;
   }).join('');
 }
-function openMobileDrawer() { document.getElementById('mobileDrawer').classList.add('open'); }
+function openMobileDrawer() { document.getElementById('mobileDrawer').classList.add('open'); renderMenuDrawerSettings_(); }
 function closeMobileDrawer() { document.getElementById('mobileDrawer').classList.remove('open'); }
 
 /* ============================================================
@@ -3885,8 +3963,14 @@ function renderDetail() {
   if (!song) { document.getElementById('app').innerHTML = '<div class="empty">Song not found.</div>'; return; }
   const contentReady = song.chords_lyrics !== undefined;
   if (!contentReady && !song._contentPending) { song._contentPending = true; loadSongContentFor(song.id); }
-  playerState.capo = (playerState.songId === song.id) ? playerState.capo : song.capo;
-  playerState.myCapo = (playerState.songId === song.id) ? playerState.myCapo : null;
+  const isSameSongAsBefore = playerState.songId === song.id;
+  playerState.capo = isSameSongAsBefore ? playerState.capo : song.capo;
+  playerState.myCapo = isSameSongAsBefore ? playerState.myCapo : null;
+  if (!isSameSongAsBefore) {
+    playerState.fontSize = displayPrefs.fontSize;
+    playerState.bold = displayPrefs.bold;
+    playerState.showChords = displayPrefs.showChords;
+  }
   playerState.songId = song.id;
   const transpose = (song.capo||0) - playerState.capo + (playerState.transpose||0);
   const ytId = extractYouTubeId(song.youtube_url);
@@ -6050,6 +6134,7 @@ function highlightClosestString_(freq) {
    ============================================================ */
 applyUiLangDir_();
 updateLangToggleButtons_();
+renderMenuDrawerSettings_();
 document.getElementById('shareIcon').src = ICONS.share;
 document.getElementById('shareBtn').onclick = shareApp;
 // Optimistically restore a cached signed-in session (see saveAuthCache/
