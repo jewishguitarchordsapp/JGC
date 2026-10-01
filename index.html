@@ -2629,7 +2629,7 @@ function renderFixedChordRow_(html, semitones, isRtl) {
     const len = inner.replace(/<[^>]*>/g, '').length || 1;
     return SUP_PLACEHOLDER.repeat(len);
   });
-  const plain = protectedHtml.replace(/&nbsp;| /gi, ' ');
+  const plain = protectedHtml.replace(/&nbsp;| /gi, ' ');
   // A second, parallel plain-text version with each <sup>...</sup>'s REAL
   // text substituted in (e.g. "7"), instead of a same-length placeholder -
   // used only so each token's data-chord attribute (see CHORD DIAGRAMS
@@ -2641,20 +2641,18 @@ function renderFixedChordRow_(html, semitones, isRtl) {
   // placeholder run) never adds or removes any whitespace - so the two
   // token arrays stay index-aligned and can be read in the same loop.
   const plainReal = html.replace(/<sup>([\s\S]*?)<\/sup>/gi, (m, inner) => inner.replace(/<[^>]*>/g, ''))
-    .replace(/&nbsp;| /gi, ' ');
+    .replace(/&nbsp;| /gi, ' ');
   const parts = plain.split(/(\s+)/);
   const partsReal = plainReal.split(/(\s+)/);
-  // Total width of the row (in characters), ignoring any trailing padding -
-  // used only to translate an RTL-paired row as a whole over to the right
-  // edge (see edgeStyle below). Computed up front from the full text rather
-  // than from `col` inside the loop below so it reflects the row's TRUE
-  // full width regardless of which token the loop currently happens to be
-  // on.
-  // Total width of the row (in characters), ignoring any trailing padding -
-  // used to size the tightly-fit inner wrapper below so a genuine CSS
-  // text-align (not a per-chord coordinate computation) can push the whole
-  // group flush to the row's right edge for an RTL-paired row.
-  const totalLen = plain.replace(/\s+$/, '').length;
+  // Full length of the row AS AUTHORED, including any trailing &nbsp;
+  // padding after the last chord - deliberately NOT trimmed. That trailing
+  // padding is what originally made this row the same overall width as its
+  // paired lyric line, and is exactly what reproduces each row's own
+  // distinct spacing once right-aligned below (a chord followed by more
+  // trailing padding ends up sitting further from the right edge than one
+  // with less) - trimming it away was tried and collapsed every row flush
+  // against the edge, losing that spacing entirely.
+  const totalLen = plain.length;
   let col = 0;
   const spans = [];
   parts.forEach((part, idx) => {
@@ -2666,34 +2664,33 @@ function renderFixedChordRow_(html, semitones, isRtl) {
     const rawTransposed = transposeChord(part, semitones || 0);
     const displayed = formatChordSymbol(rawTransposed)
       .replace(new RegExp(SUP_PLACEHOLDER + '+', 'g'), () => stash.shift());
-    // Every chord always anchors its LEFT edge within this row's own inner
-    // wrapper (see below) - the same transpose-safe technique the plain
-    // [Chord]word bracket format already uses, which keeps the chords
-    // reading left-to-right in the order they were typed, full stop. Which
-    // SIDE OF THE SCREEN the row as a whole sits on is handled separately,
-    // by wrapping these spans in a box sized to fit them exactly and then
-    // letting the row's own text-align push that box to the right - not by
-    // computing a per-chord right offset here, which is what previously
-    // caused a reported reversal (right:${startCol}ch put the first-typed
-    // chord at the right edge and each later one further left - backwards).
+    // Each chord keeps reading left-to-right in the order it was typed
+    // (column 0 first, increasing after), over both formats:
+    //   - left:${startCol}ch for an LTR-paired row - plain, unshifted.
+    //   - right:(totalLen-startCol-tokenLen)ch for an RTL-paired row - a
+    //     straight horizontal SHIFT of the whole row (not a mirror): every
+    //     chord's position RELATIVE TO THE OTHERS is identical to the
+    //     left-anchored case (startCol=0 is still leftmost, the highest
+    //     startCol is still rightmost), just slid over so the row's own
+    //     authored width (chords plus whatever trailing padding followed
+    //     the last one) ends flush at the right edge - matching how a
+    //     right-aligned Hebrew/Yiddish lyric line below it sits, while
+    //     preserving each row's own distinct spacing from however much
+    //     padding was originally typed after its last chord.
+    //   A MIRROR of the row - right:${startCol}ch directly, with no
+    //   totalLen shift - was tried before and reverses that order instead
+    //   (confirmed on real songs: a row typed as "Am ... Em" rendered with
+    //   Em to the left of Am), so it's not used.
+    const edgeStyle = isRtl
+      ? `right:${totalLen - startCol - tokenLen}ch`
+      : `left:${startCol}ch`;
     const realToken = (partsReal[idx] || part).trim();
     const dataChord = transposeChord(realToken, semitones || 0);
-    spans.push(`<span class="chord-tap" data-chord="${escapeHtml(dataChord)}" style="position:absolute;left:${startCol}ch;top:0;white-space:nowrap;">${displayed}</span>`);
+    spans.push(`<span class="chord-tap" data-chord="${escapeHtml(dataChord)}" style="position:absolute;${edgeStyle};top:0;white-space:nowrap;">${displayed}</span>`);
   });
-  // Wrapping in a box sized exactly to the row's own text width (totalLen)
-  // means the row's own text-align:right (set by renderChordHtmlBody, only
-  // for RTL-paired rows) pushes this whole group flush against the right
-  // edge as one unit, via ordinary CSS alignment - while every chord inside
-  // it keeps the ordinary left-to-right anchor above, so reading order is
-  // never affected by which side the box ends up on.
-  return `<span style="position:relative;display:inline-block;width:${totalLen}ch;height:1em;vertical-align:top;">${spans.join('')}</span>`;
+  return spans.join('');
 }
 
-// Hebrew/Yiddish text uses the Hebrew Unicode block - any such character
-// means the line reads right-to-left. Chord symbols (Em, C7, ...) are
-// always plain Latin letters/digits, so a chord line never "contains
-// Hebrew" itself - its alignment should instead match whichever lyric
-// line it sits above, not its own (irrelevant) character direction.
 function containsHebrew(s) { return /[\u0590-\u05FF]/.test(s || ''); }
 
 function renderChordHtmlBody(html, transposeSemitones) {
@@ -2721,17 +2718,16 @@ function renderChordHtmlBody(html, transposeSemitones) {
       // with runs of &nbsp; padding between them, positioning each chord
       // over a specific word (e.g. "C     F     Em"). renderFixedChordRow_
       // renders each chord as its own absolutely-positioned span (column
-      // computed once from the original, untransposed text) inside a box
-      // sized to fit them exactly, rather than one inline padded string -
-      // the chords themselves always read left-to-right in their own typed/
-      // played order, regardless of which side of the screen that box ends
-      // up on. Which side it sits on is decided here, the ordinary CSS way:
-      // text-align:right for a row paired with a Hebrew/Yiddish lyric line
-      // (so the two sit on the same, right, side of the screen), left
-      // otherwise - not by shifting each chord's own coordinates, which is
-      // what previously caused a reported chord-order reversal.
+      // computed once from the original, untransposed text) rather than one
+      // inline padded string, so which edge it hugs is passed in explicitly
+      // (isRtl) instead of being handled via text-align, which has no
+      // effect on absolutely-positioned children. Still always reads
+      // left-to-right internally either way - only which edge the whole
+      // row hugs changes, keeping chords over Hebrew/Yiddish lyrics right-
+      // aligned (with each row's own natural spacing preserved) and chords
+      // over English lyrics left-aligned.
       const inner = renderFixedChordRow_(p.innerHTML, transposeSemitones || 0, rtl);
-      return `<div class="html-chord-row" style="direction:ltr;${rtl ? 'text-align:right;' : ''}">${inner}</div>`;
+      return `<div class="html-chord-row" style="direction:ltr;">${inner}</div>`;
     }
     const lyricAlignStyle = rtl ? 'direction:rtl;text-align:right;' : 'direction:ltr;text-align:left;';
     return `<div class="html-lyric-row" style="${lyricAlignStyle}">${p.innerHTML}</div>`;
