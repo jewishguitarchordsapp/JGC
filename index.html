@@ -129,6 +129,11 @@
   .detail-tile.action .tile-label{font-size:10.5px;color:#333;}
   .detail-tile.action.active{background:#fdeceb;border-color:#f3c9c6;}
   .detail-tile.action.active svg{color:#d9302f;}
+  /* Admin > Stats > Overview's daily-visitors chart - a plain CSS bar
+     chart (no library) matching the single hue already used for every
+     other accent in this app, since there's only ever one series here. */
+  .stat-chart{display:flex;align-items:flex-end;gap:3px;height:90px;}
+  .stat-bar{flex:1 1 0;min-width:2px;background:var(--teal);border-radius:3px 3px 0 0;}
   .chords-used-row{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin:10px 0;}
   .chords-used-row .set-known-link{font-size:12.5px;color:var(--accent);white-space:nowrap;cursor:pointer;margin-top:3px;}
   .playback-row{background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin:10px 0;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
@@ -915,7 +920,33 @@ let lastSynced = null;
 let view = { name: 'home' };
 let filters = { q: '', artist: '', language: '', tag: '' };
 let songTab = 'new';        // 'new' | 'all' | 'favorites' | 'known' — Songs opens to "New Songs" by default
-let adminTab = 'requests'; // 'requests' | 'messages' | 'errors' | 'users' | 'topSongs'
+let adminTab = 'requests'; // 'requests' | 'messages' | 'errors' | 'users' | 'topSongs' | 'overview'
+// Admin is organized into 3 top-level sections (Communication / Users /
+// Stats), each with its own sub-tabs - see renderAdminSectionNav()/
+// renderAdminNav(). adminTab above still picks which sub-tab is showing and
+// is read by every existing load*/render* function exactly as before; this
+// is just an outer layer of navigation on top, so none of them needed to
+// change. adminSectionFor_() derives the section from whatever adminTab
+// already is, so jumping straight to a specific tab (nothing currently does
+// this, but cheap insurance) still lands on the right section's nav.
+let adminSection = 'communication'; // 'communication' | 'users' | 'stats'
+const ADMIN_SECTIONS = {
+  communication: { tabs: ['requests', 'messages', 'errors'], default: 'requests' },
+  users:         { tabs: ['users'],                          default: 'users' },
+  stats:         { tabs: ['overview', 'topSongs'],            default: 'overview' },
+};
+function adminSectionFor_(tab) {
+  return Object.keys(ADMIN_SECTIONS).find(sec => ADMIN_SECTIONS[sec].tabs.includes(tab)) || 'communication';
+}
+function goAdminSection(section) {
+  adminSection = section;
+  adminTab = ADMIN_SECTIONS[section].default;
+  render();
+}
+function goAdminTab(tab) {
+  adminTab = tab;
+  render();
+}
 let editChordMode = 'simple'; // 'simple' | 'raw' — which chords+lyrics textarea is active on the Add/Edit Song form
 // Manual controls for the chords+lyrics textareas. Chord symbols (Em, C7...)
 // are always English even in a Hebrew/Yiddish song, so auto-detecting text
@@ -1725,7 +1756,15 @@ async function supaApi(action, fields) {
 
   if (action === 'getErrors') {
     await supaRequireAdmin_();
-    const { data, error } = await getSupa_().from('errors').select('*');
+    // Switched to supaSelectAll_ (same as getRequests/getMessages above) -
+    // a plain .select('*') with no .range() silently caps out at whatever
+    // the project's Data API "Max Rows" setting is, the same trap flagged
+    // on getUsers' own roster fetch, except here nothing was paginating
+    // around it at all: once error reports passed that row count, this
+    // tab would start silently hiding the oldest ones with no error. Not
+    // known to have actually happened yet, but worth closing now rather
+    // than waiting to find out the hard way.
+    const { data, error } = await supaSelectAll_((from, to) => getSupa_().from('errors').select('*').order('id').range(from, to));
     throwIfErr_(error);
     const emailMap = await supaProfileMapByIds_(data.map(e => e.user_id));
     return { success: true, errors: data.map(e => supaErrorToOld_(e, emailMap)) };
@@ -1793,6 +1832,60 @@ async function supaApi(action, fields) {
     const { error } = await getSupa_().rpc('increment_song_view', { p_song_id: fields.id });
     throwIfErr_(error);
     return { success: true };
+  }
+
+  // Fire-and-forget "I had the app open today" bump for Admin > Stats >
+  // Overview - see startAfterSignIn() in the frontend, which calls this
+  // exactly once per page load/session (not on every periodic refresh).
+  // log_app_visit() (security definer, see add_visit_tracking_and_admin_stats.sql)
+  // only ever lets the caller bump their OWN today's row by +1 - there's no
+  // way to pass any other user id or date through it.
+  if (action === 'logVisit') {
+    await supaRequireUser_();
+    const { error } = await getSupa_().rpc('log_app_visit');
+    throwIfErr_(error);
+    return { success: true };
+  }
+
+  // Admin > Stats > Overview. app_visits only holds rows an admin can read
+  // (see its own RLS policy), and this only ever asks for the last 30 days
+  // of them - a small, date-bounded read no matter how large that table
+  // eventually gets, same reasoning as getUnreadMessagesInfo above never
+  // scaling with total history. Aggregates into one row per calendar day
+  // (including days with zero visits, so the chart's x-axis has no gaps)
+  // plus two rolling-window active-user counts, all computed here rather
+  // than shipping every raw row to the browser.
+  if (action === 'getVisitStats') {
+    await supaRequireAdmin_();
+    const DAYS = 30;
+    const toDateStr = d => d.toISOString().slice(0, 10);
+    const since = new Date(); since.setUTCDate(since.getUTCDate() - (DAYS - 1));
+    const sinceStr = toDateStr(since);
+    const last7Start = new Date(); last7Start.setUTCDate(last7Start.getUTCDate() - 6);
+    const last7StartStr = toDateStr(last7Start);
+    const [visitsRes, countRes] = await Promise.all([
+      getSupa_().from('app_visits').select('user_id,visit_date,visit_count').gte('visit_date', sinceStr),
+      getSupa_().from('profiles').select('id', { count: 'exact', head: true }),
+    ]);
+    throwIfErr_(visitsRes.error);
+    throwIfErr_(countRes.error);
+    const byDay = {}; // 'YYYY-MM-DD' -> { visitors: Set<user_id>, visits: number }
+    const active7 = new Set(), active30 = new Set();
+    (visitsRes.data || []).forEach(r => {
+      const bucket = byDay[r.visit_date] || (byDay[r.visit_date] = { visitors: new Set(), visits: 0 });
+      bucket.visitors.add(r.user_id);
+      bucket.visits += Number(r.visit_count) || 1;
+      active30.add(r.user_id);
+      if (r.visit_date >= last7StartStr) active7.add(r.user_id);
+    });
+    const days = [];
+    for (let i = 0; i < DAYS; i++) {
+      const d = new Date(since); d.setUTCDate(d.getUTCDate() + i);
+      const key = toDateStr(d);
+      const bucket = byDay[key];
+      days.push({ date: key, visitors: bucket ? bucket.visitors.size : 0, visits: bucket ? bucket.visits : 0 });
+    }
+    return { success: true, totalUsers: countRes.count || 0, active7: active7.size, active30: active30.size, days };
   }
 
   // Lets an admin manually kick off the same-database nightly_backup snapshot
@@ -2210,6 +2303,12 @@ function startAfterSignIn() {
   dataStarted = true;
   loadSongs(true);
   refreshTimer = setInterval(() => loadSongs(false), CONFIG.AUTO_REFRESH_SECONDS * 1000);
+  // Once per page load/session (the dataStarted guard above), not on every
+  // periodic refresh - feeds Admin > Stats > Overview's daily-visitors
+  // chart (see getVisitStats). Same fire-and-forget pattern as
+  // recordSongView_'s incrementSongView call - never blocks anything or
+  // surfaces an error to the person using the app.
+  api('logVisit', {}).catch(() => {});
 }
 
 // Fetches one song's full text on demand — used when its detail page is
@@ -4380,6 +4479,23 @@ async function deleteSongConfirm(id) {
 function renderEdit() {
   if (!effectiveIsAdmin()) { document.getElementById('app').innerHTML = '<div class="empty">Sign in with an admin Google account to add or edit songs.</div>'; return; }
   const song = view.id ? songs.find(s => s.id === view.id) : null;
+  // This song's chart text may not have been fetched into `song` yet -
+  // e.g. Edit was clicked right after a save (which clears the just-saved
+  // song's cached text so the detail page re-fetches it fresh - see
+  // saveSong), or before the normal per-song/per-list fetch landed (see
+  // loadSongContentFor/loadSongContentAll). Rendering the form anyway would
+  // show an EMPTY chords/lyrics box, which looks like the song lost its
+  // content and - worse - would actually overwrite it with blank text if
+  // Save were pressed. Show a brief loading state and re-render once the
+  // real text arrives instead.
+  if (song && song.chords_lyrics === undefined) {
+    if (!song._contentPending) {
+      song._contentPending = true;
+      loadSongContentFor(song.id).then(() => { if (view.name === 'edit' && view.id === song.id) renderEdit(); });
+    }
+    document.getElementById('app').innerHTML = '<div class="empty">Loading song text…</div>';
+    return;
+  }
   const s = song || { title:'', title_hebrew:'', artist:'', artist_hebrew:'', categories:[], capo:0, youtube_url:'', chords_lyrics:'', lyrics_only:'' };
   const { language, tags } = splitCategories(s.categories);
   const stored = s.chords_lyrics || '';
@@ -4505,6 +4621,24 @@ function saveSong(evt, id) {
   const statusEl = document.getElementById('saveStatus');
   statusEl.textContent = 'Saving…'; statusEl.className = 'status';
   api(id ? 'updateSong' : 'createSong', { song })
+    .then(() => {
+      // The save just succeeded on the server, but this song's chart text
+      // may already be sitting in songContentById from before the edit
+      // (opening its detail page, or a lyric search, both cache it there -
+      // see loadSongContentFor/loadSongContentAll) - and loadSongs() below
+      // unconditionally re-applies whatever's cached there onto the fresh
+      // list it fetches (the list endpoint itself never includes chart
+      // text - see its own comment), since that cache is what's meant to
+      // survive a normal periodic refresh. Without clearing it here first,
+      // that stale pre-edit text would get reapplied right after a save
+      // and silently show the OLD chart again, looking like the edit never
+      // saved even though it's correctly sitting in the database -
+      // reported as "I changed Em to En, saved, and it still shows En."
+      // Deleting it (rather than guessing the new value here) makes
+      // renderDetail() see this song's content as not-yet-loaded and
+      // re-fetch it fresh from the server the normal way.
+      if (id) delete songContentById[id];
+    })
     .then(() => loadSongs(false))
     .then(() => goTo(id ? 'detail' : 'list', id ? {id} : {}))
     .catch(err => { statusEl.textContent = 'Error: ' + err.message; statusEl.className = 'error'; });
@@ -5103,13 +5237,19 @@ function tabBadgeHtml(count) { return count > 0 ? ` <span class="tab-badge">${co
 
 function renderAdmin() {
   if (!effectiveIsAdmin()) { document.getElementById('app').innerHTML = '<div class="empty">Admin only.</div>'; return; }
-  document.getElementById('app').innerHTML = `<div class="subtabs" id="adminNav"></div><div id="adminToolbar"></div><div id="adminBody">Loading…</div>`;
+  // adminTab may have been left pointing at a tab from a different section
+  // than adminSection currently says (e.g. a stale value from before a
+  // reload) - resync here rather than trusting the two to always agree.
+  adminSection = adminSectionFor_(adminTab);
+  document.getElementById('app').innerHTML = `<div class="subtabs" id="adminSectionNav"></div><div class="subtabs" id="adminNav"></div><div id="adminToolbar"></div><div id="adminBody">Loading…</div>`;
+  renderAdminSectionNav();
   renderAdminNav();
   renderAdminToolbar();
   if (adminTab === 'requests') loadAdminRequests();
   else if (adminTab === 'messages') loadAdminMessages();
   else if (adminTab === 'errors') loadAdminErrors();
   else if (adminTab === 'topSongs') renderAdminTopSongs();
+  else if (adminTab === 'overview') loadAdminStatsOverview();
   else loadAdminUsers();
   // The unread badge (Messages tab) and the per-user unread dot (Users tab)
   // used to require downloading the ENTIRE messages table — every message
@@ -5126,21 +5266,45 @@ function renderAdmin() {
     api('getUnreadMessagesInfo', {}).then(data => {
       unreadInfo = { count: data.count || 0, emails: data.emails || [] };
       unreadLoaded = true;
+      renderAdminSectionNav();
       renderAdminNav();
       if (adminTab === 'users') renderUsersList();
     }).catch(() => {});
   }
 }
+// Top-level Communication / Users / Stats nav. The unread badge shows on
+// BOTH Communication (its Messages sub-tab is where the unread thread
+// lives) and Users (where the per-row unread dot lives) - the exact same
+// two places it showed in the old single-row nav, just promoted to the
+// section level now that Messages/Users aren't both visible at once.
+function renderAdminSectionNav() {
+  const nav = document.getElementById('adminSectionNav');
+  if (!nav) return;
+  const unread = unreadThreadCount();
+  nav.innerHTML = `
+      <button class="${adminSection==='communication'?'active':''}" onclick="goAdminSection('communication')">Communication${tabBadgeHtml(unread)}</button>
+      <button class="${adminSection==='users'?'active':''}" onclick="goAdminSection('users')">Users${tabBadgeHtml(unread)}</button>
+      <button class="${adminSection==='stats'?'active':''}" onclick="goAdminSection('stats')">Stats</button>`;
+}
+// Sub-tab row for whichever section is active. Users has only the one
+// pane, so it gets no sub-tab row at all rather than a row with one
+// permanently-active button in it.
 function renderAdminNav() {
   const nav = document.getElementById('adminNav');
   if (!nav) return;
   const unread = unreadThreadCount();
-  nav.innerHTML = `
-      <button class="${adminTab==='requests'?'active':''}" onclick="adminTab='requests';render()">Song Requests</button>
-      <button class="${adminTab==='messages'?'active':''}" onclick="adminTab='messages';render()">Messages${tabBadgeHtml(unread)}</button>
-      <button class="${adminTab==='errors'?'active':''}" onclick="adminTab='errors';render()">Error Reports</button>
-      <button class="${adminTab==='users'?'active':''}" onclick="adminTab='users';render()">Users${tabBadgeHtml(unread)}</button>
-      <button class="${adminTab==='topSongs'?'active':''}" onclick="adminTab='topSongs';render()">Top Songs</button>`;
+  if (adminSection === 'communication') {
+    nav.innerHTML = `
+      <button class="${adminTab==='requests'?'active':''}" onclick="goAdminTab('requests')">Song Requests</button>
+      <button class="${adminTab==='messages'?'active':''}" onclick="goAdminTab('messages')">Messages${tabBadgeHtml(unread)}</button>
+      <button class="${adminTab==='errors'?'active':''}" onclick="goAdminTab('errors')">Error Reports</button>`;
+  } else if (adminSection === 'stats') {
+    nav.innerHTML = `
+      <button class="${adminTab==='overview'?'active':''}" onclick="goAdminTab('overview')">Overview</button>
+      <button class="${adminTab==='topSongs'?'active':''}" onclick="goAdminTab('topSongs')">Top Songs</button>`;
+  } else {
+    nav.innerHTML = '';
+  }
 }
 // Small standalone toolbar under the admin tab strip - deliberately NOT one
 // of the subtabs buttons above, so it never looks like a tab you "switch
@@ -5309,6 +5473,7 @@ function loadAdminMessages() {
     messagesLoaded = true;
     unreadLoaded = true; // messagesCache is now the real, full, authoritative source - see unreadThreadCount()/userHasUnreadMessage()
     if (adminTab === 'messages') renderAdminMessages();
+    renderAdminSectionNav();
     renderAdminNav();
   }).catch(err => { if (adminTab === 'messages') document.getElementById('adminBody').innerHTML = `<div class="error">${err.message}</div>`; });
 }
@@ -5429,6 +5594,7 @@ function openThreadModal(email, name) {
   const t = document.getElementById('adminChatThread'); if (t) t.scrollTop = t.scrollHeight;
   api('markThreadRead', { user_email: email }).then(() => {
     messagesCache.forEach(m => { if (m.user_email === email && m.sender === 'user') m.read_by_admin = 'true'; });
+    renderAdminSectionNav();
     renderAdminNav();
   }).catch(() => {});
 }
@@ -5453,6 +5619,7 @@ function sendAdminReply() {
     messagesCache = data.messages || [];
     messagesLoaded = true;
     refreshThreadModalIfOpen();
+    renderAdminSectionNav();
     renderAdminNav();
   }).catch(err => alert(err.message));
 }
@@ -5583,6 +5750,51 @@ function renderAdminTopSongs() {
     pagerHtml(sorted.length, adminTopSongsPage, 'changeAdminTopSongsPage');
 }
 function changeAdminTopSongsPage(p) { adminTopSongsPage = p; renderAdminTopSongs(); }
+
+/* ============================================================
+   STATS > OVERVIEW (admin) — total/active user counts plus a simple daily-
+   visitors chart, backed by the app_visits table (see getVisitStats/
+   logVisit and add_visit_tracking_and_admin_stats.sql). Cached in memory
+   for this admin-panel visit (statsOverviewCache) the same way
+   usersCache/requestsCache etc. are - switching away to another tab and
+   back shows the same numbers instantly rather than re-fetching.
+   ============================================================ */
+let statsOverviewCache = null;
+function loadAdminStatsOverview() {
+  if (statsOverviewCache) { renderAdminStatsOverview(); return; }
+  const body = document.getElementById('adminBody');
+  if (body) body.innerHTML = '<div class="muted">Loading stats…</div>';
+  api('getVisitStats', {}).then(data => {
+    statsOverviewCache = data;
+    if (adminTab === 'overview') renderAdminStatsOverview();
+  }).catch(err => { if (adminTab === 'overview') document.getElementById('adminBody').innerHTML = `<div class="error">${err.message}</div>`; });
+}
+function renderAdminStatsOverview() {
+  const body = document.getElementById('adminBody');
+  if (!body) return;
+  const d = statsOverviewCache;
+  if (!d) { body.innerHTML = '<div class="muted">Loading stats…</div>'; return; }
+  // Bars are sized relative to the busiest day in this 30-day window, not
+  // to total user count - a quiet app with 5 regular users should still
+  // show a readable chart, not 30 nearly-invisible slivers.
+  const maxVisitors = Math.max(1, ...d.days.map(x => x.visitors));
+  const barsHtml = d.days.map(day => {
+    const pct = Math.round((day.visitors / maxVisitors) * 100);
+    const dateLabel = new Date(day.date + 'T00:00:00Z').toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
+    const title = `${dateLabel}: ${day.visitors} visitor${day.visitors === 1 ? '' : 's'}`;
+    return `<div class="stat-bar" style="height:${day.visitors > 0 ? Math.max(pct, 4) : 0}%;" title="${escapeHtml(title)}"></div>`;
+  }).join('');
+  body.innerHTML = `
+    <div class="detail-tiles-row" style="margin-bottom:18px;">
+      <div class="detail-tile"><div class="tile-value">${d.totalUsers}</div><div class="tile-label">Total Users</div></div>
+      <div class="detail-tile"><div class="tile-value">${d.active7}</div><div class="tile-label">Active, Last 7 Days</div></div>
+      <div class="detail-tile"><div class="tile-value">${d.active30}</div><div class="tile-label">Active, Last 30 Days</div></div>
+    </div>
+    <div class="card">
+      <div class="muted" style="margin-bottom:10px;">Daily visitors — last 30 days (hover a bar for its date)</div>
+      <div class="stat-chart">${barsHtml}</div>
+    </div>`;
+}
 
 /* ============================================================
    USERS (admin) + "View As" read-only impersonation
