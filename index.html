@@ -1476,38 +1476,16 @@ function supaCached_(getCache, setCache, loader) {
 
 // ---- identity -------------------------------------------------------
 let supaProfileCache = null; // this browser session's own profile row, or null if signed out
-// In-flight dedupe: without this, two auth-gated calls firing in the same
-// tick (e.g. loadSongs() and the Round 10 logVisit() ping, both fired from
-// startAfterSignIn() at sign-in, before supaProfileCache is ever populated)
-// would each independently re-run the session+profile lookup. If either of
-// those two REDUNDANT lookups hits any transient hiccup (a Supabase
-// free-tier project waking from its auto-pause, a brief network blip) and
-// comes back empty, it looks exactly like "not signed in" - and api()
-// treats that error, from ANY action, as the Google token having expired
-// and wipes the whole local session (see expireSession_ and its callers
-// below) even though the OTHER concurrent call succeeded fine and the
-// person is genuinely signed in. Sharing one in-flight request means every
-// concurrent caller sees the exact same outcome - they can never disagree.
-let supaProfileFetchInFlight = null;
 
 async function supaCurrentProfile_(forceRefresh) {
   if (supaProfileCache && !forceRefresh) return supaProfileCache;
-  if (supaProfileFetchInFlight && !forceRefresh) return supaProfileFetchInFlight;
-  const fetchPromise = (async () => {
-    const { data: sessionData } = await getSupa_().auth.getSession();
-    const authUser = sessionData && sessionData.session && sessionData.session.user;
-    if (!authUser) { supaProfileCache = null; return null; }
-    const { data, error } = await getSupa_().from('profiles').select('*').eq('auth_user_id', authUser.id).maybeSingle();
-    throwIfErr_(error);
-    supaProfileCache = data || null;
-    return supaProfileCache;
-  })();
-  supaProfileFetchInFlight = fetchPromise;
-  try {
-    return await fetchPromise;
-  } finally {
-    if (supaProfileFetchInFlight === fetchPromise) supaProfileFetchInFlight = null;
-  }
+  const { data: sessionData } = await getSupa_().auth.getSession();
+  const authUser = sessionData && sessionData.session && sessionData.session.user;
+  if (!authUser) { supaProfileCache = null; return null; }
+  const { data, error } = await getSupa_().from('profiles').select('*').eq('auth_user_id', authUser.id).maybeSingle();
+  throwIfErr_(error);
+  supaProfileCache = data || null;
+  return supaProfileCache;
 }
 async function supaRequireUser_() {
   const p = await supaCurrentProfile_();
