@@ -262,8 +262,8 @@
      this margin-right (meant to space an inline icon from its label) was
      leaking onto its icons too, pushing them off-center within their
      otherwise-centered 30px icon box. */
-  #mainNav button img{width:15px;height:15px;vertical-align:middle;margin-inline-end:5px;opacity:0.9;}
-  #mainNav button svg{width:17px;height:17px;vertical-align:-3px;margin-inline-end:5px;stroke:#fff;}
+  #mainNav button img{width:15px;height:15px;vertical-align:middle;opacity:0.9;}
+  #mainNav button svg{width:17px;height:17px;vertical-align:-3px;stroke:#fff;}
   .fav-btn svg{width:15px;height:14px;vertical-align:-2px;margin-right:5px;}
   .html-chord-row{position:relative;height:1.35em;font-family:"CustomCourier",'Courier New',monospace;color:var(--chord);font-weight:700;white-space:pre;line-height:1.35;font-size:calc(14px + var(--chart-step,0px));}
   .html-lyric-row{font-family:"CustomCourier",'Courier New',monospace;white-space:pre;line-height:1.35;font-size:calc(14px + var(--chart-step,0px));font-weight:var(--chart-fw,400);margin-bottom:5px;}
@@ -430,7 +430,7 @@
     header h1{font-size:15px;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;margin:0;white-space:nowrap;}
     nav{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;}
     nav button{flex:0 0 auto;padding:7px 9px;font-size:12.5px;}
-    #mainNav button svg{width:15px;height:15px;margin-inline-end:4px;}
+    #mainNav button svg{width:15px;height:15px;}
     .subtabs button{padding:8px 9px;font-size:12px;gap:4px;}
     .subtabs button svg{width:13px;height:13px;}
     .subtabs.song-tabs button{padding:7px 2px;font-size:10.5px;gap:3px;}
@@ -481,7 +481,7 @@
   <nav id="mainNav"></nav>
   <div class="spacer"></div>
   <button id="tunerBtn" class="btn secondary" style="padding:6px 10px;" title="Guitar Tuner" onclick="goTo('tuner')"><span style="display:inline-flex;width:16px;height:16px;vertical-align:middle;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 1 1 9-9"/><line x1="12" y1="12" x2="12" y2="5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg></span></button>
-  <button class="btn secondary lang-toggle-btn" style="padding:6px 10px;font-size:12.5px;line-height:16px;display:inline-flex;align-items:center;" title="עברית / English" onclick="toggleUiLang()">עברית</button>
+  <button class="btn secondary lang-toggle-btn" style="box-sizing:border-box;height:28px;padding:0 10px;font-size:12.5px;display:inline-flex;align-items:center;justify-content:center;" title="עברית / English" onclick="toggleUiLang()">עברית</button>
   <button id="shareBtn" class="btn secondary" style="padding:6px 10px;" title="Share this app"><img id="shareIcon" alt="Share" style="width:16px;height:16px;vertical-align:middle;"></button>
   <div id="userArea" class="userbox"></div>
 </header>
@@ -702,9 +702,19 @@ const I18N = {
     onboarding_scroll_text: 'Browsing the full song list? Use the A-Z strip that floats on the side to jump straight to any letter instead of paging through everything.',
     onboarding_reorder_title: 'Reorder your lists',
     onboarding_reorder_text: 'See a grip handle next to a song in a playlist or in your Favorites? Drag it up or down to put your songs in whatever order you like.',
+    onboarding_offline_title: 'Save for offline',
+    onboarding_offline_text: 'Tap the download icon on your Favorites or on a playlist to save those songs for offline use — handy with no signal or spotty wifi.',
     onboarding_done_title: "That's it!",
     onboarding_done_text: "You're all set — enjoy the new app. You can always reach Contact from the menu if you run into any trouble or have an idea for us.",
     onboarding_next: 'Next', onboarding_skip: 'Skip', onboarding_got_it: 'Got it',
+    home_desc_list: 'Browse a full database of all the songs in the app.',
+    home_desc_artists: 'Explore a complete list of all featured artists.',
+    home_desc_categories: 'Explore songs by language and other content tags.',
+    home_desc_playlists: 'Create, share, and view your favorite playlists.',
+    home_desc_contact: 'Request songs, report issues, or reach out to your teacher.',
+    home_desc_known: 'Set your known chords and jump to your favorite songs.',
+    home_share_title: 'Share App',
+    home_share_desc: 'Share this app with others and spread the love to fellow guitar players.',
   },
   he: {
     nav_list: 'שירים', nav_artists: 'אמנים', nav_categories: 'קטגוריות', nav_playlists: 'פלייליסטים', nav_contact: 'צור קשר', nav_admin: 'ניהול',
@@ -739,9 +749,19 @@ const I18N = {
     onboarding_scroll_text: 'עוברים על רשימת השירים המלאה? השתמשו ברצועת האותיות A-Z הצפה בצד כדי לקפוץ ישר לכל אות, במקום לדפדף בין כל העמודים.',
     onboarding_reorder_title: 'סדרו את הרשימות שלכם',
     onboarding_reorder_text: 'רואים ידית אחיזה ליד שיר בפלייליסט או ברשימת המועדפים? גררו אותה למעלה או למטה כדי לסדר את השירים בסדר שתרצו.',
+    onboarding_offline_title: 'שמירה לשימוש לא מקוון',
+    onboarding_offline_text: 'הקישו על סמל ההורדה במועדפים שלכם או בפלייליסט כדי לשמור את השירים לשימוש ללא אינטרנט — שימושי כשאין קליטה או שהוויי-פיי חלש.',
     onboarding_done_title: 'זהו!',
     onboarding_done_text: 'הכל מוכן — תהנו מהאפליקציה החדשה. תמיד אפשר לפנות אלינו דרך "צור קשר" בתפריט אם יש תקלה או רעיון.',
     onboarding_next: 'הבא', onboarding_skip: 'דלג', onboarding_got_it: 'הבנתי',
+    home_desc_list: 'עיינו במאגר המלא של כל השירים באפליקציה.',
+    home_desc_artists: 'עיינו ברשימה המלאה של כל האמנים המוצגים.',
+    home_desc_categories: 'עיינו בשירים לפי שפה ותגיות תוכן נוספות.',
+    home_desc_playlists: 'צרו, שתפו וצפו בפלייליסטים המועדפים עליכם.',
+    home_desc_contact: 'בקשו שירים, דווחו על תקלות, או פנו למורה שלכם.',
+    home_desc_known: 'הגדירו את האקורדים שאתם כבר יודעים וקפצו לשירים המועדפים עליכם.',
+    home_share_title: 'שיתוף האפליקציה',
+    home_share_desc: 'שתפו את האפליקציה עם אחרים והפיצו את האהבה לחברים נגני גיטרה.',
   },
 };
 function t(key) {
@@ -921,6 +941,10 @@ let adminTopSongsPage = 0; // paginates the admin Top Songs tab
 let requestsFilter = [];  // multi-select subset of 'pending'/'added'/'declined'/'archived' — empty means all non-archived
 let errorsFilter = [];    // multi-select subset of 'open'/'resolved'/'archived' — empty means all non-archived
 let messagesFilter = 'all';  // 'all' | 'unread' | 'archived'
+let requestsSearch = '';   // admin Requests tab free-text search (song/artist/requester/note)
+let errorsSearch = '';     // admin Error Reports tab free-text search (song/artist/reporter/description)
+let messagesSearch = '';   // admin Messages tab free-text search (name/email/message text)
+let publicPlaylistsSearch = ''; // Public Playlists free-text search (title/owner), all 3 Playlists-page variants
 
 /* ============================================================
    PAGINATION — shared by the Songs list, Users tab, and the admin
@@ -1502,13 +1526,13 @@ async function supaApi(action, fields) {
     // lyrics search is actually used (listContent).
     const data = await supaCached_(() => _supaListCache, c => _supaListCache = c, async () => {
       const { data, error } = await supaSelectAll_((from, to) => getSupa_().from('songs')
-        .select('id,title,title_hebrew,artist,categories,capo,youtube_url,date_added,updated_at,chords_used,view_count')
+        .select('id,title,title_hebrew,artist,artist_hebrew,categories,capo,youtube_url,date_added,updated_at,chords_used,view_count')
         .order('id').range(from, to));
       throwIfErr_(error);
       return data;
     });
     return { success: true, songs: data.map(s => ({
-      id: s.id, title: s.title, title_hebrew: s.title_hebrew || '', artist: s.artist || '',
+      id: s.id, title: s.title, title_hebrew: s.title_hebrew || '', artist: s.artist || '', artist_hebrew: s.artist_hebrew || '',
       categories: s.categories || [], capo: s.capo || 0, youtube_url: s.youtube_url || '',
       date_added: s.date_added, updated_at: s.updated_at,
       chords_used: s.chords_used || [],
@@ -1707,7 +1731,7 @@ async function supaApi(action, fields) {
     await supaRequireAdmin_();
     const s = fields.song || {};
     const row = {
-      title: s.title || '', title_hebrew: s.title_hebrew || '', artist: s.artist || '',
+      title: s.title || '', title_hebrew: s.title_hebrew || '', artist: s.artist || '', artist_hebrew: s.artist_hebrew || '',
       categories: Array.isArray(s.categories) ? s.categories : [], capo: Number(s.capo) || 0,
       youtube_url: s.youtube_url || '', chords_lyrics: s.chords_lyrics || '', lyrics_only: s.lyrics_only || '',
       // Kept in sync with chords_lyrics on every save so 'list' (above) never
@@ -2206,7 +2230,7 @@ async function ensureContentFor(ids) {
 async function setOfflineAvailable(setId, title, songIds) {
   await ensureContentFor(songIds);
   const fullSongs = songIds.map(id => songs.find(s => s.id === id)).filter(Boolean).map(s => ({
-    id: s.id, title: s.title, title_hebrew: s.title_hebrew || '', artist: s.artist || '',
+    id: s.id, title: s.title, title_hebrew: s.title_hebrew || '', artist: s.artist || '', artist_hebrew: s.artist_hebrew || '',
     categories: s.categories || '', capo: s.capo || 0, youtube_url: s.youtube_url || '',
     chords_lyrics: (songContentById[s.id] || {}).chords_lyrics || s.chords_lyrics || '',
     lyrics_only: (songContentById[s.id] || {}).lyrics_only || s.lyrics_only || '',
@@ -3000,7 +3024,7 @@ function renderPrintPreview() {
       <div class="print-page">
         <div class="print-header">
           <div class="print-title">${escapeHtml(song.title)}${song.title_hebrew ? ` <span class="print-title-hebrew" dir="rtl">${escapeHtml(song.title_hebrew)}</span>` : ''}</div>
-          <div class="print-meta">${escapeHtml(song.artist||'')}${st.capo ? ` &middot; Capo ${st.capo}` : ''}</div>
+          <div class="print-meta">${escapeHtml(song.artist||'')}${song.artist_hebrew ? ` <span dir="rtl">(${escapeHtml(song.artist_hebrew)})</span>` : ''}${st.capo ? ` &middot; Capo ${st.capo}` : ''}</div>
         </div>
         <div class="print-columns${st.columns===2?' cols-2':''}" dir="${st.columns===2 && st.rtl ? 'rtl' : 'ltr'}" style="--chart-step:${st.fontSize}px;--chart-fw:${st.bold?700:400};">
           ${chartHtml}
@@ -3188,7 +3212,7 @@ function renderNav() {
   if (!currentUser) { nav.innerHTML = ''; return; }
   nav.innerHTML = navTabs().map(([name,label]) => {
     const icon = SVG_ICONS[name] || '';
-    return `<button class="${view.name===name?'active':''}" data-tab="${name}" onclick="goTo('${name}')">${icon}${label}</button>`;
+    return `<button class="${view.name===name?'active':''}" data-tab="${name}" style="display:inline-flex;align-items:center;gap:6px;" onclick="goTo('${name}')">${icon}<span>${label}</span></button>`;
   }).join('');
 }
 // Mobile-only fixed tab bar (see .bottom-nav CSS) — same tabs as renderNav,
@@ -3261,13 +3285,18 @@ if (isIosDevice() && !isStandaloneDisplay()) showInstallBanner('ios');
 // Icons for the Home tiles are the same plain-line SVG_ICONS glyphs used by
 // the nav bar (no baked-in background box), so every tile renders at the
 // exact same size/weight/color — uniform, with nothing framing them.
+// title/desc are i18n KEYS (looked up via t() in renderHome below), not
+// literal display text, so this one array drives both languages — titleKey
+// reuses the exact same key the nav bar/header already use for that
+// section (nav_list, header_known, etc.) since the English text happened
+// to be identical, so there's one Hebrew translation to keep in sync, not two.
 const HOME_TILES = [
-  { name: 'list', icon: 'list', title: 'Songs', desc: 'Browse a full database of all the songs in the app.' },
-  { name: 'artists', icon: 'artists', title: 'Artists', desc: 'Explore a complete list of all featured artists.' },
-  { name: 'categories', icon: 'categories', title: 'Categories', desc: 'Explore songs by language and other content tags.' },
-  { name: 'playlists', icon: 'playlists', title: 'Playlists', desc: 'Create, share, and view your favorite playlists.' },
-  { name: 'contact', icon: 'contact', title: 'Contact', desc: 'Request songs, report issues, or reach out to your teacher.' },
-  { name: 'knownChords', icon: 'knownChords', title: 'My Chords & Favorites', desc: 'Set your known chords and jump to your favorite songs.' },
+  { name: 'list', icon: 'list', titleKey: 'nav_list', descKey: 'home_desc_list' },
+  { name: 'artists', icon: 'artists', titleKey: 'nav_artists', descKey: 'home_desc_artists' },
+  { name: 'categories', icon: 'categories', titleKey: 'nav_categories', descKey: 'home_desc_categories' },
+  { name: 'playlists', icon: 'playlists', titleKey: 'nav_playlists', descKey: 'home_desc_playlists' },
+  { name: 'contact', icon: 'contact', titleKey: 'nav_contact', descKey: 'home_desc_contact' },
+  { name: 'knownChords', icon: 'knownChords', titleKey: 'header_known', descKey: 'home_desc_known' },
 ];
 function tileIconHtml(t) {
   if (t.icon && SVG_ICONS[t.icon]) return SVG_ICONS[t.icon];
@@ -3277,15 +3306,17 @@ function renderHome() {
   // Admin is intentionally NOT a home tile — it's only for the teacher, so
   // it lives solely in the nav bar (already conditional on isAdmin there).
   const tiles = HOME_TILES.slice();
-  let html = tiles.map(t => `
-    <div class="home-tile" onclick="goTo('${t.name}')">
-      <div class="home-tile-icon">${tileIconHtml(t)}</div>
-      <div><div class="home-tile-title">${t.title}</div><div class="home-tile-desc">${t.desc}</div></div>
+  // (named `tile`, not `t` — `t` is the global translate function, and
+  // shadowing it inside this callback would break every t(...) call below)
+  let html = tiles.map(tile => `
+    <div class="home-tile" onclick="goTo('${tile.name}')">
+      <div class="home-tile-icon">${tileIconHtml(tile)}</div>
+      <div><div class="home-tile-title">${t(tile.titleKey)}</div><div class="home-tile-desc">${t(tile.descKey)}</div></div>
     </div>`).join('');
   html += `
     <div class="home-tile" onclick="shareApp()">
       <div class="home-tile-icon">${SVG_ICONS.share}</div>
-      <div><div class="home-tile-title">Share App</div><div class="home-tile-desc">Share this app with others and spread the love to fellow guitar players.</div></div>
+      <div><div class="home-tile-title">${t('home_share_title')}</div><div class="home-tile-desc">${t('home_share_desc')}</div></div>
     </div>`;
   document.getElementById('app').innerHTML = html;
 }
@@ -3403,7 +3434,7 @@ function filteredSongs() {
     if (filters.q) {
       const q = filters.q.toLowerCase();
       const inLyrics = (s.lyrics_only || '').toLowerCase().includes(q);
-      if (!(s.title||'').toLowerCase().includes(q) && !(s.title_hebrew||'').includes(filters.q) && !(s.artist||'').toLowerCase().includes(q) && !inLyrics) return false;
+      if (!(s.title||'').toLowerCase().includes(q) && !(s.title_hebrew||'').includes(filters.q) && !(s.artist||'').toLowerCase().includes(q) && !(s.artist_hebrew||'').includes(filters.q) && !inLyrics) return false;
     }
     return true;
   });
@@ -4205,7 +4236,7 @@ async function deleteSongConfirm(id) {
 function renderEdit() {
   if (!effectiveIsAdmin()) { document.getElementById('app').innerHTML = '<div class="empty">Sign in with an admin Google account to add or edit songs.</div>'; return; }
   const song = view.id ? songs.find(s => s.id === view.id) : null;
-  const s = song || { title:'', title_hebrew:'', artist:'', categories:[], capo:0, youtube_url:'', chords_lyrics:'', lyrics_only:'' };
+  const s = song || { title:'', title_hebrew:'', artist:'', artist_hebrew:'', categories:[], capo:0, youtube_url:'', chords_lyrics:'', lyrics_only:'' };
   const { language, tags } = splitCategories(s.categories);
   const stored = s.chords_lyrics || '';
   const storedIsHtml = isHtmlChordFormat(stored);
@@ -4223,6 +4254,9 @@ function renderEdit() {
       </div>
       <div class="row">
         <div><label>Artist</label><input type="text" id="f_artist" value="${escapeHtml(s.artist)}"></div>
+        <div><label>Artist (Hebrew, optional)</label><input type="text" id="f_artist_hebrew" dir="auto" value="${escapeHtml(s.artist_hebrew||'')}"></div>
+      </div>
+      <div class="row">
         <div><label>YouTube URL (optional)</label><input type="text" id="f_youtube" value="${escapeHtml(s.youtube_url||'')}" placeholder="https://youtube.com/watch?v=…"></div>
       </div>
       <div class="row">
@@ -4316,6 +4350,7 @@ function saveSong(evt, id) {
     title: document.getElementById('f_title').value.trim(),
     title_hebrew: document.getElementById('f_title_hebrew').value.trim(),
     artist: document.getElementById('f_artist').value.trim(),
+    artist_hebrew: document.getElementById('f_artist_hebrew').value.trim(),
     categories: [document.getElementById('f_language').value.trim()].concat(
       document.getElementById('f_tags').value.split(',').map(t=>t.trim())
     ).filter(Boolean),
@@ -4390,19 +4425,46 @@ function makeReorderable(containerEl, onDrop) {
 /* ============================================================
    PLAYLISTS
    ============================================================ */
+// Free-text search over the Public Playlists section (title or owner
+// name) - matched client-side, same pattern as the admin tabs' search.
+function filterPublicPlaylistsSearch_(list) {
+  const q = publicPlaylistsSearch.trim().toLowerCase();
+  if (!q) return list;
+  return list.filter(p => (p.title||'').toLowerCase().includes(q) || (p.owner_name||p.owner_email||'').toLowerCase().includes(q));
+}
+function publicPlaylistsSearchRowHtml_() {
+  return `<div class="searchRow"><input type="text" id="publicPlaylistsSearchBox" placeholder="Search public playlists…" value="${escapeHtml(publicPlaylistsSearch)}"></div>`;
+}
+// Only #publicPlaylistsListWrap is replaced on a keystroke (see
+// bindPublicPlaylistsSearchBox_ below) — the search box itself is never
+// touched, so it keeps focus and cursor position while typing.
+function renderPublicPlaylistsWrap_(pub) {
+  const el = document.getElementById('publicPlaylistsListWrap');
+  if (!el) return;
+  const filtered = filterPublicPlaylistsSearch_(pub);
+  el.innerHTML = filtered.length ? renderPlaylistCards(filtered, 'sm') : `<div class="muted">${publicPlaylistsSearch ? 'No matching playlists.' : 'None yet.'}</div>`;
+}
+function bindPublicPlaylistsSearchBox_(pub) {
+  const box = document.getElementById('publicPlaylistsSearchBox');
+  if (box) box.addEventListener('input', e => { publicPlaylistsSearch = e.target.value; renderPublicPlaylistsWrap_(pub); });
+}
 function renderPlaylists() {
   if (viewAsUser) {
     const mine = viewAsData.playlists || [];
     const pub = playlists.filter(p => p.visibility === 'public');
     let html = `<div class="searchRow"><div class="spacer"></div><button class="btn" onclick="createPlaylistPrompt()">+ New Playlist</button></div>`;
     html += `<h2>${escapeHtml(viewAsUser.name)}'s Playlists</h2>` + (mine.length? renderPlaylistCards(mine, 'lg') : '<div class="muted">None yet.</div>');
-    html += `<h2>Public Playlists</h2>` + (pub.length? renderPlaylistCards(pub, 'sm') : '<div class="muted">None yet.</div>');
+    html += `<h2>Public Playlists</h2>` + publicPlaylistsSearchRowHtml_() + `<div id="publicPlaylistsListWrap"></div>`;
     document.getElementById('app').innerHTML = html;
+    renderPublicPlaylistsWrap_(pub);
+    bindPublicPlaylistsSearchBox_(pub);
     return;
   }
   if (!currentUser) {
     const pub = playlists.filter(p => p.visibility === 'public');
-    document.getElementById('app').innerHTML = `<h2>Public Playlists</h2>` + renderPlaylistCards(pub, 'sm') + `<div class="empty">Sign in with Google to make your own playlists.</div>`;
+    document.getElementById('app').innerHTML = `<h2>Public Playlists</h2>` + publicPlaylistsSearchRowHtml_() + `<div id="publicPlaylistsListWrap"></div>` + `<div class="empty">Sign in with Google to make your own playlists.</div>`;
+    renderPublicPlaylistsWrap_(pub);
+    bindPublicPlaylistsSearchBox_(pub);
     return;
   }
   const mine = playlists.filter(p => p.owner_email === currentUser.email);
@@ -4411,8 +4473,10 @@ function renderPlaylists() {
   let html = `<div class="searchRow"><div class="spacer"></div><button class="btn" onclick="createPlaylistPrompt()">+ New Playlist</button></div>`;
   html += `<h2>My Playlists</h2>` + (mine.length? renderPlaylistCards(mine, 'lg') : '<div class="muted">None yet.</div>');
   html += `<h2>Shared with me</h2>` + (shared.length? renderPlaylistCards(shared, 'lg') : '<div class="muted">None yet.</div>');
-  html += `<h2>Public Playlists</h2>` + (pub.length? renderPlaylistCards(pub, 'sm') : '<div class="muted">None yet.</div>');
+  html += `<h2>Public Playlists</h2>` + publicPlaylistsSearchRowHtml_() + `<div id="publicPlaylistsListWrap"></div>`;
   document.getElementById('app').innerHTML = html;
+  renderPublicPlaylistsWrap_(pub);
+  bindPublicPlaylistsSearchBox_(pub);
 }
 function renderPlaylistCards(list, size) {
   const badgeSize = size === 'sm' ? 26 : 34;
@@ -4981,16 +5045,38 @@ function toggleRequestsFilter(key) {
   const i = requestsFilter.indexOf(key);
   if (i >= 0) requestsFilter.splice(i, 1); else requestsFilter.push(key);
   adminRequestsPage = 0;
-  renderAdminRequests();
+  renderAdminRequestsList_();
+}
+// Free-text search on top of the status/archived chip filters — song
+// title, artist, requester name/email, and note, all matched client-side
+// (requestsCache is small enough that this needs no server round-trip).
+function filterRequestsSearch_(list) {
+  const q = requestsSearch.trim().toLowerCase();
+  if (!q) return list;
+  return list.filter(r => (r.song_title||'').toLowerCase().includes(q) || (r.artist||'').toLowerCase().includes(q) ||
+    (r.user_name||'').toLowerCase().includes(q) || (r.user_email||'').toLowerCase().includes(q) || (r.note||'').toLowerCase().includes(q));
 }
 function renderAdminRequests() {
   const body = document.getElementById('adminBody');
   if (!body) return;
-  const filtered = filterRequests(requestsCache).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+  // The search box is created once and left alone on every re-render after
+  // that — only #adminRequestsListWrap's innerHTML is replaced on a
+  // keystroke/filter/page change, so the input never loses focus or
+  // cursor position while typing (replacing the box itself would).
+  if (!document.getElementById('requestsSearchBox')) {
+    body.innerHTML = `<div class="searchRow"><input type="text" id="requestsSearchBox" placeholder="Search requests…" value="${escapeHtml(requestsSearch)}"></div><div id="adminRequestsListWrap"></div>`;
+    document.getElementById('requestsSearchBox').addEventListener('input', e => { requestsSearch = e.target.value; adminRequestsPage = 0; renderAdminRequestsList_(); });
+  }
+  renderAdminRequestsList_();
+}
+function renderAdminRequestsList_() {
+  const wrap = document.getElementById('adminRequestsListWrap');
+  if (!wrap) return;
+  const filtered = filterRequestsSearch_(filterRequests(requestsCache)).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
   const filterBar = filterChipsHtml(
     [{key:'pending',title:'Pending'},{key:'added',title:'Added'},{key:'declined',title:'Declined'},{key:'archived',title:'Archived'}],
     requestsFilter, 'toggleRequestsFilter');
-  body.innerHTML = filterBar + `<div class="table-wrap"><table><tr><th>Status</th><th>Song</th><th>Artist</th><th>Requested by</th><th>Note</th><th></th></tr>` +
+  wrap.innerHTML = filterBar + `<div class="table-wrap"><table><tr><th>Status</th><th>Song</th><th>Artist</th><th>Requested by</th><th>Note</th><th></th></tr>` +
     (pageSlice(filtered, adminRequestsPage).map(r => `<tr>
       <td>${r.status==='pending'
         ? `<span class="admin-grid-icons"><button class="status-icon-btn added" onclick="setRequestStatus('${r.id}','added')" title="Mark added" aria-label="Mark added">${SVG_ICONS.statusResolved}</button><button class="status-icon-btn declined" onclick="setRequestStatus('${r.id}','declined')" title="Decline" aria-label="Decline">${SVG_ICONS.decline}</button></span>`
@@ -4999,7 +5085,7 @@ function renderAdminRequests() {
       <td>${escapeHtml(r.artist)}</td>
       <td>${escapeHtml(r.user_name)}<br><span class="muted">${escapeHtml(r.user_email)}</span></td><td>${escapeHtml(r.note)}</td>
       <td><button class="status-icon-btn archive-action" onclick="setRequestArchived('${r.id}',${r.archived==='true'?'false':'true'})" title="${r.archived==='true'?'Unarchive':'Archive'}" aria-label="${r.archived==='true'?'Unarchive':'Archive'}">${r.archived==='true'?SVG_ICONS.unarchive:SVG_ICONS.archive}</button></td>
-    </tr>`).join('') || `<tr><td colspan="6" class="muted">No requests${requestsFilter.length===0?' yet':''}.</td></tr>`) + `</table></div>` +
+    </tr>`).join('') || `<tr><td colspan="6" class="muted">No requests${requestsFilter.length===0 && !requestsSearch?' yet':' match'}.</td></tr>`) + `</table></div>` +
     pagerHtml(filtered.length, adminRequestsPage, 'changeAdminRequestsPage');
 }
 // "Details" link on a request row — shown only when there's a categories
@@ -5014,7 +5100,7 @@ function viewRequestDetails(id) {
     <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">Close</button></div>
   `);
 }
-function changeAdminRequestsPage(p) { adminRequestsPage = p; renderAdminRequests(); }
+function changeAdminRequestsPage(p) { adminRequestsPage = p; renderAdminRequestsList_(); }
 function setRequestStatus(id, status) {
   api('updateRequestStatus', { id, status }).then(loadAdminRequests).catch(err => alert(err.message));
 }
@@ -5044,25 +5130,44 @@ function threadPreviewText(t) {
   const text = (last.sender === 'admin' ? 'You: ' : '') + last.text;
   return escapeHtml(text.slice(0, 70)) + (text.length > 70 ? '…' : '');
 }
+// Free-text search on top of the All/Unread/Archived filter — name,
+// email, or any message text in the thread, matched client-side.
+function filterThreadsSearch_(threads) {
+  const q = messagesSearch.trim().toLowerCase();
+  if (!q) return threads;
+  return threads.filter(t => (t.name||'').toLowerCase().includes(q) || (t.email||'').toLowerCase().includes(q) ||
+    (t.msgs||[]).some(m => (m.text||'').toLowerCase().includes(q)));
+}
 function renderAdminMessages() {
   const body = document.getElementById('adminBody');
   if (!body) return;
+  // Same shell/wrap split as Requests/Errors — the search box is created
+  // once and never replaced, so typing doesn't get interrupted.
+  if (!document.getElementById('messagesSearchBox')) {
+    body.innerHTML = `<div class="searchRow"><input type="text" id="messagesSearchBox" placeholder="Search conversations…" value="${escapeHtml(messagesSearch)}"></div><div id="adminMessagesListWrap"></div>`;
+    document.getElementById('messagesSearchBox').addEventListener('input', e => { messagesSearch = e.target.value; adminMessagesPage = 0; renderAdminMessagesList_(); });
+  }
+  renderAdminMessagesList_();
+}
+function renderAdminMessagesList_() {
+  const wrap = document.getElementById('adminMessagesListWrap');
+  if (!wrap) return;
   const threads = computeThreads(messagesCache);
-  const filtered = filterThreads(threads);
-  const filterBar = `<div class="admin-filter-row"><label class="muted">Filter:</label><select onchange="messagesFilter=this.value;adminMessagesPage=0;renderAdminMessages()">
+  const filtered = filterThreadsSearch_(filterThreads(threads));
+  const filterBar = `<div class="admin-filter-row"><label class="muted">Filter:</label><select onchange="messagesFilter=this.value;adminMessagesPage=0;renderAdminMessagesList_()">
       <option value="all" ${messagesFilter==='all'?'selected':''}>All</option>
       <option value="unread" ${messagesFilter==='unread'?'selected':''}>Unread</option>
       <option value="archived" ${messagesFilter==='archived'?'selected':''}>Archived</option>
     </select></div>`;
   // Preview-only list — tapping a row opens that conversation in a modal
   // (openThreadModal below); the full thread never renders on this page.
-  body.innerHTML = filterBar + `<div>${
+  wrap.innerHTML = filterBar + `<div>${
     pageSlice(filtered, adminMessagesPage, 10).map(t => `<div class="thread-list-item" onclick='openThreadModal(${JSON.stringify(t.email)},${JSON.stringify(t.name)})'>
         <span>${t.hasUnread ? '<span class="tab-dot"></span>' : ''}<b>${escapeHtml(t.name)}</b><br><span class="muted">${threadPreviewText(t)}</span></span></div>`).join('')
-      || `<div class="muted">No ${messagesFilter==='all'?'':messagesFilter+' '}conversations.</div>`
+      || `<div class="muted">No ${messagesFilter==='all'?'':messagesFilter+' '}conversations${messagesSearch ? ' match' : ''}.</div>`
   }</div>` + pagerHtml(filtered.length, adminMessagesPage, 'changeAdminMessagesPage', 10);
 }
-function changeAdminMessagesPage(p) { adminMessagesPage = p; renderAdminMessages(); }
+function changeAdminMessagesPage(p) { adminMessagesPage = p; renderAdminMessagesList_(); }
 function threadModalHtml() {
   const active = computeThreads(messagesCache).find(t => t.email === chatTarget.email);
   return `<h2 style="margin-top:0">${escapeHtml(chatTarget.name)}</h2>
@@ -5121,26 +5226,45 @@ function toggleErrorsFilter(key) {
   const i = errorsFilter.indexOf(key);
   if (i >= 0) errorsFilter.splice(i, 1); else errorsFilter.push(key);
   adminErrorsPage = 0;
-  renderAdminErrors();
+  renderAdminErrorsList_();
+}
+// Free-text search on top of the status/archived chip filters — song
+// title, artist, reporter name/email, and description, matched client-side.
+function filterErrorsSearch_(list) {
+  const q = errorsSearch.trim().toLowerCase();
+  if (!q) return list;
+  return list.filter(e => (e.song_title||'').toLowerCase().includes(q) || (e.artist||'').toLowerCase().includes(q) ||
+    (e.user_name||'').toLowerCase().includes(q) || (e.user_email||'').toLowerCase().includes(q) || (e.description||'').toLowerCase().includes(q));
 }
 function renderAdminErrors() {
   const body = document.getElementById('adminBody');
   if (!body) return;
-  const filtered = filterErrors(errorsCache).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+  // Same shell/wrap split as Requests — the search box is created once and
+  // never replaced, so typing doesn't get interrupted by re-renders.
+  if (!document.getElementById('errorsSearchBox')) {
+    body.innerHTML = `<div class="searchRow"><input type="text" id="errorsSearchBox" placeholder="Search error reports…" value="${escapeHtml(errorsSearch)}"></div><div id="adminErrorsListWrap"></div>`;
+    document.getElementById('errorsSearchBox').addEventListener('input', e => { errorsSearch = e.target.value; adminErrorsPage = 0; renderAdminErrorsList_(); });
+  }
+  renderAdminErrorsList_();
+}
+function renderAdminErrorsList_() {
+  const wrap = document.getElementById('adminErrorsListWrap');
+  if (!wrap) return;
+  const filtered = filterErrorsSearch_(filterErrors(errorsCache)).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
   const filterBar = filterChipsHtml(
     [{key:'open',title:'Open'},{key:'resolved',title:'Resolved'},{key:'archived',title:'Archived'}],
     errorsFilter, 'toggleErrorsFilter');
-  body.innerHTML = filterBar + `<div class="table-wrap"><table><tr><th>Status</th><th>Song</th><th>Reported by</th><th>Description</th><th></th></tr>` +
+  wrap.innerHTML = filterBar + `<div class="table-wrap"><table><tr><th>Status</th><th>Song</th><th>Reported by</th><th>Description</th><th></th></tr>` +
     (pageSlice(filtered, adminErrorsPage).map(e => `<tr>
       <td><button class="status-icon-btn ${e.status}" onclick="setErrorStatus('${e.id}','${e.status==='open'?'resolved':'open'}')" title="${e.status==='open'?'Mark resolved':'Mark open'}" aria-label="${e.status==='open'?'Mark resolved':'Mark open'}">${e.status==='open'?SVG_ICONS.statusOpen:SVG_ICONS.statusResolved}</button></td>
       <td>${escapeHtml(e.song_title)}<br><span class="muted">${escapeHtml(e.artist)}</span></td>
       <td>${escapeHtml(e.user_name)}<br><span class="muted">${escapeHtml(e.user_email)}</span></td>
       <td>${escapeHtml(e.description)}</td>
       <td><button class="status-icon-btn archive-action" onclick="setErrorArchived('${e.id}',${e.archived==='true'?'false':'true'})" title="${e.archived==='true'?'Unarchive':'Archive'}" aria-label="${e.archived==='true'?'Unarchive':'Archive'}">${e.archived==='true'?SVG_ICONS.unarchive:SVG_ICONS.archive}</button></td>
-    </tr>`).join('') || `<tr><td colspan="5" class="muted">No error reports${errorsFilter.length===0?'':' in this view'}.</td></tr>`) + `</table></div>` +
+    </tr>`).join('') || `<tr><td colspan="5" class="muted">No error reports${errorsFilter.length===0 && !errorsSearch?'':' in this view'}.</td></tr>`) + `</table></div>` +
     pagerHtml(filtered.length, adminErrorsPage, 'changeAdminErrorsPage');
 }
-function changeAdminErrorsPage(p) { adminErrorsPage = p; renderAdminErrors(); }
+function changeAdminErrorsPage(p) { adminErrorsPage = p; renderAdminErrorsList_(); }
 function setErrorStatus(id, status) { api('updateErrorReport', { id, status }).then(loadAdminErrors).catch(err => alert(err.message)); }
 function setErrorArchived(id, archived) { api('archiveError', { id, archived }).then(loadAdminErrors).catch(err => alert(err.message)); }
 
@@ -5451,6 +5575,10 @@ function onboardingSteps_() {
     {
       title: t('onboarding_reorder_title'),
       text: t('onboarding_reorder_text'),
+    },
+    {
+      title: t('onboarding_offline_title'),
+      text: t('onboarding_offline_text'),
     },
     {
       title: t('onboarding_done_title'),
