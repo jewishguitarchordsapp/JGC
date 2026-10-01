@@ -279,6 +279,37 @@
   .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;z-index:100;padding:16px;}
   .modal-card{background:var(--card);border-radius:12px;padding:20px;max-width:420px;width:100%;box-shadow:0 10px 30px rgba(0,0,0,0.25);}
   .modal-card h2{margin-top:0;}
+  /* Bottom-center, auto-dismissing confirmation toast (see showToast()).
+     Fixed/centered regardless of scroll position; pointer-events:none so it
+     never blocks taps on whatever's underneath it. Bumped higher on mobile
+     (see the mobile media query below) so it clears the bottom tab bar. */
+  .toast{position:fixed;left:50%;bottom:28px;transform:translate(-50%,12px);background:#222;color:#fff;padding:10px 18px;border-radius:24px;font-size:14px;font-weight:600;box-shadow:0 4px 16px rgba(0,0,0,0.3);opacity:0;pointer-events:none;transition:opacity .2s ease,transform .2s ease;z-index:200;max-width:88vw;text-align:center;}
+  .toast.show{opacity:1;transform:translate(-50%,0);}
+  /* First-sign-in welcome tour (see maybeStartOnboardingTour()). z-index
+     above everything else in the app (.offline-banner's 500 was previously
+     the highest) since this is meant to be the one thing on screen. The
+     "hole" is a real cutout, not a z-index hack: a transparent box sized to
+     exactly match the live target, whose own box-shadow fills the rest of
+     the viewport in the dim color - a single element does both the
+     dimming and the cutout. #onboardingOverlay itself has no background,
+     but being a full-viewport box at the top z-index, it still catches and
+     swallows every click/tap underneath it, so nothing in the app behind
+     the tour is reachable until Next/Skip/Got it is pressed. */
+  .onboarding-overlay{position:fixed;inset:0;z-index:600;}
+  .onboarding-dim{position:fixed;inset:0;background:rgba(0,0,0,0.55);}
+  .onboarding-hole{position:fixed;border-radius:10px;box-shadow:0 0 0 9999px rgba(0,0,0,0.55);transition:left .25s ease,top .25s ease,width .25s ease,height .25s ease;}
+  .onboarding-card{position:fixed;width:300px;max-width:88vw;background:#fff;border-radius:12px;padding:18px 20px;box-shadow:0 10px 36px rgba(0,0,0,0.4);}
+  .onboarding-card h3{margin:0 0 8px;font-size:16px;color:var(--teal-dark);}
+  .onboarding-card p{margin:0 0 14px;font-size:13.5px;color:#444;line-height:1.5;}
+  .onboarding-actions{display:flex;justify-content:space-between;align-items:center;gap:10px;}
+  .onboarding-dots{display:flex;gap:5px;}
+  .onboarding-dot{width:6px;height:6px;border-radius:50%;background:#ddd;}
+  .onboarding-dot.active{background:var(--teal);}
+  .onboarding-arrow{position:absolute;width:14px;height:14px;background:#fff;transform:rotate(45deg);}
+  .onboarding-demo{background:var(--bg);border-radius:8px;padding:14px 16px;margin-bottom:12px;text-align:center;}
+  .onboarding-demo-chord{display:inline-block;color:var(--chord);font-weight:700;font-size:15px;border:1.5px dashed var(--chord);border-radius:6px;padding:2px 10px;}
+  .onboarding-demo-lyric{margin-top:6px;font-size:14px;color:var(--text);}
+  .onboarding-demo-arrow{margin-top:6px;font-size:11.5px;color:var(--muted);}
   .modal-actions{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:16px;flex-wrap:wrap;}
   /* Print preview: a full-screen overlay (not the small .modal-card, which
      is too narrow for a page-shaped preview) showing exactly what "Print"
@@ -292,7 +323,16 @@
   .ppt-label{font-size:12.5px;color:var(--muted);font-weight:600;}
   .ppt-val{width:26px;text-align:center;font-size:13px;color:#444;}
   .print-page-wrap{display:flex;justify-content:center;padding:22px 14px 60px;}
-  .print-page{background:#fff;width:100%;max-width:800px;padding:28px 32px;box-shadow:0 6px 24px rgba(0,0,0,0.3);border-radius:4px;}
+  /* Sized in real inches to actually look like a letter sheet on screen (was
+     a flexible max-width:800px box before - any width, height purely driven
+     by content, nothing about it actually resembled a sheet of paper).
+     8.5in/0.75in padding matches the @page rule below exactly, so what you
+     see here is what prints. max-width:100% is just a safety net so this
+     doesn't force horizontal scrolling on a narrower window; min-height
+     keeps a short song looking like a full page instead of a tiny sliver,
+     while a long song is simply allowed to run past the bottom edge (never
+     clipped/hidden) rather than silently losing content to fit a fixed box. */
+  .print-page{background:#fff;width:8.5in;max-width:100%;min-height:11in;padding:0.75in;box-shadow:0 6px 24px rgba(0,0,0,0.3);border-radius:4px;}
   .print-header{border-bottom:2px solid #222;padding-bottom:10px;margin-bottom:14px;}
   .print-title{font-size:22px;font-weight:800;color:#111;}
   .print-title-hebrew{font-size:17px;color:#444;font-weight:600;}
@@ -400,6 +440,7 @@
     #tunerBtn{display:none;}
     footer{padding-bottom:80px;}
     .bottom-nav{display:flex;position:fixed;left:0;right:0;bottom:0;background:var(--teal);border-top:none;z-index:20;padding:6px 2px calc(6px + env(safe-area-inset-bottom));justify-content:space-around;}
+    .toast{bottom:calc(68px + env(safe-area-inset-bottom));}
     .bottom-nav button{background:none;border:none;display:flex;flex-direction:column;align-items:center;gap:2px;color:rgba(255,255,255,0.85);font-size:10.5px;padding:4px 2px;flex:1;cursor:pointer;text-align:center;-webkit-tap-highlight-color:transparent;border-radius:10px;}
     .bottom-nav button .nav-icon-wrap{width:30px;height:30px;display:flex;align-items:center;justify-content:center;margin-bottom:1px;}
     .bottom-nav button .nav-icon-wrap svg{width:18px;height:18px;stroke:#fff;display:block;}
@@ -423,7 +464,7 @@
   <h1 style="cursor:pointer;" onclick="goTo('home')"><span id="headerTitle">Welcome</span></h1>
   <nav id="mainNav"></nav>
   <div class="spacer"></div>
-  <button id="tunerBtn" class="btn secondary" style="padding:6px 10px;" title="Guitar Tuner" onclick="goTo('tuner')"><span style="display:inline-flex;width:16px;height:16px;vertical-align:middle;color:#fff;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 1 1 9-9"/><line x1="12" y1="12" x2="12" y2="5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg></span></button>
+  <button id="tunerBtn" class="btn secondary" style="padding:6px 10px;" title="Guitar Tuner" onclick="goTo('tuner')"><span style="display:inline-flex;width:16px;height:16px;vertical-align:middle;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 1 1 9-9"/><line x1="12" y1="12" x2="12" y2="5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg></span></button>
   <button id="shareBtn" class="btn secondary" style="padding:6px 10px;" title="Share this app"><img id="shareIcon" alt="Share" style="width:16px;height:16px;vertical-align:middle;"></button>
   <div id="userArea" class="userbox"></div>
 </header>
@@ -2133,6 +2174,29 @@ function parseChordLine(line) {
 
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
+// Small, auto-dismissing confirmation message (e.g. "Added to playlist")
+// for actions that already have their own modal/UI feedback elsewhere and
+// just need a brief "yes, that worked" - a single reusable element is
+// re-shown/re-timed on each call rather than stacking multiple toasts,
+// since nothing here currently fires more than one in quick succession.
+let toastHideTimer_ = null;
+function showToast(message) {
+  let el = document.getElementById('toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'toast';
+    el.className = 'toast';
+    document.body.appendChild(el);
+  }
+  el.textContent = message;
+  // Reflow before adding .show so re-triggering the toast while it's still
+  // visible (e.g. two quick adds) restarts the fade-in instead of no-op'ing.
+  el.classList.remove('show'); void el.offsetWidth;
+  el.classList.add('show');
+  clearTimeout(toastHideTimer_);
+  toastHideTimer_ = setTimeout(() => { el.classList.remove('show'); }, 2200);
+}
+
 // Generic popup used for small forms (e.g. "Request a Song") that don't
 // warrant a whole page — a simple backdrop + card appended to <body>,
 // closed by its Cancel button, an Escape press, or a click outside the card.
@@ -2284,7 +2348,6 @@ function renderFixedChordRow_(html, semitones, isRtl) {
   // token arrays stay index-aligned and can be read in the same loop.
   const plainReal = html.replace(/<sup>([\s\S]*?)<\/sup>/gi, (m, inner) => inner.replace(/<[^>]*>/g, ''))
     .replace(/&nbsp;| /gi, ' ');
-  const totalLen = plain.length;
   const parts = plain.split(/(\s+)/);
   const partsReal = plainReal.split(/(\s+)/);
   let col = 0;
@@ -2298,7 +2361,24 @@ function renderFixedChordRow_(html, semitones, isRtl) {
     const rawTransposed = transposeChord(part, semitones || 0);
     const displayed = formatChordSymbol(rawTransposed)
       .replace(new RegExp(SUP_PLACEHOLDER + '+', 'g'), () => stash.shift());
-    const edgeStyle = isRtl ? `right:${totalLen - startCol - tokenLen}ch` : `left:${startCol}ch`;
+    // RTL (Hebrew/Yiddish-lyric) rows hug the row's right edge instead of its
+    // left, but must NOT reverse the chords' own left-to-right order among
+    // themselves (see the big comment above - a chord symbol like "C7"
+    // always reads left-to-right; only the whole row's anchor side flips).
+    // The previous formula here, right:(totalLen-startCol-tokenLen)ch, did
+    // exactly that unwanted reversal: it placed whichever chord was typed
+    // FIRST (smallest startCol) furthest from the right edge and the chord
+    // typed LAST closest to it - backwards, since in a right-to-left line,
+    // column 0 (the first character typed, matching the first/rightmost
+    // Hebrew word) belongs at the right edge, not the left. right:${startCol}ch
+    // - the exact mirror of the left-anchored case, just measured from the
+    // opposite edge - puts column 0 flush against the right edge and each
+    // later column progressively further left, matching how the RTL lyric
+    // line below it actually renders, while staying just as stable across a
+    // transpose-driven chord-name-length change as the left-anchored case
+    // already was (it's still computed from the ORIGINAL untransposed
+    // startCol).
+    const edgeStyle = isRtl ? `right:${startCol}ch` : `left:${startCol}ch`;
     const realToken = (partsReal[idx] || part).trim();
     const dataChord = transposeChord(realToken, semitones || 0);
     spans.push(`<span class="chord-tap" data-chord="${escapeHtml(dataChord)}" style="position:absolute;${edgeStyle};top:0;white-space:nowrap;">${displayed}</span>`);
@@ -2948,7 +3028,7 @@ function renderNav() {
   if (!currentUser) { nav.innerHTML = ''; return; }
   nav.innerHTML = navTabs().map(([name,label]) => {
     const icon = SVG_ICONS[name] || '';
-    return `<button class="${view.name===name?'active':''}" onclick="goTo('${name}')">${icon}${label}</button>`;
+    return `<button class="${view.name===name?'active':''}" data-tab="${name}" onclick="goTo('${name}')">${icon}${label}</button>`;
   }).join('');
 }
 // Mobile-only fixed tab bar (see .bottom-nav CSS) — same tabs as renderNav,
@@ -2961,7 +3041,7 @@ function renderBottomNav() {
   if (!currentUser) { el.innerHTML = ''; return; }
   el.innerHTML = navTabs().map(([name,label]) => {
     const icon = SVG_ICONS[name] || '';
-    return `<button class="${view.name===name?'active':''}" onclick="goTo('${name}')"><span class="nav-icon-wrap">${icon}</span><span>${label}</span></button>`;
+    return `<button class="${view.name===name?'active':''}" data-tab="${name}" onclick="goTo('${name}')"><span class="nav-icon-wrap">${icon}</span><span>${label}</span></button>`;
   }).join('');
 }
 function openMobileDrawer() { document.getElementById('mobileDrawer').classList.add('open'); }
@@ -4355,10 +4435,15 @@ function saveAddToPlaylist(songId) {
     const newIds = shouldHave ? Array.from(new Set((p.song_ids||[]).concat([songId]))) : (p.song_ids||[]).filter(id => id !== songId);
     return api('updatePlaylist', Object.assign({ id: p.id, song_ids: newIds }, viewAsFields()));
   });
+  const addedCount = mine.filter(p => addToPlaylistSelection.has(p.id) && !(p.song_ids||[]).includes(songId)).length;
+  const removedCount = mine.filter(p => !addToPlaylistSelection.has(p.id) && (p.song_ids||[]).includes(songId)).length;
   Promise.all(ops)
     .then(results => {
       results.forEach(r => { if (r && r.playlist) applyPlaylistPatch_(r.playlist); });
       closeModal(); addToPlaylistSelection = new Set();
+      if (addedCount && removedCount) showToast('Playlists updated');
+      else if (addedCount) showToast(addedCount > 1 ? `Added to ${addedCount} playlists` : 'Added to playlist');
+      else if (removedCount) showToast(removedCount > 1 ? `Removed from ${removedCount} playlists` : 'Removed from playlist');
     })
     .catch(err => alert(err.message));
 }
@@ -5051,6 +5136,162 @@ function render() {
   else if (view.name === 'tuner') renderTuner();
   else if (view.name === 'contact') renderContact();
   else if (view.name === 'admin') renderAdmin();
+  maybeStartOnboardingTour();
+}
+
+/* ============================================================
+   FIRST-SIGN-IN WELCOME TOUR — a short, skippable walkthrough spotlighting
+   a few real on-screen controls (Tuner, Playlists) plus one explained-only
+   feature (chord-tap diagrams, which has nothing to spotlight unless a song
+   happens to already be open) the first time this browser ever sees the
+   signed-in app. Gated purely by a localStorage flag - per browser/device,
+   not per account, since there's no reason to add a server-side "has this
+   person seen the tour" column for something this low-stakes; a new device
+   or a cleared browser just sees it again, which is harmless.
+   ============================================================ */
+const ONBOARDING_KEY = 'jgc_onboarding_v1_done';
+let onboardingActive = false;
+let onboardingStepIndex = 0;
+
+// Called on every render() (same cheap-no-op-after-the-first-time pattern as
+// startAfterSignIn()) - only actually starts once currentUser exists, we're
+// looking at Home (the natural landing spot right after sign-in; a deep
+// link straight into some other view skips the tour rather than yanking
+// the person away from whatever they actually came here for), and the
+// localStorage flag isn't already set.
+function maybeStartOnboardingTour() {
+  if (onboardingActive || !currentUser || view.name !== 'home') return;
+  let seen = true;
+  try { seen = !!localStorage.getItem(ONBOARDING_KEY); } catch (e) {}
+  if (seen) return;
+  onboardingActive = true;
+  onboardingStepIndex = -1; // showOnboardingStep(0) below reads this as "no previous step yet"
+
+  // Let this render pass finish settling into the DOM before measuring any
+  // element's position - calling getBoundingClientRect() immediately can
+  // catch a stale/zero-sized layout on some browsers.
+  setTimeout(() => showOnboardingStep(0), 300);
+}
+
+function onboardingIsMobileNav_() { return window.matchMedia('(max-width:640px)').matches; }
+
+// Each step is centered (no spotlight) unless it defines `target`, a
+// function returning the live element to highlight (re-resolved on every
+// show/reposition, since e.g. the mobile drawer has to actually be open
+// first - see `before`). `before`/`after` run exactly once, when entering/
+// leaving that specific step (e.g. opening/closing that same drawer).
+function onboardingSteps_() {
+  const mobile = onboardingIsMobileNav_();
+  return [
+    {
+      title: 'Welcome to the new JGC!',
+      text: "We've rebuilt the app with a few new features. Here's a quick look at what's new — Next when you're ready, or Skip to explore on your own.",
+    },
+    {
+      title: 'Guitar Tuner',
+      text: mobile
+        ? 'Open the menu, then tap Tuner any time to tune up using your phone’s microphone — no separate app needed.'
+        : 'Tap here any time to tune up using your microphone — no separate app needed.',
+      before: () => { if (mobile) openMobileDrawer(); },
+      after: () => { if (mobile) closeMobileDrawer(); },
+      target: () => document.querySelector(mobile ? '#mobileDrawer .mobile-drawer-nav button' : '#tunerBtn'),
+    },
+    {
+      title: 'Chord pictures',
+      text: 'While viewing any song, tap a chord name above the lyrics to see exactly where to put your fingers.',
+      demo: true,
+    },
+    {
+      title: 'Playlists',
+      text: 'Save songs into your own playlists — great for lessons, services, or practice sets.',
+      target: () => document.querySelector(`${mobile ? '#bottomNav' : '#mainNav'} [data-tab="playlists"]`),
+    },
+    {
+      title: "That's it!",
+      text: "You're all set — enjoy the new app. You can always reach Contact from the menu if you run into any trouble or have an idea for us.",
+    },
+  ];
+}
+
+function showOnboardingStep(i) {
+  const steps = onboardingSteps_();
+  const prev = steps[onboardingStepIndex];
+  if (prev && prev.after) prev.after();
+  if (i >= steps.length) { endOnboardingTour(); return; }
+  onboardingStepIndex = i;
+  const step = steps[i];
+  if (step.before) step.before();
+  // A step that opens the mobile drawer needs one tick for it to actually
+  // be in the DOM/visible before we can measure its target's position.
+  setTimeout(() => renderOnboardingOverlay_(steps, i), step.before ? 50 : 0);
+}
+
+function skipOnboardingTour() { endOnboardingTour(); }
+
+function endOnboardingTour() {
+  const steps = onboardingSteps_();
+  const cur = steps[onboardingStepIndex];
+  if (cur && cur.after) cur.after();
+  onboardingActive = false;
+  try { localStorage.setItem(ONBOARDING_KEY, '1'); } catch (e) {}
+  const el = document.getElementById('onboardingOverlay');
+  if (el) el.remove();
+  window.removeEventListener('resize', onboardingReposition_);
+}
+
+function onboardingReposition_() {
+  if (onboardingActive) renderOnboardingOverlay_(onboardingSteps_(), onboardingStepIndex);
+}
+
+const ONBOARDING_CARD_W = 300;
+function renderOnboardingOverlay_(steps, i) {
+  const step = steps[i];
+  let el = document.getElementById('onboardingOverlay');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'onboardingOverlay';
+    el.className = 'onboarding-overlay';
+    document.body.appendChild(el);
+    window.addEventListener('resize', onboardingReposition_);
+  }
+  const target = step.target ? step.target() : null;
+  const rect = target ? target.getBoundingClientRect() : null;
+
+  let holeHtml = '', arrowHtml = '', cardStyle, arrowStyle = '';
+  if (rect && rect.width) {
+    holeHtml = `<div class="onboarding-hole" style="left:${rect.left-6}px;top:${rect.top-6}px;width:${rect.width+12}px;height:${rect.height+12}px;"></div>`;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const below = spaceBelow > 190;
+    const top = below ? rect.bottom + 16 : Math.max(12, rect.top - 16 - 180);
+    const left = Math.min(Math.max(12, rect.left + rect.width/2 - ONBOARDING_CARD_W/2), window.innerWidth - ONBOARDING_CARD_W - 12);
+    cardStyle = `top:${top}px;left:${left}px;`;
+    const arrowLeft = Math.min(Math.max(20, rect.left + rect.width/2 - left), ONBOARDING_CARD_W - 20);
+    arrowStyle = below ? `top:-6px;left:${arrowLeft}px;` : `bottom:-6px;left:${arrowLeft}px;`;
+    arrowHtml = `<div class="onboarding-arrow" style="${arrowStyle}"></div>`;
+  } else {
+    holeHtml = `<div class="onboarding-dim"></div>`;
+    cardStyle = `top:50%;left:50%;transform:translate(-50%,-50%);`;
+  }
+
+  const demoHtml = step.demo ? `<div class="onboarding-demo"><span class="onboarding-demo-chord">C</span><div class="onboarding-demo-lyric">Hal-le-lu-yah</div><div class="onboarding-demo-arrow">↑ tap a chord to see it</div></div>` : '';
+  const dots = steps.map((s, idx) => `<span class="onboarding-dot${idx===i?' active':''}"></span>`).join('');
+  const isLast = i === steps.length - 1;
+
+  el.innerHTML = `
+    ${holeHtml}
+    <div class="onboarding-card" style="${cardStyle}">
+      ${arrowHtml}
+      <h3>${escapeHtml(step.title)}</h3>
+      ${demoHtml}
+      <p>${escapeHtml(step.text)}</p>
+      <div class="onboarding-actions">
+        <div class="onboarding-dots">${dots}</div>
+        <div style="display:flex;gap:8px;">
+          ${!isLast ? `<button class="btn secondary" onclick="skipOnboardingTour()" style="font-size:12.5px;padding:6px 10px;">Skip</button>` : ''}
+          <button class="btn" onclick="showOnboardingStep(${i+1})" style="font-size:12.5px;padding:6px 14px;">${isLast ? 'Got it' : 'Next'}</button>
+        </div>
+      </div>
+    </div>`;
 }
 
 
