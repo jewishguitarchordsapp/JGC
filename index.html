@@ -310,6 +310,20 @@
   .onboarding-demo-chord{display:inline-block;color:var(--chord);font-weight:700;font-size:15px;border:1.5px dashed var(--chord);border-radius:6px;padding:2px 10px;}
   .onboarding-demo-lyric{margin-top:6px;font-size:14px;color:var(--text);}
   .onboarding-demo-arrow{margin-top:6px;font-size:11.5px;color:var(--muted);}
+  /* Users-tab summary strip (total / active today / week / month) - plain
+     stat tiles, same spirit as the admin dashboard's other small cards. */
+  .user-stats-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;}
+  .user-stat-tile{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px 16px;min-width:110px;text-align:center;flex:1 1 110px;}
+  .user-stat-value{font-size:22px;font-weight:700;color:var(--teal-dark);line-height:1.2;}
+  .user-stat-label{font-size:11.5px;color:var(--muted);margin-top:2px;}
+  /* A-Z fast-scroll rail (see alphabetSidebarHtml_()). Fixed to the right
+     edge, vertically centered, height capped so it never collides with the
+     header or (on mobile) the bottom tab bar; letters space themselves out
+     evenly to fill whatever height is available via space-between, rather
+     than a fixed per-letter size, so all 27 entries always fit on screen. */
+  .az-sidebar{position:fixed;right:2px;top:50%;transform:translateY(-50%);max-height:min(70vh,520px);display:flex;flex-direction:column;justify-content:space-between;align-items:center;z-index:15;background:rgba(255,255,255,0.7);border-radius:10px;padding:4px 2px;}
+  .az-sidebar button{background:none;border:none;color:var(--teal-dark);font-size:10.5px;font-weight:700;line-height:1;padding:1px 4px;cursor:pointer;}
+  .az-sidebar button:hover{color:var(--accent);}
   .modal-actions{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:16px;flex-wrap:wrap;}
   /* Print preview: a full-screen overlay (not the small .modal-card, which
      is too narrow for a page-shaped preview) showing exactly what "Print"
@@ -441,6 +455,8 @@
     footer{padding-bottom:80px;}
     .bottom-nav{display:flex;position:fixed;left:0;right:0;bottom:0;background:var(--teal);border-top:none;z-index:20;padding:6px 2px calc(6px + env(safe-area-inset-bottom));justify-content:space-around;}
     .toast{bottom:calc(68px + env(safe-area-inset-bottom));}
+    .az-sidebar{max-height:min(60vh,420px);right:calc(2px + env(safe-area-inset-right));}
+    .az-sidebar button{font-size:9.5px;padding:1px 3px;}
     .bottom-nav button{background:none;border:none;display:flex;flex-direction:column;align-items:center;gap:2px;color:rgba(255,255,255,0.85);font-size:10.5px;padding:4px 2px;flex:1;cursor:pointer;text-align:center;-webkit-tap-highlight-color:transparent;border-radius:10px;}
     .bottom-nav button .nav-icon-wrap{width:30px;height:30px;display:flex;align-items:center;justify-content:center;margin-bottom:1px;}
     .bottom-nav button .nav-icon-wrap svg{width:18px;height:18px;stroke:#fff;display:block;}
@@ -465,6 +481,7 @@
   <nav id="mainNav"></nav>
   <div class="spacer"></div>
   <button id="tunerBtn" class="btn secondary" style="padding:6px 10px;" title="Guitar Tuner" onclick="goTo('tuner')"><span style="display:inline-flex;width:16px;height:16px;vertical-align:middle;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 1 1 9-9"/><line x1="12" y1="12" x2="12" y2="5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg></span></button>
+  <button class="btn secondary lang-toggle-btn" style="padding:6px 10px;font-size:12.5px;" title="עברית / English" onclick="toggleUiLang()">עברית</button>
   <button id="shareBtn" class="btn secondary" style="padding:6px 10px;" title="Share this app"><img id="shareIcon" alt="Share" style="width:16px;height:16px;vertical-align:middle;"></button>
   <div id="userArea" class="userbox"></div>
 </header>
@@ -478,6 +495,7 @@
     <div id="userAreaMobile" class="userbox"></div>
     <nav class="mobile-drawer-nav">
       <button onclick="closeMobileDrawer();goTo('tuner')"><span class="mobile-drawer-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 1 1 9-9"/><line x1="12" y1="12" x2="12" y2="5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg></span><span>Tuner</span></button>
+      <button class="lang-toggle-btn" onclick="toggleUiLang()" style="font-weight:600;">עברית</button>
     </nav>
   </div>
 </div>
@@ -629,6 +647,113 @@ const SVG_ICONS = {
   // Guitar Tuner nav/home destination - a gauge/meter glyph (arc + needle).
   tuner: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 1 1 9-9"/><line x1="12" y1="12" x2="12" y2="5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg>',
 };
+
+/* ============================================================
+   UI LANGUAGE (English / Hebrew + RTL) — a first pass, not full coverage.
+   Translates and mirrors the app's main navigation and most common actions
+   (nav tabs, sign-in screen, song-list tabs/search, Add to Playlist, the
+   welcome tour, playlist-save toasts). Deliberately does NOT touch: song
+   content itself (titles/lyrics/artist names always display exactly as
+   entered - this is a UI-chrome setting, not a translator), the admin
+   panel, the Contact form, or every remaining modal/confirm dialog in the
+   app - those still read in English regardless of this setting. Expanding
+   coverage is just a matter of routing more hardcoded strings through t()
+   below and adding their Hebrew counterparts; nothing architectural is
+   blocking that, there just wasn't time to do every single string in one
+   pass. Stored per-browser (localStorage), same as the onboarding flag -
+   not synced to the account/profile, so a different device starts back at
+   English until toggled there too.
+   ============================================================ */
+const UI_LANG_KEY = 'jgc_ui_lang';
+let uiLang = 'en';
+try { uiLang = localStorage.getItem(UI_LANG_KEY) === 'he' ? 'he' : 'en'; } catch (e) {}
+
+const I18N = {
+  en: {
+    nav_list: 'Songs', nav_artists: 'Artists', nav_categories: 'Categories', nav_playlists: 'Playlists', nav_contact: 'Contact', nav_admin: 'Admin',
+    header_welcome: 'Welcome', header_tuner: 'Tuner', header_known: 'My Chords & Favorites', header_add_song: 'Add Song', header_edit_song: 'Edit Song',
+    signin_title: 'Sign in to continue',
+    signin_sub: 'Sign in with Google to browse songs, chords, and playlists.',
+    songtab_new: 'New Songs', songtab_all: 'All Songs', songtab_favorites: 'Favorites', songtab_known: 'Known Songs',
+    search_placeholder: 'Search by title, artist, or lyrics…',
+    add_song_btn: '+ Add Song',
+    random_song: 'Random Song',
+    add_to_playlist_title: 'Add to Playlist',
+    new_playlist_label: 'New playlist',
+    playlist_name_placeholder: 'Playlist name',
+    create_btn: 'Create',
+    cancel_btn: 'Cancel',
+    save_btn: 'Save',
+    toast_added_one: 'Added to playlist',
+    toast_removed_one: 'Removed from playlist',
+    toast_updated: 'Playlists updated',
+    onboarding_welcome_title: 'Welcome to the new JGC!',
+    onboarding_welcome_text: "We've rebuilt the app with a few new features. Here's a quick look at what's new — Next when you're ready, or Skip to explore on your own.",
+    onboarding_tuner_title: 'Guitar Tuner',
+    onboarding_tuner_text_mobile: 'Open the menu, then tap Tuner any time to tune up using your phone’s microphone — no separate app needed.',
+    onboarding_tuner_text_desktop: 'Tap here any time to tune up using your microphone — no separate app needed.',
+    onboarding_chords_title: 'Chord pictures',
+    onboarding_chords_text: 'While viewing any song, tap a chord name above the lyrics to see exactly where to put your fingers.',
+    onboarding_chords_demo_lyric: 'Hal-le-lu-yah',
+    onboarding_chords_demo_hint: '↑ tap a chord to see it',
+    onboarding_playlists_title: 'Playlists',
+    onboarding_playlists_text: 'Save songs into your own playlists — great for lessons, services, or practice sets.',
+    onboarding_done_title: "That's it!",
+    onboarding_done_text: "You're all set — enjoy the new app. You can always reach Contact from the menu if you run into any trouble or have an idea for us.",
+    onboarding_next: 'Next', onboarding_skip: 'Skip', onboarding_got_it: 'Got it',
+  },
+  he: {
+    nav_list: 'שירים', nav_artists: 'אמנים', nav_categories: 'קטגוריות', nav_playlists: 'פלייליסטים', nav_contact: 'צור קשר', nav_admin: 'ניהול',
+    header_welcome: 'ברוכים הבאים', header_tuner: 'מכוון גיטרה', header_known: 'האקורדים והמועדפים שלי', header_add_song: 'הוספת שיר', header_edit_song: 'עריכת שיר',
+    signin_title: 'התחברו כדי להמשיך',
+    signin_sub: 'התחברו עם Google כדי לעיין בשירים, אקורדים ופלייליסטים.',
+    songtab_new: 'שירים חדשים', songtab_all: 'כל השירים', songtab_favorites: 'מועדפים', songtab_known: 'שירים מוכרים',
+    search_placeholder: 'חיפוש לפי שם, אמן או מילות השיר…',
+    add_song_btn: '+ הוספת שיר',
+    random_song: 'שיר אקראי',
+    add_to_playlist_title: 'הוספה לפלייליסט',
+    new_playlist_label: 'פלייליסט חדש',
+    playlist_name_placeholder: 'שם הפלייליסט',
+    create_btn: 'יצירה',
+    cancel_btn: 'ביטול',
+    save_btn: 'שמירה',
+    toast_added_one: 'נוסף לפלייליסט',
+    toast_removed_one: 'הוסר מהפלייליסט',
+    toast_updated: 'הפלייליסטים עודכנו',
+    onboarding_welcome_title: 'ברוכים הבאים ל-JGC החדש!',
+    onboarding_welcome_text: 'בנינו את האפליקציה מחדש עם כמה תכונות חדשות. הנה סיכור קצר של מה שחדש — הבא כשתהיו מוכנים, או דלגו כדי לחקור בעצמכם.',
+    onboarding_tuner_title: 'מכוון גיטרה',
+    onboarding_tuner_text_mobile: 'פתחו את התפריט, ואז הקישו על מכוון גיטרה בכל עת כדי לכוון באמצעות המיקרופון של הטלפון — לא צריך אפליקציה נפרדת.',
+    onboarding_tuner_text_desktop: 'הקישו כאן בכל עת כדי לכוון באמצעות המיקרופון — לא צריך אפליקציה נפרדת.',
+    onboarding_chords_title: 'תמונות אקורדים',
+    onboarding_chords_text: 'בעת צפייה בכל שיר, הקישו על שם אקורד מעל מילות השיר כדי לראות בדיוק איפה להניח את האצבעות.',
+    onboarding_chords_demo_lyric: 'הַלְלוּיָהּ',
+    onboarding_chords_demo_hint: '↑ הקישו על אקורד כדי לראות אותו',
+    onboarding_playlists_title: 'פלייליסטים',
+    onboarding_playlists_text: 'שמרו שירים בפלייליסטים משלכם — מעולה לשיעורים, תפילות או תרגול.',
+    onboarding_done_title: 'זהו!',
+    onboarding_done_text: 'הכל מוכן — תהנו מהאפליקציה החדשה. תמיד אפשר לפנות אלינו דרך "צור קשר" בתפריט אם יש תקלה או רעיון.',
+    onboarding_next: 'הבא', onboarding_skip: 'דלג', onboarding_got_it: 'הבנתי',
+  },
+};
+function t(key) {
+  const dict = I18N[uiLang] || I18N.en;
+  return (key in dict) ? dict[key] : (I18N.en[key] || key);
+}
+function applyUiLangDir_() {
+  document.documentElement.setAttribute('dir', uiLang === 'he' ? 'rtl' : 'ltr');
+  document.documentElement.setAttribute('lang', uiLang === 'he' ? 'he' : 'en');
+}
+function updateLangToggleButtons_() {
+  document.querySelectorAll('.lang-toggle-btn').forEach(btn => { btn.textContent = uiLang === 'he' ? 'EN' : 'עברית'; });
+}
+function toggleUiLang() {
+  uiLang = uiLang === 'he' ? 'en' : 'he';
+  try { localStorage.setItem(UI_LANG_KEY, uiLang); } catch (e) {}
+  applyUiLangDir_();
+  updateLangToggleButtons_();
+  render();
+}
 // A fixed set of icon+color cover choices for playlists — no custom photo
 // upload (decided against earlier), just pick-a-preset, stored as
 // playlist.icon (one of these keys) on the Playlists sheet.
@@ -1132,15 +1257,42 @@ async function supaSelectAll_(buildQuery, pageSize) {
   pageSize = pageSize || 1000;
   const MAX_PAGES = 200;
   let all = [];
-  let from = 0;
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const { data, error } = await buildQuery(from, from + pageSize - 1);
-    if (error) return { data: null, error };
-    if (!data || data.length === 0) break;
-    all = all.concat(data);
-    if (data.length < pageSize) break;
-    from += pageSize;
-    if (page === MAX_PAGES - 1) {
+  let nextPage = 0;      // index of the next page not yet requested
+  let batchSize = 2;     // pages fired in parallel this round, doubling each
+                          // round that comes back entirely full - this was
+                          // one sequential awaited round-trip PER PAGE before
+                          // (6 of them back-to-back just for admin_user_roster's
+                          // ~5,000 profiles), each one re-running every
+                          // GROUP BY aggregate in that view from scratch -
+                          // the main reason the admin Users tab stayed slow
+                          // even after that view itself was already optimized.
+                          // Firing a growing batch of pages in parallel
+                          // instead turns that into a small handful of
+                          // *concurrent* round trips (2, then 4, then 8, ...)
+                          // regardless of how many callers below ultimately
+                          // need, with zero changes required at any call site.
+  while (nextPage < MAX_PAGES) {
+    const pagesThisRound = Math.min(batchSize, MAX_PAGES - nextPage);
+    const results = await Promise.all(
+      Array.from({ length: pagesThisRound }, (_, k) => {
+        const from = (nextPage + k) * pageSize;
+        return buildQuery(from, from + pageSize - 1);
+      })
+    );
+    nextPage += pagesThisRound;
+    let reachedEnd = false;
+    // Promise.all preserves input order (results[k] is always the page at
+    // nextPage-pagesThisRound+k), so these can still be appended in the
+    // correct order even though they resolved concurrently, not in sequence.
+    for (const { data, error } of results) {
+      if (error) return { data: null, error };
+      if (!data || data.length === 0) { reachedEnd = true; break; }
+      all = all.concat(data);
+      if (data.length < pageSize) { reachedEnd = true; break; }
+    }
+    if (reachedEnd) break;
+    batchSize *= 2;
+    if (nextPage >= MAX_PAGES) {
       console.error('supaSelectAll_: hit the ' + MAX_PAGES + '-page safety cap - stopping early with ' + all.length + ' rows. This should never happen; something (non-deterministic ordering, a broken .range()) is wrong.');
     }
   }
@@ -3019,8 +3171,8 @@ window.addEventListener('popstate', (e) => {
 // title already goes home when clicked (onclick="goTo('home')" above), so a
 // separate tab would just be a redundant second way to do the same thing.
 function navTabs() {
-  const tabs = [['list','Songs'],['artists','Artists'],['categories','Categories'],['playlists','Playlists'],['contact','Contact']];
-  if (effectiveIsAdmin()) tabs.push(['admin','Admin']);
+  const tabs = [['list',t('nav_list')],['artists',t('nav_artists')],['categories',t('nav_categories')],['playlists',t('nav_playlists')],['contact',t('nav_contact')]];
+  if (effectiveIsAdmin()) tabs.push(['admin',t('nav_admin')]);
   return tabs;
 }
 function renderNav() {
@@ -3295,15 +3447,15 @@ function renderList() {
   const activeFilterChip = filters.artist ? `Artist: ${filters.artist}` : filters.language ? `Language: ${filters.language}` : filters.tag ? `Tag: ${filters.tag}` : null;
 
   let html = `<div class="subtabs song-tabs">
-      <button class="${songTab==='new'?'active':''}" onclick="songTab='new';songListPage=0;render()">${SONG_TAB_ICONS.new}<span>New Songs</span></button>
-      <button class="${songTab==='all'?'active':''}" onclick="songTab='all';songListPage=0;render()">${SONG_TAB_ICONS.all}<span>All Songs</span></button>
-      <button class="${songTab==='favorites'?'active':''}" onclick="songTab='favorites';songListPage=0;render()">${SONG_TAB_ICONS.favorites}<span>Favorites</span></button>
-      <button class="${songTab==='known'?'active':''}" onclick="songTab='known';songListPage=0;render()">${SONG_TAB_ICONS.known}<span>Known Songs</span></button>
+      <button class="${songTab==='new'?'active':''}" onclick="songTab='new';songListPage=0;render()">${SONG_TAB_ICONS.new}<span>${t('songtab_new')}</span></button>
+      <button class="${songTab==='all'?'active':''}" onclick="songTab='all';songListPage=0;render()">${SONG_TAB_ICONS.all}<span>${t('songtab_all')}</span></button>
+      <button class="${songTab==='favorites'?'active':''}" onclick="songTab='favorites';songListPage=0;render()">${SONG_TAB_ICONS.favorites}<span>${t('songtab_favorites')}</span></button>
+      <button class="${songTab==='known'?'active':''}" onclick="songTab='known';songListPage=0;render()">${SONG_TAB_ICONS.known}<span>${t('songtab_known')}</span></button>
     </div>
     <div class="searchRow">
-      <input type="text" id="searchBox" placeholder="Search by title, artist, or lyrics…" value="${escapeHtml(filters.q)}">
-      <button class="btn secondary icon-btn-round" onclick="goRandomSong()" title="Random Song" aria-label="Random Song" style="border-radius:50%;width:38px;height:38px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex:none;">${SVG_ICONS.shuffle}</button>
-      ${effectiveIsAdmin() ? `<button class="btn" onclick="goTo('edit')">+ Add Song</button>` : ''}
+      <input type="text" id="searchBox" placeholder="${t('search_placeholder')}" value="${escapeHtml(filters.q)}">
+      <button class="btn secondary icon-btn-round" onclick="goRandomSong()" title="${t('random_song')}" aria-label="${t('random_song')}" style="border-radius:50%;width:38px;height:38px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex:none;">${SVG_ICONS.shuffle}</button>
+      ${effectiveIsAdmin() ? `<button class="btn" onclick="goTo('edit')">${t('add_song_btn')}</button>` : ''}
     </div>`;
   if (activeFilterChip) html += `<div style="margin-bottom:10px"><span class="chip active" onclick="filters.artist='';filters.language='';filters.tag='';songListPage=0;render()">${escapeHtml(activeFilterChip)} ✕</span></div>`;
   if (songTab === 'favorites' && currentUser && !isOffline) {
@@ -3317,11 +3469,48 @@ function renderList() {
   if (songTab === 'known' && currentUser) {
     html += `<div style="margin-bottom:10px"><button class="btn secondary" onclick="goTo('knownChords')">Edit Known Chords</button></div>`;
   }
-  html += `<div id="songListBody"></div>`;
+  html += `<div id="songListBody"></div>` + alphabetSidebarHtml_();
   document.getElementById('app').innerHTML = html;
   document.getElementById('searchBox').addEventListener('input', e => { filters.q = e.target.value; songListPage = 0; if (filters.q) ensureSongContentLoaded(); renderSongListBody(); });
   renderSongListBody();
   if (songTab === 'favorites' && currentUser && !isOffline) refreshFavOfflineButton();
+}
+
+// A-Z "fast scroll" rail along the edge of the song list - with 2,600+
+// songs at 15 per page, getting from page 1 to, say, the T's by mashing
+// Next was 100+ clicks; jumping straight to the first page containing a
+// title starting with the tapped letter is one tap instead. position:fixed
+// (not part of the normal document flow), so it stays put at a constant
+// screen position while the page itself scrolls underneath it, same as a
+// contacts-app fast-scroll rail. Only shown when the list is actually in
+// A-Z order - New Songs sorts by date, and a reorderable (unfiltered)
+// Favorites tab preserves the person's own drag order - jumping to "M"
+// wouldn't correspond to anything meaningful in either of those.
+function alphabetSidebarHtml_() {
+  if (songTab === 'new') return '';
+  if (songTab === 'favorites' && favoritesReorderable()) return '';
+  const letters = ['#','A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z'];
+  return `<div class="az-sidebar">${letters.map(l => `<button onclick="alphabetJump_('${l}')">${l}</button>`).join('')}</div>`;
+}
+// Jumps to whichever page contains the first song whose title starts with
+// (or, if nothing starts with exactly this letter, the first title that
+// sorts at or after it - so tapping a sparsely-used letter like "Q" still
+// goes somewhere useful instead of silently doing nothing) the tapped
+// letter. '#' catches anything not starting with a plain A-Z letter
+// (numbers, Hebrew/Yiddish titles, punctuation, ...).
+function alphabetJump_(letter) {
+  const list = filteredSongs();
+  if (!list.length) return;
+  let idx = list.findIndex(s => {
+    const first = (s.title || '').trim().charAt(0).toUpperCase();
+    if (letter === '#') return !(first >= 'A' && first <= 'Z');
+    return first >= letter;
+  });
+  if (idx === -1) idx = list.length - 1;
+  songListPage = Math.floor(idx / PAGE_SIZE);
+  renderSongListBody();
+  const el = document.getElementById('songListBody');
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // Toggles whether the signed-in (or, during View As, impersonated) user's
@@ -4396,14 +4585,14 @@ function openAddToPlaylist(songId) {
 function renderAddToPlaylistModal(songId) {
   const mine = viewAsUser ? (viewAsData.playlists||[]) : playlists.filter(p => p.owner_email === currentUser.email);
   openModal(`
-    <h2>Add to Playlist</h2>
+    <h2>${t('add_to_playlist_title')}</h2>
     ${mine.length ? `<div class="grid-cats">${mine.map(p => `<span class="chip ${addToPlaylistSelection.has(p.id)?'toggle-on':''}" onclick="toggleAddToPlaylistSelection('${p.id}','${songId}')">${escapeHtml(p.title)}</span>`).join('')}</div>` : `<p class="muted">You have no playlists yet — create one below.</p>`}
-    <label>New playlist</label>
+    <label>${t('new_playlist_label')}</label>
     <div style="display:flex;gap:8px;">
-      <input type="text" id="newPlaylistName" placeholder="Playlist name" onkeydown="if(event.key==='Enter'){event.preventDefault();createPlaylistForAdd('${songId}')}">
-      <button class="btn secondary" onclick="createPlaylistForAdd('${songId}')">Create</button>
+      <input type="text" id="newPlaylistName" placeholder="${t('playlist_name_placeholder')}" onkeydown="if(event.key==='Enter'){event.preventDefault();createPlaylistForAdd('${songId}')}">
+      <button class="btn secondary" onclick="createPlaylistForAdd('${songId}')">${t('create_btn')}</button>
     </div>
-    <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveAddToPlaylist('${songId}')">Save</button></div>
+    <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">${t('cancel_btn')}</button><button class="btn" onclick="saveAddToPlaylist('${songId}')">${t('save_btn')}</button></div>
   `);
 }
 function toggleAddToPlaylistSelection(playlistId, songId) {
@@ -4441,9 +4630,9 @@ function saveAddToPlaylist(songId) {
     .then(results => {
       results.forEach(r => { if (r && r.playlist) applyPlaylistPatch_(r.playlist); });
       closeModal(); addToPlaylistSelection = new Set();
-      if (addedCount && removedCount) showToast('Playlists updated');
-      else if (addedCount) showToast(addedCount > 1 ? `Added to ${addedCount} playlists` : 'Added to playlist');
-      else if (removedCount) showToast(removedCount > 1 ? `Removed from ${removedCount} playlists` : 'Removed from playlist');
+      if (addedCount && removedCount) showToast(t('toast_updated'));
+      else if (addedCount) showToast(addedCount > 1 ? (uiLang==='he' ? `נוסף ל-${addedCount} פלייליסטים` : `Added to ${addedCount} playlists`) : t('toast_added_one'));
+      else if (removedCount) showToast(removedCount > 1 ? (uiLang==='he' ? `הוסר מ-${removedCount} פלייליסטים` : `Removed from ${removedCount} playlists`) : t('toast_removed_one'));
     })
     .catch(err => alert(err.message));
 }
@@ -4964,7 +5153,7 @@ function renderUsersTable() {
   // focus after every single character typed. Building it once here and
   // only ever touching the container below it keeps focus (and cursor
   // position) intact.
-  body.innerHTML = `<div style="margin-bottom:10px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+  body.innerHTML = renderUsersSummary_() + `<div style="margin-bottom:10px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
       <input type="text" id="userSearchBox" placeholder="Search by name or email…" value="${escapeHtml(userSearch)}" style="max-width:320px;flex:1;min-width:180px;">
       <select id="userSortSelect" style="max-width:220px;">
         <option value="name" ${userSort==='name'?'selected':''}>Sort: Name (A–Z)</option>
@@ -4978,6 +5167,31 @@ function renderUsersTable() {
   const sel = document.getElementById('userSortSelect');
   if (sel) sel.addEventListener('change', e => { userSort = e.target.value; usersPage = 0; renderUsersList(); });
   renderUsersList();
+}
+// "Active" here means admin_user_roster's last_activity timestamp falls
+// within the window - any favorite/playlist edit/request/message/error
+// report/sign-in, not just opening the app - same definition already used
+// for the per-user "last active" column and the Users-tab sort option, so
+// these counts are consistent with what's shown per row right below them.
+function renderUsersSummary_() {
+  const list = usersCache || [];
+  const now = Date.now();
+  const DAY = 24 * 60 * 60 * 1000;
+  let activeToday = 0, activeWeek = 0, activeMonth = 0;
+  list.forEach(u => {
+    if (!u.lastActivity) return;
+    const age = now - new Date(u.lastActivity).getTime();
+    if (age <= DAY) activeToday++;
+    if (age <= 7 * DAY) activeWeek++;
+    if (age <= 30 * DAY) activeMonth++;
+  });
+  const tile = (label, value) => `<div class="user-stat-tile"><div class="user-stat-value">${value}</div><div class="user-stat-label">${label}</div></div>`;
+  return `<div class="user-stats-row">${
+    tile('Total users', list.length) +
+    tile('Active today', activeToday) +
+    tile('Active this week', activeWeek) +
+    tile('Active this month', activeMonth)
+  }</div>`;
 }
 function sortUsersList_(list) {
   const arr = list.slice();
@@ -5082,19 +5296,19 @@ function mountGateSignInButton() {
 // from render() below, same place renderNav()/renderBottomNav() refresh.
 function headerTitleText() {
   switch (view.name) {
-    case 'home': return 'Welcome';
-    case 'list': return 'Songs';
-    case 'artists': return 'Artists';
-    case 'categories': return 'Categories';
-    case 'playlists': return 'Playlists';
-    case 'playlistDetail': { const pl = playlists.find(p => p.id === view.id); return pl ? pl.title : 'Playlists'; }
-    case 'tuner': return 'Tuner';
-    case 'contact': return 'Contact';
-    case 'admin': return 'Admin';
-    case 'knownChords': return 'My Chords & Favorites';
-    case 'edit': return view.id ? 'Edit Song' : 'Add Song';
-    case 'detail': { const s = songs.find(x => x.id === view.id); return s ? s.title : 'Songs'; }
-    default: return 'Welcome';
+    case 'home': return t('header_welcome');
+    case 'list': return t('nav_list');
+    case 'artists': return t('nav_artists');
+    case 'categories': return t('nav_categories');
+    case 'playlists': return t('nav_playlists');
+    case 'playlistDetail': { const pl = playlists.find(p => p.id === view.id); return pl ? pl.title : t('nav_playlists'); }
+    case 'tuner': return t('header_tuner');
+    case 'contact': return t('nav_contact');
+    case 'admin': return t('nav_admin');
+    case 'knownChords': return t('header_known');
+    case 'edit': return view.id ? t('header_edit_song') : t('header_add_song');
+    case 'detail': { const s = songs.find(x => x.id === view.id); return s ? s.title : t('nav_list'); }
+    default: return t('header_welcome');
   }
 }
 function renderHeaderTitle() {
@@ -5117,8 +5331,8 @@ function render() {
     document.getElementById('app').innerHTML = `
       <div class="card" style="text-align:center;max-width:420px;margin:40px auto;">
         <img src="${ICONS.logo}" alt="" style="width:64px;height:64px;border-radius:14px;margin-bottom:14px;">
-        <h2>Sign in to continue</h2>
-        <p class="muted">Sign in with Google to browse songs, chords, and playlists.</p>
+        <h2>${t('signin_title')}</h2>
+        <p class="muted">${t('signin_sub')}</p>
         <div id="gsiButtonContainerGate" style="display:flex;justify-content:center;margin-top:14px;"></div>
       </div>`;
     mountGateSignInButton();
@@ -5184,31 +5398,29 @@ function onboardingSteps_() {
   const mobile = onboardingIsMobileNav_();
   return [
     {
-      title: 'Welcome to the new JGC!',
-      text: "We've rebuilt the app with a few new features. Here's a quick look at what's new — Next when you're ready, or Skip to explore on your own.",
+      title: t('onboarding_welcome_title'),
+      text: t('onboarding_welcome_text'),
     },
     {
-      title: 'Guitar Tuner',
-      text: mobile
-        ? 'Open the menu, then tap Tuner any time to tune up using your phone’s microphone — no separate app needed.'
-        : 'Tap here any time to tune up using your microphone — no separate app needed.',
+      title: t('onboarding_tuner_title'),
+      text: mobile ? t('onboarding_tuner_text_mobile') : t('onboarding_tuner_text_desktop'),
       before: () => { if (mobile) openMobileDrawer(); },
       after: () => { if (mobile) closeMobileDrawer(); },
       target: () => document.querySelector(mobile ? '#mobileDrawer .mobile-drawer-nav button' : '#tunerBtn'),
     },
     {
-      title: 'Chord pictures',
-      text: 'While viewing any song, tap a chord name above the lyrics to see exactly where to put your fingers.',
+      title: t('onboarding_chords_title'),
+      text: t('onboarding_chords_text'),
       demo: true,
     },
     {
-      title: 'Playlists',
-      text: 'Save songs into your own playlists — great for lessons, services, or practice sets.',
+      title: t('onboarding_playlists_title'),
+      text: t('onboarding_playlists_text'),
       target: () => document.querySelector(`${mobile ? '#bottomNav' : '#mainNav'} [data-tab="playlists"]`),
     },
     {
-      title: "That's it!",
-      text: "You're all set — enjoy the new app. You can always reach Contact from the menu if you run into any trouble or have an idea for us.",
+      title: t('onboarding_done_title'),
+      text: t('onboarding_done_text'),
     },
   ];
 }
@@ -5273,7 +5485,7 @@ function renderOnboardingOverlay_(steps, i) {
     cardStyle = `top:50%;left:50%;transform:translate(-50%,-50%);`;
   }
 
-  const demoHtml = step.demo ? `<div class="onboarding-demo"><span class="onboarding-demo-chord">C</span><div class="onboarding-demo-lyric">Hal-le-lu-yah</div><div class="onboarding-demo-arrow">↑ tap a chord to see it</div></div>` : '';
+  const demoHtml = step.demo ? `<div class="onboarding-demo"><span class="onboarding-demo-chord">C</span><div class="onboarding-demo-lyric">${t('onboarding_chords_demo_lyric')}</div><div class="onboarding-demo-arrow">${t('onboarding_chords_demo_hint')}</div></div>` : '';
   const dots = steps.map((s, idx) => `<span class="onboarding-dot${idx===i?' active':''}"></span>`).join('');
   const isLast = i === steps.length - 1;
 
@@ -5287,8 +5499,8 @@ function renderOnboardingOverlay_(steps, i) {
       <div class="onboarding-actions">
         <div class="onboarding-dots">${dots}</div>
         <div style="display:flex;gap:8px;">
-          ${!isLast ? `<button class="btn secondary" onclick="skipOnboardingTour()" style="font-size:12.5px;padding:6px 10px;">Skip</button>` : ''}
-          <button class="btn" onclick="showOnboardingStep(${i+1})" style="font-size:12.5px;padding:6px 14px;">${isLast ? 'Got it' : 'Next'}</button>
+          ${!isLast ? `<button class="btn secondary" onclick="skipOnboardingTour()" style="font-size:12.5px;padding:6px 10px;">${t('onboarding_skip')}</button>` : ''}
+          <button class="btn" onclick="showOnboardingStep(${i+1})" style="font-size:12.5px;padding:6px 14px;">${isLast ? t('onboarding_got_it') : t('onboarding_next')}</button>
         </div>
       </div>
     </div>`;
@@ -5478,6 +5690,8 @@ function highlightClosestString_(freq) {
 /* ============================================================
    INIT
    ============================================================ */
+applyUiLangDir_();
+updateLangToggleButtons_();
 document.getElementById('shareIcon').src = ICONS.share;
 document.getElementById('shareBtn').onclick = shareApp;
 // Optimistically restore a cached signed-in session (see saveAuthCache/
