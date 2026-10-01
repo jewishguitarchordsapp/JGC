@@ -55,6 +55,8 @@
     font-family:inherit;font-size:14px;padding:9px 10px;border:1px solid var(--border);border-radius:7px;background:#fff;color:var(--text);
   }
   .searchRow input[type=text]{flex:1;min-width:160px;}
+  .bulk-action-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--teal-light,#eef7f6);border:1px solid var(--teal,#2a8f84);border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:13px;}
+  .bulk-action-bar span.adv-link{font-size:12.5px;}
   select{cursor:pointer;}
   .btn{background:var(--teal);color:#fff;border:none;padding:9px 14px;border-radius:7px;cursor:pointer;font-size:14px;}
   .btn:hover{background:var(--teal-dark);}
@@ -945,6 +947,9 @@ let requestsSearch = '';   // admin Requests tab free-text search (song/artist/r
 let errorsSearch = '';     // admin Error Reports tab free-text search (song/artist/reporter/description)
 let messagesSearch = '';   // admin Messages tab free-text search (name/email/message text)
 let publicPlaylistsSearch = ''; // Public Playlists free-text search (title/owner), all 3 Playlists-page variants
+let requestsSelected = new Set();  // admin Requests tab bulk-select — ids currently checked
+let errorsSelected = new Set();    // admin Error Reports tab bulk-select — ids currently checked
+let messagesSelected = new Set();  // admin Messages tab bulk-select — thread user_ids currently checked
 
 /* ============================================================
    PAGINATION — shared by the Songs list, Users tab, and the admin
@@ -3100,13 +3105,36 @@ function splitCategories(cats) {
 function splitArtists(artist) {
   return String(artist || '').split(',').map(a => a.trim()).filter(Boolean);
 }
+// Display text for a song's title/artist in the current UI language — falls
+// back to the English field whenever a Hebrew value is missing for that
+// song/artist, so nothing ever renders blank just because the Hebrew side
+// hasn't been filled in yet (most artists don't have one at all right now).
+// Multi-artist songs ("Artist A, Artist B") pair up Hebrew names by
+// position, assuming they were entered in the same comma order as the
+// English field - any position missing a Hebrew name falls back to its
+// own English name rather than the whole field collapsing to blank.
+function songDisplayTitle_(s) {
+  if (uiLang === 'he' && (s.title_hebrew||'').trim()) return s.title_hebrew;
+  return s.title || '';
+}
+function songDisplayArtist_(s) {
+  if (uiLang !== 'he') return s.artist || '';
+  const en = splitArtists(s.artist);
+  const he = splitArtists(s.artist_hebrew);
+  if (!he.length) return s.artist || '';
+  return en.map((name, i) => he[i] || name).join(', ');
+}
 // Renders a song's artist field as clickable name(s) — same "filter the
 // Songs list to this artist" behavior as the Artists tab's chips — so
 // tapping an artist on a song's detail page jumps to all of their songs.
-function artistLinksHtml(artist) {
+function artistLinksHtml(artist, artistHebrew) {
   const names = splitArtists(artist);
   if (!names.length) return '';
-  return names.map(a => `<span class="backlink" onclick="event.stopPropagation();songTab='all';filters.artist='${a.replace(/'/g,"\\'")}';songListPage=0;goTo('list')">${escapeHtml(a)}</span>`).join(', ');
+  const heNames = uiLang === 'he' ? splitArtists(artistHebrew) : [];
+  return names.map((a, i) => {
+    const label = heNames[i] || a;
+    return `<span class="backlink" onclick="event.stopPropagation();songTab='all';filters.artist='${a.replace(/'/g,"\\'")}';songListPage=0;goTo('list')">${escapeHtml(label)}</span>`;
+  }).join(', ');
 }
 
 function extractYouTubeId(url) {
@@ -3497,7 +3525,7 @@ function songRowHtml(s, queueIds, reorderable) {
   return `<div class="song-row"${reorderable ? ` data-reorder-id="${s.id}"` : ''}>
         ${reorderable ? `<span class="drag-handle" title="Drag to reorder">${SVG_ICONS.dragHandle}</span>` : ''}
         <div style="display:flex;align-items:center;gap:10px;flex:1;cursor:pointer;" onclick="${detailGoTo(s.id, queueIds)}">
-          <div>${newBadge}<div class="title">${escapeHtml(s.title)}</div><div class="artist">${escapeHtml(s.artist||'')}</div></div>
+          <div>${newBadge}<div class="title" dir="auto">${escapeHtml(songDisplayTitle_(s))}</div><div class="artist" dir="auto">${escapeHtml(songDisplayArtist_(s))}</div></div>
         </div>
         <span class="star ${effectiveFavorites().includes(s.id)?'on':''}" data-fav-star="${s.id}" onclick="event.stopPropagation();toggleFavoriteFor('${s.id}')">${SVG_ICONS.heart}</span>
       </div>`;
@@ -3874,7 +3902,7 @@ function renderDetail() {
 
   let html = `<span class="backlink" onclick="goTo('list')">‹ Back to Songs</span>
     <div class="song-header">
-      <div><h2 style="margin-bottom:2px">${escapeHtml(song.title)}</h2><div class="meta">${artistLinksHtml(song.artist)}</div></div>
+      <div><h2 style="margin-bottom:2px" dir="auto">${escapeHtml(songDisplayTitle_(song))}</h2><div class="meta" dir="auto">${artistLinksHtml(song.artist, song.artist_hebrew)}</div></div>
       ${(view.fromShuffle || effectiveIsAdmin()) ? `<div style="display:flex;gap:8px">
         ${view.fromShuffle ? `<button class="btn secondary icon-btn-round" onclick="goRandomSong()" title="Shuffle again" aria-label="Shuffle again" style="border-radius:50%;width:38px;height:38px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex:none;">${SVG_ICONS.shuffle}</button>` : ''}
         ${effectiveIsAdmin() ? `<button class="btn secondary" onclick="goTo('edit',{id:'${song.id}'})">&#9998; Edit</button>
@@ -4523,7 +4551,7 @@ function renderPlaylistDetail() {
   html += list.length ? `<div id="playlistSongList">` + list.map(s => `
     <div class="song-row" data-reorder-id="${s.id}">
       ${canEdit ? `<span class="drag-handle" title="Drag to reorder">${SVG_ICONS.dragHandle}</span>` : ''}
-      <div style="cursor:pointer;flex:1" onclick="${detailGoTo(s.id, queueIds)}"><div class="title">${escapeHtml(s.title)}</div><div class="artist">${escapeHtml(s.artist||'')}</div></div>
+      <div style="cursor:pointer;flex:1" onclick="${detailGoTo(s.id, queueIds)}"><div class="title" dir="auto">${escapeHtml(songDisplayTitle_(s))}</div><div class="artist" dir="auto">${escapeHtml(songDisplayArtist_(s))}</div></div>
       ${canEdit ? `<button class="btn secondary icon-btn-round" onclick="removeFromPlaylist('${p.id}','${s.id}')" title="Remove from playlist" aria-label="Remove from playlist" style="border-radius:50%;width:34px;height:34px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex:none;">${SVG_ICONS.trash}</button>` : ''}
     </div>`).join('') + `</div>` : '<div class="empty">No songs in this playlist yet.</div>';
   document.getElementById('app').innerHTML = html;
@@ -4784,7 +4812,7 @@ function renderAddSongsResultsOnly_() {
   const results = songs.filter(s => (s.title||'').toLowerCase().includes(q) || (s.artist||'').toLowerCase().includes(q)).slice(0, 40);
   resultsEl.innerHTML = results.length ? results.map(s => `
     <div class="song-row" style="display:flex;align-items:center;justify-content:space-between;">
-      <div><div class="title">${escapeHtml(s.title)}</div><div class="artist">${escapeHtml(s.artist||'')}</div></div>
+      <div><div class="title" dir="auto">${escapeHtml(songDisplayTitle_(s))}</div><div class="artist" dir="auto">${escapeHtml(songDisplayArtist_(s))}</div></div>
       ${already.has(s.id) ? '<span class="muted">Added ✓</span>' : `<button class="btn secondary" onclick="addSongToPlaylist_('${s.id}')">Add</button>`}
     </div>`).join('') : '<div class="muted" style="padding:10px 0">No matching songs.</div>';
 }
@@ -5045,6 +5073,7 @@ function toggleRequestsFilter(key) {
   const i = requestsFilter.indexOf(key);
   if (i >= 0) requestsFilter.splice(i, 1); else requestsFilter.push(key);
   adminRequestsPage = 0;
+  requestsSelected.clear();
   renderAdminRequestsList_();
 }
 // Free-text search on top of the status/archived chip filters — song
@@ -5065,19 +5094,70 @@ function renderAdminRequests() {
   // cursor position while typing (replacing the box itself would).
   if (!document.getElementById('requestsSearchBox')) {
     body.innerHTML = `<div class="searchRow"><input type="text" id="requestsSearchBox" placeholder="Search requests…" value="${escapeHtml(requestsSearch)}"></div><div id="adminRequestsListWrap"></div>`;
-    document.getElementById('requestsSearchBox').addEventListener('input', e => { requestsSearch = e.target.value; adminRequestsPage = 0; renderAdminRequestsList_(); });
+    document.getElementById('requestsSearchBox').addEventListener('input', e => { requestsSearch = e.target.value; adminRequestsPage = 0; requestsSelected.clear(); renderAdminRequestsList_(); });
   }
   renderAdminRequestsList_();
+}
+// The full filtered+sorted list, recomputed on demand by a few helpers
+// below (bulk select-all, page-level select, bulk archive) instead of
+// threading it through onclick-string params.
+function requestsFilteredSorted_() {
+  return filterRequestsSearch_(filterRequests(requestsCache)).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+}
+function toggleRequestRowSelected(id) {
+  if (requestsSelected.has(id)) requestsSelected.delete(id); else requestsSelected.add(id);
+  renderAdminRequestsList_();
+}
+function toggleRequestsPageSelected(checked) {
+  const pageIds = pageSlice(requestsFilteredSorted_(), adminRequestsPage).map(r => r.id);
+  pageIds.forEach(id => checked ? requestsSelected.add(id) : requestsSelected.delete(id));
+  renderAdminRequestsList_();
+}
+function selectAllMatchingRequests_() {
+  requestsFilteredSorted_().forEach(r => requestsSelected.add(r.id));
+  renderAdminRequestsList_();
+}
+function clearRequestsSelection_() {
+  requestsSelected.clear();
+  renderAdminRequestsList_();
+}
+// Bulk action: archive/unarchive every selected request in one go (reuses
+// the same single-row API action — no separate bulk endpoint needed). All
+// selected rows share the same current archived state (the filter only
+// ever shows one or the other), so one direction applies to the whole batch.
+function bulkArchiveSelectedRequests_() {
+  const ids = Array.from(requestsSelected);
+  if (!ids.length) return;
+  const archived = !requestsFilter.includes('archived');
+  Promise.all(ids.map(id => api('archiveRequest', { id, archived }))).then(() => {
+    requestsSelected.clear();
+    loadAdminRequests();
+  }).catch(err => alert(err.message));
+}
+function requestsBulkBarHtml_(filtered) {
+  const n = requestsSelected.size;
+  if (!n) return '';
+  const allMatchingSelected = filtered.every(r => requestsSelected.has(r.id));
+  const archiveLabel = requestsFilter.includes('archived') ? 'Unarchive selected' : 'Archive selected';
+  return `<div class="bulk-action-bar">
+    <span>${n} selected</span>
+    ${!allMatchingSelected ? `<span class="adv-link" onclick="selectAllMatchingRequests_()">Select all ${filtered.length} matching</span>` : ''}
+    <button class="btn secondary" onclick="bulkArchiveSelectedRequests_()">${archiveLabel}</button>
+    <span class="adv-link" onclick="clearRequestsSelection_()">Clear</span>
+  </div>`;
 }
 function renderAdminRequestsList_() {
   const wrap = document.getElementById('adminRequestsListWrap');
   if (!wrap) return;
-  const filtered = filterRequestsSearch_(filterRequests(requestsCache)).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+  const filtered = requestsFilteredSorted_();
   const filterBar = filterChipsHtml(
     [{key:'pending',title:'Pending'},{key:'added',title:'Added'},{key:'declined',title:'Declined'},{key:'archived',title:'Archived'}],
     requestsFilter, 'toggleRequestsFilter');
-  wrap.innerHTML = filterBar + `<div class="table-wrap"><table><tr><th>Status</th><th>Song</th><th>Artist</th><th>Requested by</th><th>Note</th><th></th></tr>` +
-    (pageSlice(filtered, adminRequestsPage).map(r => `<tr>
+  const pageRows = pageSlice(filtered, adminRequestsPage);
+  const pageAllSelected = pageRows.length > 0 && pageRows.every(r => requestsSelected.has(r.id));
+  wrap.innerHTML = filterBar + requestsBulkBarHtml_(filtered) + `<div class="table-wrap"><table><tr><th><input type="checkbox" ${pageAllSelected?'checked':''} onchange="toggleRequestsPageSelected(this.checked)" title="Select all on this page"></th><th>Status</th><th>Song</th><th>Artist</th><th>Requested by</th><th>Note</th><th></th></tr>` +
+    (pageRows.map(r => `<tr>
+      <td><input type="checkbox" ${requestsSelected.has(r.id)?'checked':''} onchange="toggleRequestRowSelected('${r.id}')"></td>
       <td>${r.status==='pending'
         ? `<span class="admin-grid-icons"><button class="status-icon-btn added" onclick="setRequestStatus('${r.id}','added')" title="Mark added" aria-label="Mark added">${SVG_ICONS.statusResolved}</button><button class="status-icon-btn declined" onclick="setRequestStatus('${r.id}','declined')" title="Decline" aria-label="Decline">${SVG_ICONS.decline}</button></span>`
         : `<span class="badge ${r.status}" title="${escapeHtml(r.status)}">${requestStatusSymbol(r.status)}</span>`}</td>
@@ -5085,7 +5165,7 @@ function renderAdminRequestsList_() {
       <td>${escapeHtml(r.artist)}</td>
       <td>${escapeHtml(r.user_name)}<br><span class="muted">${escapeHtml(r.user_email)}</span></td><td>${escapeHtml(r.note)}</td>
       <td><button class="status-icon-btn archive-action" onclick="setRequestArchived('${r.id}',${r.archived==='true'?'false':'true'})" title="${r.archived==='true'?'Unarchive':'Archive'}" aria-label="${r.archived==='true'?'Unarchive':'Archive'}">${r.archived==='true'?SVG_ICONS.unarchive:SVG_ICONS.archive}</button></td>
-    </tr>`).join('') || `<tr><td colspan="6" class="muted">No requests${requestsFilter.length===0 && !requestsSearch?' yet':' match'}.</td></tr>`) + `</table></div>` +
+    </tr>`).join('') || `<tr><td colspan="7" class="muted">No requests${requestsFilter.length===0 && !requestsSearch?' yet':' match'}.</td></tr>`) + `</table></div>` +
     pagerHtml(filtered.length, adminRequestsPage, 'changeAdminRequestsPage');
 }
 // "Details" link on a request row — shown only when there's a categories
@@ -5119,7 +5199,15 @@ function loadAdminMessages() {
 function filterThreads(threads) {
   if (messagesFilter === 'archived') return threads.filter(t => t.archived);
   const active = threads.filter(t => !t.archived);
-  return messagesFilter === 'unread' ? active.filter(t => t.hasUnread) : active;
+  if (messagesFilter === 'unread') return active.filter(t => t.hasUnread);
+  if (messagesFilter === 'read') return active.filter(t => !t.hasUnread);
+  return active;
+}
+// Shared filtered+sorted thread list — used by the list render and by the
+// bulk-select helpers so "select all matching" always agrees with what's
+// on screen.
+function messagesFilteredSorted_() {
+  return filterThreadsSearch_(filterThreads(computeThreads(messagesCache)));
 }
 // A conversation's preview line: the last message, "You: " prefixed when
 // the admin sent it, trimmed to one line — same idea as the Contact page's
@@ -5145,25 +5233,68 @@ function renderAdminMessages() {
   // once and never replaced, so typing doesn't get interrupted.
   if (!document.getElementById('messagesSearchBox')) {
     body.innerHTML = `<div class="searchRow"><input type="text" id="messagesSearchBox" placeholder="Search conversations…" value="${escapeHtml(messagesSearch)}"></div><div id="adminMessagesListWrap"></div>`;
-    document.getElementById('messagesSearchBox').addEventListener('input', e => { messagesSearch = e.target.value; adminMessagesPage = 0; renderAdminMessagesList_(); });
+    document.getElementById('messagesSearchBox').addEventListener('input', e => { messagesSearch = e.target.value; adminMessagesPage = 0; messagesSelected.clear(); renderAdminMessagesList_(); });
   }
   renderAdminMessagesList_();
+}
+function toggleThreadRowSelected(email) {
+  if (messagesSelected.has(email)) messagesSelected.delete(email); else messagesSelected.add(email);
+  renderAdminMessagesList_();
+}
+function toggleMessagesPageSelected(checked) {
+  const pageEmails = pageSlice(messagesFilteredSorted_(), adminMessagesPage, 10).map(t => t.email);
+  pageEmails.forEach(email => checked ? messagesSelected.add(email) : messagesSelected.delete(email));
+  renderAdminMessagesList_();
+}
+function selectAllMatchingThreads_() {
+  messagesFilteredSorted_().forEach(t => messagesSelected.add(t.email));
+  renderAdminMessagesList_();
+}
+function clearMessagesSelection_() {
+  messagesSelected.clear();
+  renderAdminMessagesList_();
+}
+function bulkArchiveSelectedThreads_() {
+  const emails = Array.from(messagesSelected);
+  if (!emails.length) return;
+  const archived = messagesFilter !== 'archived';
+  Promise.all(emails.map(email => api('archiveThread', { user_email: email, archived }))).then(() => {
+    messagesCache.forEach(m => { if (emails.includes(m.user_email)) m.archived = archived ? 'true' : 'false'; });
+    messagesSelected.clear();
+    renderAdminMessagesList_();
+  }).catch(err => alert(err.message));
+}
+function threadsBulkBarHtml_(filtered) {
+  const n = messagesSelected.size;
+  if (!n) return '';
+  const allMatchingSelected = filtered.every(t => messagesSelected.has(t.email));
+  const archiveLabel = messagesFilter === 'archived' ? 'Unarchive selected' : 'Archive selected';
+  return `<div class="bulk-action-bar">
+    <span>${n} selected</span>
+    ${!allMatchingSelected ? `<span class="adv-link" onclick="selectAllMatchingThreads_()">Select all ${filtered.length} matching</span>` : ''}
+    <button class="btn secondary" onclick="bulkArchiveSelectedThreads_()">${archiveLabel}</button>
+    <span class="adv-link" onclick="clearMessagesSelection_()">Clear</span>
+  </div>`;
 }
 function renderAdminMessagesList_() {
   const wrap = document.getElementById('adminMessagesListWrap');
   if (!wrap) return;
-  const threads = computeThreads(messagesCache);
-  const filtered = filterThreadsSearch_(filterThreads(threads));
-  const filterBar = `<div class="admin-filter-row"><label class="muted">Filter:</label><select onchange="messagesFilter=this.value;adminMessagesPage=0;renderAdminMessagesList_()">
+  const filtered = messagesFilteredSorted_();
+  const filterBar = `<div class="admin-filter-row"><label class="muted">Filter:</label><select onchange="messagesFilter=this.value;adminMessagesPage=0;messagesSelected.clear();renderAdminMessagesList_()">
       <option value="all" ${messagesFilter==='all'?'selected':''}>All</option>
       <option value="unread" ${messagesFilter==='unread'?'selected':''}>Unread</option>
+      <option value="read" ${messagesFilter==='read'?'selected':''}>Read</option>
       <option value="archived" ${messagesFilter==='archived'?'selected':''}>Archived</option>
     </select></div>`;
+  const pageThreads = pageSlice(filtered, adminMessagesPage, 10);
+  const pageAllSelected = pageThreads.length > 0 && pageThreads.every(t => messagesSelected.has(t.email));
+  const selectRow = pageThreads.length ? `<div class="searchRow" style="margin-bottom:6px;align-items:center;"><label style="display:flex;align-items:center;gap:6px;font-size:12.5px;" class="muted"><input type="checkbox" ${pageAllSelected?'checked':''} onchange="toggleMessagesPageSelected(this.checked)">Select this page</label></div>` : '';
   // Preview-only list — tapping a row opens that conversation in a modal
   // (openThreadModal below); the full thread never renders on this page.
-  wrap.innerHTML = filterBar + `<div>${
-    pageSlice(filtered, adminMessagesPage, 10).map(t => `<div class="thread-list-item" onclick='openThreadModal(${JSON.stringify(t.email)},${JSON.stringify(t.name)})'>
-        <span>${t.hasUnread ? '<span class="tab-dot"></span>' : ''}<b>${escapeHtml(t.name)}</b><br><span class="muted">${threadPreviewText(t)}</span></span></div>`).join('')
+  wrap.innerHTML = filterBar + selectRow + threadsBulkBarHtml_(filtered) + `<div>${
+    pageThreads.map(t => `<div class="thread-list-item" style="display:flex;align-items:center;gap:8px;">
+        <input type="checkbox" onclick="event.stopPropagation()" onchange="toggleThreadRowSelected(${JSON.stringify(t.email)})" ${messagesSelected.has(t.email)?'checked':''}>
+        <div style="flex:1;cursor:pointer;" onclick='openThreadModal(${JSON.stringify(t.email)},${JSON.stringify(t.name)})'>${t.hasUnread ? '<span class="tab-dot"></span>' : ''}<b>${escapeHtml(t.name)}</b><br><span class="muted">${threadPreviewText(t)}</span></div></div>`).join('')
       || `<div class="muted">No ${messagesFilter==='all'?'':messagesFilter+' '}conversations${messagesSearch ? ' match' : ''}.</div>`
   }</div>` + pagerHtml(filtered.length, adminMessagesPage, 'changeAdminMessagesPage', 10);
 }
@@ -5226,6 +5357,7 @@ function toggleErrorsFilter(key) {
   const i = errorsFilter.indexOf(key);
   if (i >= 0) errorsFilter.splice(i, 1); else errorsFilter.push(key);
   adminErrorsPage = 0;
+  errorsSelected.clear();
   renderAdminErrorsList_();
 }
 // Free-text search on top of the status/archived chip filters — song
@@ -5236,6 +5368,9 @@ function filterErrorsSearch_(list) {
   return list.filter(e => (e.song_title||'').toLowerCase().includes(q) || (e.artist||'').toLowerCase().includes(q) ||
     (e.user_name||'').toLowerCase().includes(q) || (e.user_email||'').toLowerCase().includes(q) || (e.description||'').toLowerCase().includes(q));
 }
+function errorsFilteredSorted_() {
+  return filterErrorsSearch_(filterErrors(errorsCache)).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+}
 function renderAdminErrors() {
   const body = document.getElementById('adminBody');
   if (!body) return;
@@ -5243,25 +5378,66 @@ function renderAdminErrors() {
   // never replaced, so typing doesn't get interrupted by re-renders.
   if (!document.getElementById('errorsSearchBox')) {
     body.innerHTML = `<div class="searchRow"><input type="text" id="errorsSearchBox" placeholder="Search error reports…" value="${escapeHtml(errorsSearch)}"></div><div id="adminErrorsListWrap"></div>`;
-    document.getElementById('errorsSearchBox').addEventListener('input', e => { errorsSearch = e.target.value; adminErrorsPage = 0; renderAdminErrorsList_(); });
+    document.getElementById('errorsSearchBox').addEventListener('input', e => { errorsSearch = e.target.value; adminErrorsPage = 0; errorsSelected.clear(); renderAdminErrorsList_(); });
   }
   renderAdminErrorsList_();
+}
+function toggleErrorRowSelected(id) {
+  if (errorsSelected.has(id)) errorsSelected.delete(id); else errorsSelected.add(id);
+  renderAdminErrorsList_();
+}
+function toggleErrorsPageSelected(checked) {
+  const pageIds = pageSlice(errorsFilteredSorted_(), adminErrorsPage).map(e => e.id);
+  pageIds.forEach(id => checked ? errorsSelected.add(id) : errorsSelected.delete(id));
+  renderAdminErrorsList_();
+}
+function selectAllMatchingErrors_() {
+  errorsFilteredSorted_().forEach(e => errorsSelected.add(e.id));
+  renderAdminErrorsList_();
+}
+function clearErrorsSelection_() {
+  errorsSelected.clear();
+  renderAdminErrorsList_();
+}
+function bulkArchiveSelectedErrors_() {
+  const ids = Array.from(errorsSelected);
+  if (!ids.length) return;
+  const archived = !errorsFilter.includes('archived');
+  Promise.all(ids.map(id => api('archiveError', { id, archived }))).then(() => {
+    errorsSelected.clear();
+    loadAdminErrors();
+  }).catch(err => alert(err.message));
+}
+function errorsBulkBarHtml_(filtered) {
+  const n = errorsSelected.size;
+  if (!n) return '';
+  const allMatchingSelected = filtered.every(e => errorsSelected.has(e.id));
+  const archiveLabel = errorsFilter.includes('archived') ? 'Unarchive selected' : 'Archive selected';
+  return `<div class="bulk-action-bar">
+    <span>${n} selected</span>
+    ${!allMatchingSelected ? `<span class="adv-link" onclick="selectAllMatchingErrors_()">Select all ${filtered.length} matching</span>` : ''}
+    <button class="btn secondary" onclick="bulkArchiveSelectedErrors_()">${archiveLabel}</button>
+    <span class="adv-link" onclick="clearErrorsSelection_()">Clear</span>
+  </div>`;
 }
 function renderAdminErrorsList_() {
   const wrap = document.getElementById('adminErrorsListWrap');
   if (!wrap) return;
-  const filtered = filterErrorsSearch_(filterErrors(errorsCache)).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+  const filtered = errorsFilteredSorted_();
   const filterBar = filterChipsHtml(
     [{key:'open',title:'Open'},{key:'resolved',title:'Resolved'},{key:'archived',title:'Archived'}],
     errorsFilter, 'toggleErrorsFilter');
-  wrap.innerHTML = filterBar + `<div class="table-wrap"><table><tr><th>Status</th><th>Song</th><th>Reported by</th><th>Description</th><th></th></tr>` +
-    (pageSlice(filtered, adminErrorsPage).map(e => `<tr>
+  const pageRows = pageSlice(filtered, adminErrorsPage);
+  const pageAllSelected = pageRows.length > 0 && pageRows.every(e => errorsSelected.has(e.id));
+  wrap.innerHTML = filterBar + errorsBulkBarHtml_(filtered) + `<div class="table-wrap"><table><tr><th><input type="checkbox" ${pageAllSelected?'checked':''} onchange="toggleErrorsPageSelected(this.checked)" title="Select all on this page"></th><th>Status</th><th>Song</th><th>Reported by</th><th>Description</th><th></th></tr>` +
+    (pageRows.map(e => `<tr>
+      <td><input type="checkbox" ${errorsSelected.has(e.id)?'checked':''} onchange="toggleErrorRowSelected('${e.id}')"></td>
       <td><button class="status-icon-btn ${e.status}" onclick="setErrorStatus('${e.id}','${e.status==='open'?'resolved':'open'}')" title="${e.status==='open'?'Mark resolved':'Mark open'}" aria-label="${e.status==='open'?'Mark resolved':'Mark open'}">${e.status==='open'?SVG_ICONS.statusOpen:SVG_ICONS.statusResolved}</button></td>
       <td>${escapeHtml(e.song_title)}<br><span class="muted">${escapeHtml(e.artist)}</span></td>
       <td>${escapeHtml(e.user_name)}<br><span class="muted">${escapeHtml(e.user_email)}</span></td>
       <td>${escapeHtml(e.description)}</td>
       <td><button class="status-icon-btn archive-action" onclick="setErrorArchived('${e.id}',${e.archived==='true'?'false':'true'})" title="${e.archived==='true'?'Unarchive':'Archive'}" aria-label="${e.archived==='true'?'Unarchive':'Archive'}">${e.archived==='true'?SVG_ICONS.unarchive:SVG_ICONS.archive}</button></td>
-    </tr>`).join('') || `<tr><td colspan="5" class="muted">No error reports${errorsFilter.length===0 && !errorsSearch?'':' in this view'}.</td></tr>`) + `</table></div>` +
+    </tr>`).join('') || `<tr><td colspan="6" class="muted">No error reports${errorsFilter.length===0 && !errorsSearch?'':' in this view'}.</td></tr>`) + `</table></div>` +
     pagerHtml(filtered.length, adminErrorsPage, 'changeAdminErrorsPage');
 }
 function changeAdminErrorsPage(p) { adminErrorsPage = p; renderAdminErrorsList_(); }
