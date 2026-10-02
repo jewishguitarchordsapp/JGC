@@ -3726,10 +3726,27 @@ function songsHaveHebrewTitles_() {
   return songs.some(s => (s.title_hebrew || '').trim().length > 0);
 }
 // True only for the plain Favorites tab view — signed in, no active
-// search/artist/language/tag filter — which is exactly when custom drag
-// order applies and drag handles are shown (see renderSongListBody).
-function favoritesReorderable() {
+// search/artist/language/tag filter. This is the only state where there's a
+// real choice between custom drag-order and alphabetical (a filtered view
+// is always shown alphabetically regardless of favoritesSortAlpha below).
+function favoritesCanToggleSort_() {
   return songTab === 'favorites' && !!currentUser && !filters.q && !filters.artist && !filters.language && !filters.tag;
+}
+// Persisted per-device choice: show Favorites in custom drag order (default,
+// matches prior behavior) or alphabetically. Composes with
+// favoritesCanToggleSort_() above — this is the single source of truth
+// consumed by filteredSongs(), alphabetSidebarHtml_() and
+// renderSongListBody(), same as before this toggle existed.
+const FAVORITES_SORT_ALPHA_KEY = 'jgc_favorites_sort_alpha';
+let favoritesSortAlpha = false;
+try { favoritesSortAlpha = localStorage.getItem(FAVORITES_SORT_ALPHA_KEY) === '1'; } catch (e) {}
+function favoritesReorderable() {
+  return favoritesCanToggleSort_() && !favoritesSortAlpha;
+}
+function toggleFavoritesSortAlpha() {
+  favoritesSortAlpha = !favoritesSortAlpha;
+  try { localStorage.setItem(FAVORITES_SORT_ALPHA_KEY, favoritesSortAlpha ? '1' : '0'); } catch (e) {}
+  renderList();
 }
 
 // Builds the goTo(...) call for opening a song. When queueIds is given (the
@@ -3767,8 +3784,14 @@ function renderList() {
       ${effectiveIsAdmin() ? `<button class="btn" onclick="goTo('edit')">${t('add_song_btn')}</button>` : ''}
     </div>`;
   if (activeFilterChip) html += `<div style="margin-bottom:10px"><span class="chip active" onclick="filters.artist='';filters.language='';filters.tag='';songListPage=0;render()">${escapeHtml(activeFilterChip)} ✕</span></div>`;
-  if (songTab === 'favorites' && currentUser && !isOffline) {
-    html += `<div style="margin-bottom:10px"><button id="favOfflineBtn" class="btn secondary icon-btn-round offline-toggle-btn" onclick="toggleFavoritesOffline()" title="Available Offline" aria-label="Available Offline" style="border-radius:50%;width:38px;height:38px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex:none;">${SVG_ICONS.download}</button></div>`;
+  if (songTab === 'favorites' && currentUser) {
+    let favControls = '';
+    // Only offered on the plain, unfiltered Favorites view — a filtered
+    // view is always alphabetical already, so the toggle wouldn't mean
+    // anything there (see favoritesCanToggleSort_()).
+    if (favoritesCanToggleSort_()) favControls += `<button class="btn secondary" onclick="toggleFavoritesSortAlpha()">${favoritesSortAlpha ? 'Sort: My Order' : 'Sort: A–Z'}</button>`;
+    if (!isOffline) favControls += `<button id="favOfflineBtn" class="btn secondary icon-btn-round offline-toggle-btn" onclick="toggleFavoritesOffline()" title="Available Offline" aria-label="Available Offline" style="border-radius:50%;width:38px;height:38px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex:none;">${SVG_ICONS.download}</button>`;
+    if (favControls) html += `<div style="margin-bottom:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">${favControls}</div>`;
   }
   // Known Songs is filtered entirely by the chords the person has marked
   // as known (renderKnownChords, reached via goTo('knownChords')) - this
@@ -4042,13 +4065,30 @@ function saveKnownChords() {
 /* ============================================================
    ARTISTS / CATEGORIES
    ============================================================ */
+let artistsSearch = '';
 function renderArtists() {
+  let html = `<h2>Artists</h2>
+    <div class="searchRow"><input type="text" id="artistsSearchBox" placeholder="Search artists…" value="${escapeHtml(artistsSearch)}"></div>
+    <div id="artistsGridWrap"></div>`;
+  document.getElementById('app').innerHTML = html;
+  document.getElementById('artistsSearchBox').addEventListener('input', e => { artistsSearch = e.target.value; renderArtistsGrid_(); });
+  renderArtistsGrid_();
+}
+// Re-rendered on every keystroke; the search box itself (built once, above)
+// is left alone so it keeps focus/cursor position, same pattern as the
+// admin Requests/Users search boxes.
+function renderArtistsGrid_() {
+  const wrap = document.getElementById('artistsGridWrap');
+  if (!wrap) return;
   const counts = {};
   songs.forEach(s => { splitArtists(s.artist).forEach(a => { counts[a] = (counts[a]||0)+1; }); });
-  const artists = Object.keys(counts).sort((a,b)=>a.localeCompare(b));
-  let html = '<h2>Artists</h2><div class="grid-cats">' +
-    (artists.map(a => `<span class="chip" onclick="songTab='all';filters.artist='${a.replace(/'/g,"\\'")}';songListPage=0;goTo('list')">${escapeHtml(a)} <span class="count">(${counts[a]})</span></span>`).join('') || '<span class="muted">No artists yet.</span>') + '</div>';
-  document.getElementById('app').innerHTML = html;
+  let artists = Object.keys(counts).sort((a,b)=>a.localeCompare(b));
+  if (artistsSearch.trim()) {
+    const q = artistsSearch.trim().toLowerCase();
+    artists = artists.filter(a => a.toLowerCase().includes(q));
+  }
+  wrap.innerHTML = '<div class="grid-cats">' +
+    (artists.map(a => `<span class="chip" onclick="songTab='all';filters.artist='${a.replace(/'/g,"\\'")}';songListPage=0;goTo('list')">${escapeHtml(a)} <span class="count">(${counts[a]})</span></span>`).join('') || '<span class="muted">No artists found.</span>') + '</div>';
 }
 function renderCategories() {
   const langCounts = {}, tagCounts = {};
@@ -5159,7 +5199,7 @@ function renderContactBody() {
       </div>`;
     if (isOpen) {
       html += `<div class="chat-thread" id="chatThread">${renderChatMessages(myMessages)}</div>
-        <div style="display:flex;gap:8px"><input type="text" id="chatInput" placeholder="Type a message…" style="flex:1"><button class="btn" onclick="sendChatMessage()">Send</button></div>`;
+        <div style="display:flex;gap:8px;align-items:flex-end;"><textarea id="chatInput" placeholder="Type a message…" style="flex:1;min-height:64px;max-height:200px;font-family:inherit;font-size:14px;resize:vertical;" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage();}"></textarea><button class="btn" onclick="sendChatMessage()">Send</button></div>`;
     }
   }
   document.getElementById('app').innerHTML = html;
@@ -5602,7 +5642,7 @@ function threadModalHtml() {
   return `<h2 style="margin-top:0">${escapeHtml(chatTarget.name)}</h2>
     <div class="muted" style="margin-top:-10px;margin-bottom:12px;font-size:12.5px;">${escapeHtml(chatTarget.email)}</div>
     <div class="chat-thread" id="adminChatThread">${renderChatMessages(active ? active.msgs : [])}</div>
-    <div style="display:flex;gap:8px;margin-bottom:14px;"><input type="text" id="adminChatInput" placeholder="Reply…" style="flex:1"><button class="btn" onclick="sendAdminReply()">Send</button></div>
+    <div style="display:flex;gap:8px;margin-bottom:14px;align-items:flex-end;"><textarea id="adminChatInput" placeholder="Reply…" style="flex:1;min-height:64px;max-height:200px;font-family:inherit;font-size:14px;resize:vertical;" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAdminReply();}"></textarea><button class="btn" onclick="sendAdminReply()">Send</button></div>
     <div class="modal-actions"><button class="btn secondary" onclick="setThreadArchived(${JSON.stringify(chatTarget.email)},${active && active.archived ? 'false' : 'true'})">${active && active.archived ? 'Unarchive' : 'Archive'} conversation</button><button class="btn secondary" onclick="closeModal()">Close</button></div>`;
 }
 function openThreadModal(email, name) {
@@ -5835,7 +5875,7 @@ function renderAdminStatsOverview() {
       <div class="muted" style="margin-bottom:10px;">Daily visitors — last 30 days (hover a bar for its date)</div>
       <div class="stat-chart">${barsHtml}</div>
     </div>
-    <div class="muted" style="margin:18px 0 6px;">User activity (moved here from the Users tab)</div>
+    <div class="muted" style="margin:18px 0 6px;">User activity (a broader measure than visitors above — see note)</div>
     ${renderUsersSummary_()}`;
 }
 
@@ -5899,10 +5939,11 @@ function renderUsersSummary_() {
   const tile = (label, value) => `<div class="user-stat-tile"><div class="user-stat-value">${value}</div><div class="user-stat-label">${label}</div></div>`;
   return `<div class="user-stats-row">${
     tile('Total users', list.length) +
-    tile('Active today', activeToday) +
-    tile('Active this week', activeWeek) +
-    tile('Active this month', activeMonth)
-  }</div>`;
+    tile('Active today*', activeToday) +
+    tile('Active this week*', activeWeek) +
+    tile('Active this month*', activeMonth)
+  }</div>
+  <div class="muted" style="font-size:12px;margin-top:6px;">* Rolling window from right now, counting ANY activity — a favorite, playlist edit, song request, message, error report, or even a silent sign-in refresh the app does on every load. That's a much wider net than "visitors" above, which only counts an actual app open, once per person per calendar day. The two are expected to disagree, often by a lot — it's not a bug.</div>`;
 }
 function sortUsersList_(list) {
   const arr = list.slice();
