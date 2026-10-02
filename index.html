@@ -5533,7 +5533,7 @@ function renderAdminRequestsList_() {
         : `<span class="badge ${r.status}" title="${escapeHtml(r.status)}">${requestStatusSymbol(r.status)}</span>${r.status==='declined' && r.decline_reason ? `<br><span class="muted" style="font-size:11.5px;">${escapeHtml(r.decline_reason)}</span>` : ''}`}</td>
       <td>${r.youtube_url ? `<a href="${escapeHtml(r.youtube_url)}" target="_blank" rel="noopener">${escapeHtml(r.song_title)}</a>` : escapeHtml(r.song_title)}${(r.categories||[]).length || r.lyrics ? `<br><span class="adv-link" onclick="viewRequestDetails('${r.id}')">Details</span>` : ''}</td>
       <td>${escapeHtml(r.artist)}</td>
-      <td>${escapeHtml(r.user_name)}<br><span class="muted">${escapeHtml(r.user_email)}</span></td><td>${escapeHtml(r.note)}</td>
+      <td>${escapeHtml(r.user_name)}<br><span class="muted">${escapeHtml(r.user_email)}</span><br><span class="adv-link" onclick='openThreadModal(${escapeHtml(JSON.stringify(r.user_email))},${escapeHtml(JSON.stringify(r.user_name))},${escapeHtml(JSON.stringify('Re: Song Request - "' + r.song_title + '"'))})'>Message</span></td><td>${escapeHtml(r.note)}</td>
       <td class="muted" style="white-space:nowrap;">${r.created_at ? new Date(r.created_at).toLocaleString() : ''}</td>
       <td><button class="status-icon-btn archive-action" onclick="setRequestArchived('${r.id}',${r.archived==='true'?'false':'true'})" title="${r.archived==='true'?'Unarchive':'Archive'}" aria-label="${r.archived==='true'?'Unarchive':'Archive'}">${r.archived==='true'?SVG_ICONS.unarchive:SVG_ICONS.archive}</button></td>
     </tr>`).join('') || `<tr><td colspan="8" class="muted">No requests${requestsFilter.length===0 && !requestsSearch?' yet':' match'}.</td></tr>`) + `</table></div>` +
@@ -5684,8 +5684,8 @@ function renderAdminMessagesList_() {
   // (openThreadModal below); the full thread never renders on this page.
   wrap.innerHTML = filterBar + selectRow + threadsBulkBarHtml_(filtered) + `<div>${
     pageThreads.map(t => `<div class="thread-list-item" style="display:flex;align-items:center;gap:8px;">
-        <input type="checkbox" onclick="event.stopPropagation()" onchange="toggleThreadRowSelected(${JSON.stringify(t.email)})" ${messagesSelected.has(t.email)?'checked':''}>
-        <div style="flex:1;cursor:pointer;" onclick='openThreadModal(${JSON.stringify(t.email)},${JSON.stringify(t.name)})'>
+        <input type="checkbox" onclick="event.stopPropagation()" onchange="toggleThreadRowSelected(${escapeHtml(JSON.stringify(t.email))})" ${messagesSelected.has(t.email)?'checked':''}>
+        <div style="flex:1;cursor:pointer;" onclick='openThreadModal(${escapeHtml(JSON.stringify(t.email))},${escapeHtml(JSON.stringify(t.name))})'>
           <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;">
             <span>${t.hasUnread ? '<span class="tab-dot"></span>' : ''}<b>${escapeHtml(t.name)}</b></span>
             <span class="muted" style="font-size:11.5px;white-space:nowrap;">${t.lastAt ? new Date(t.lastAt).toLocaleString() : ''}</span>
@@ -5698,14 +5698,21 @@ function renderAdminMessagesList_() {
 function changeAdminMessagesPage(p) { adminMessagesPage = p; renderAdminMessagesList_(); }
 function threadModalHtml() {
   const active = computeThreads(messagesCache).find(t => t.email === chatTarget.email);
+  const prefillVal = chatTarget.prefill || '';
+  chatTarget.prefill = ''; // one-shot - see the comment above this function
   return `<h2 style="margin-top:0">${escapeHtml(chatTarget.name)}</h2>
     <div class="muted" style="margin-top:-10px;margin-bottom:12px;font-size:12.5px;">${escapeHtml(chatTarget.email)}</div>
     <div class="chat-thread" id="adminChatThread">${renderChatMessages(active ? active.msgs : [])}</div>
-    <div style="display:flex;gap:8px;margin-bottom:14px;align-items:flex-end;"><textarea id="adminChatInput" placeholder="Reply…" style="flex:1;min-height:64px;max-height:200px;font-family:inherit;font-size:14px;resize:vertical;" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAdminReply();}"></textarea><button class="btn" onclick="sendAdminReply()">Send</button></div>
-    <div class="modal-actions"><button class="btn secondary" onclick='setThreadArchived(${JSON.stringify(chatTarget.email)},${active && active.archived ? 'false' : 'true'})'>${active && active.archived ? 'Unarchive' : 'Archive'} conversation</button><button class="btn secondary" onclick="closeModal()">Close</button></div>`;
+    <div style="display:flex;gap:8px;margin-bottom:14px;align-items:flex-end;"><textarea id="adminChatInput" placeholder="Reply…" style="flex:1;min-height:64px;max-height:200px;font-family:inherit;font-size:14px;resize:vertical;" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAdminReply();}">${escapeHtml(prefillVal)}</textarea><button class="btn" onclick="sendAdminReply()">Send</button></div>
+    <div class="modal-actions"><button class="btn secondary" onclick='setThreadArchived(${escapeHtml(JSON.stringify(chatTarget.email))},${active && active.archived ? 'false' : 'true'})'>${active && active.archived ? 'Unarchive' : 'Archive'} conversation</button><button class="btn secondary" onclick="closeModal()">Close</button></div>`;
 }
-function openThreadModal(email, name) {
-  chatTarget = { email, name };
+// prefill (optional) - opening text for the reply box, e.g. "Re: Song
+// Request..." when this was opened from the "Message" link on a specific
+// request/error row rather than from the plain Messages tab list, so the
+// admin doesn't have to retype which request/error this reply is about -
+// consumed once by threadModalHtml() above, not re-shown after that.
+function openThreadModal(email, name, prefill) {
+  chatTarget = { email, name, prefill: prefill || '' };
   const afterMessagesReady_ = () => {
     openModal(threadModalHtml());
     const t = document.getElementById('adminChatThread'); if (t) t.scrollTop = t.scrollHeight;
@@ -5854,7 +5861,7 @@ function renderAdminErrorsList_() {
       <td><input type="checkbox" ${errorsSelected.has(e.id)?'checked':''} onchange="toggleErrorRowSelected('${e.id}')"></td>
       <td><button class="status-icon-btn ${e.status}" onclick="setErrorStatus('${e.id}','${e.status==='open'?'resolved':'open'}')" title="${e.status==='open'?'Mark resolved':'Mark open'}" aria-label="${e.status==='open'?'Mark resolved':'Mark open'}">${e.status==='open'?SVG_ICONS.statusOpen:SVG_ICONS.statusResolved}</button></td>
       <td>${escapeHtml(e.song_title)}<br><span class="muted">${escapeHtml(e.artist)}</span>${e.song_id && songs.some(s=>s.id===e.song_id) ? `<br><span class="adv-link" onclick="goTo('detail',{id:'${e.song_id}'})">Go to song</span>` : ''}</td>
-      <td>${escapeHtml(e.user_name)}<br><span class="muted">${escapeHtml(e.user_email)}</span><br><span class="adv-link" onclick='openThreadModal(${JSON.stringify(e.user_email)},${JSON.stringify(e.user_name)})'>Message</span></td>
+      <td>${escapeHtml(e.user_name)}<br><span class="muted">${escapeHtml(e.user_email)}</span><br><span class="adv-link" onclick='openThreadModal(${escapeHtml(JSON.stringify(e.user_email))},${escapeHtml(JSON.stringify(e.user_name))},${escapeHtml(JSON.stringify('Re: Error Report - ' + (e.description||'').slice(0,60)))})'>Message</span></td>
       <td>${escapeHtml(e.description)}</td>
       <td class="muted" style="white-space:nowrap;">${e.created_at ? new Date(e.created_at).toLocaleString() : ''}</td>
       <td><button class="status-icon-btn archive-action" onclick="setErrorArchived('${e.id}',${e.archived==='true'?'false':'true'})" title="${e.archived==='true'?'Unarchive':'Archive'}" aria-label="${e.archived==='true'?'Unarchive':'Archive'}">${e.archived==='true'?SVG_ICONS.unarchive:SVG_ICONS.archive}</button></td>
@@ -6055,7 +6062,7 @@ function renderUsersList() {
   container.innerHTML = `${list.length === 0 ? `<div class="empty">No users found.</div>` : pageSlice(list, usersPage).map(u => {
       const expanded = expandedUserEmail === u.email;
       return `
-      <div class="playlist-card" style="cursor:pointer;" onclick='toggleUserExpanded(${JSON.stringify(u.email)})'>
+      <div class="playlist-card" style="cursor:pointer;" onclick='toggleUserExpanded(${escapeHtml(JSON.stringify(u.email))})'>
         <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
           <div style="display:flex;gap:10px;align-items:center;min-width:0;flex:1;">
             ${u.photo ? `<img src="${escapeHtml(u.photo)}" alt="" style="width:32px;height:32px;border-radius:50%;flex:0 0 auto;object-fit:cover;">` : ''}
@@ -6076,7 +6083,7 @@ function renderUsersList() {
             ★ ${u.favorites||0} favorites · ${u.knownChords ? 'chords set' : 'no chords set'} · ${u.playlists||0} playlists<br>
             ${u.requests||0} requests · ${u.messages||0} messages · ${u.errors||0} error reports
           </div>
-          <button class="btn secondary" onclick='event.stopPropagation();enterViewAs(${JSON.stringify(u.email)},${JSON.stringify(u.name||u.email)})'>View As</button>
+          <button class="btn secondary" onclick='event.stopPropagation();enterViewAs(${escapeHtml(JSON.stringify(u.email))},${escapeHtml(JSON.stringify(u.name||u.email))})'>View As</button>
         </div>` : ''}
       </div>`;
     }).join('')}
