@@ -4725,7 +4725,7 @@ function openMyCapoPicker() {
     <h2>Set your capo</h2>
     <p class="muted">Pick the capo fret that's most comfortable for you on this song. This won't change how the chords are displayed.</p>
     <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">
-      ${Array.from({length:10},(_,i)=>i+1).map(n => `<button class="stepper-btn" style="width:38px;height:38px;font-size:15px;${playerState.myCapo===n?'background:var(--teal);color:#fff;border-color:var(--teal);':''}" onclick="setMyCapo(${n})">${n}</button>`).join('')}
+      ${Array.from({length:11},(_,i)=>i).map(n => `<button class="stepper-btn" style="width:38px;height:38px;font-size:15px;${playerState.myCapo===n?'background:var(--teal);color:#fff;border-color:var(--teal);':''}" onclick="setMyCapo(${n})">${n}</button>`).join('')}
     </div>
     <div class="modal-actions">
       ${playerState.myCapo!=null ? `<span class="adv-link" style="margin-right:auto;" onclick="clearMyCapo()">Clear</span>` : ''}
