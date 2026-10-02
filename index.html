@@ -5171,7 +5171,13 @@ function renderContactBody() {
   const myRequests = effectiveRequests().slice().sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
   const myMessages = effectiveMessages();
   const requestsHeading = viewAsUser ? `${escapeHtml(viewAsUser.name)}'s Song Requests` : 'My Song Requests';
-  let html = `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h2 style="margin:0">${requestsHeading}</h2><button class="btn" onclick="openRequestSongModal()">+ Request a Song</button></div>
+  // A short, warm note setting expectations (volunteer-run, replies may take
+  // a little while) and asking for kindness in return — shown to real users
+  // and to an admin's View As preview, but not on the admin's own Contact
+  // tab (effectiveIsAdmin() is false while viewAsUser is set, so this still
+  // shows there too - see its definition above).
+  let html = !effectiveIsAdmin() ? `<div class="card" style="font-size:14px;line-height:1.5;">This app is built and kept running by a volunteer, in whatever spare time is available — so song requests, fixes, and new features may take a little while to show up. Thank you for your patience! If something isn't working right, or you just want to say hi, please reach out below — your notes and requests are genuinely appreciated. Messages written with warmth and politeness are always easier (and nicer) to respond to.</div>` : '';
+  html += `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h2 style="margin:0">${requestsHeading}</h2><button class="btn" onclick="openRequestSongModal()">+ Request a Song</button></div>
       <p class="muted">Up to 2 requests per week.</p>`;
   html += `<div class="table-wrap"><table><tr><th>Status</th><th>Song</th><th>Artist</th></tr>
       ${pageSlice(myRequests, contactRequestsPage, 10).map(r => `<tr><td><span class="badge ${r.status}" title="${escapeHtml(r.status)}">${requestStatusSymbol(r.status)}</span></td><td>${escapeHtml(r.song_title)}</td><td>${escapeHtml(r.artist)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No requests yet.</td></tr>'}
@@ -5493,7 +5499,7 @@ function renderAdminRequestsList_() {
     requestsFilter, 'toggleRequestsFilter');
   const pageRows = pageSlice(filtered, adminRequestsPage);
   const pageAllSelected = pageRows.length > 0 && pageRows.every(r => requestsSelected.has(r.id));
-  wrap.innerHTML = filterBar + requestsBulkBarHtml_(filtered) + `<div class="table-wrap"><table><tr><th><input type="checkbox" ${pageAllSelected?'checked':''} onchange="toggleRequestsPageSelected(this.checked)" title="Select all on this page"></th><th>Status</th><th>Song</th><th>Artist</th><th>Requested by</th><th>Note</th><th></th></tr>` +
+  wrap.innerHTML = filterBar + requestsBulkBarHtml_(filtered) + `<div class="table-wrap"><table><tr><th><input type="checkbox" ${pageAllSelected?'checked':''} onchange="toggleRequestsPageSelected(this.checked)" title="Select all on this page"></th><th>Status</th><th>Song</th><th>Artist</th><th>Requested by</th><th>Note</th><th>Requested</th><th></th></tr>` +
     (pageRows.map(r => `<tr>
       <td><input type="checkbox" ${requestsSelected.has(r.id)?'checked':''} onchange="toggleRequestRowSelected('${r.id}')"></td>
       <td>${r.status==='pending'
@@ -5502,8 +5508,9 @@ function renderAdminRequestsList_() {
       <td>${r.youtube_url ? `<a href="${escapeHtml(r.youtube_url)}" target="_blank" rel="noopener">${escapeHtml(r.song_title)}</a>` : escapeHtml(r.song_title)}${(r.categories||[]).length || r.lyrics ? `<br><span class="adv-link" onclick="viewRequestDetails('${r.id}')">Details</span>` : ''}</td>
       <td>${escapeHtml(r.artist)}</td>
       <td>${escapeHtml(r.user_name)}<br><span class="muted">${escapeHtml(r.user_email)}</span></td><td>${escapeHtml(r.note)}</td>
+      <td class="muted" style="white-space:nowrap;">${r.created_at ? new Date(r.created_at).toLocaleString() : ''}</td>
       <td><button class="status-icon-btn archive-action" onclick="setRequestArchived('${r.id}',${r.archived==='true'?'false':'true'})" title="${r.archived==='true'?'Unarchive':'Archive'}" aria-label="${r.archived==='true'?'Unarchive':'Archive'}">${r.archived==='true'?SVG_ICONS.unarchive:SVG_ICONS.archive}</button></td>
-    </tr>`).join('') || `<tr><td colspan="7" class="muted">No requests${requestsFilter.length===0 && !requestsSearch?' yet':' match'}.</td></tr>`) + `</table></div>` +
+    </tr>`).join('') || `<tr><td colspan="8" class="muted">No requests${requestsFilter.length===0 && !requestsSearch?' yet':' match'}.</td></tr>`) + `</table></div>` +
     pagerHtml(filtered.length, adminRequestsPage, 'changeAdminRequestsPage');
 }
 // "Details" link on a request row — shown only when there's a categories
@@ -5632,7 +5639,13 @@ function renderAdminMessagesList_() {
   wrap.innerHTML = filterBar + selectRow + threadsBulkBarHtml_(filtered) + `<div>${
     pageThreads.map(t => `<div class="thread-list-item" style="display:flex;align-items:center;gap:8px;">
         <input type="checkbox" onclick="event.stopPropagation()" onchange="toggleThreadRowSelected(${JSON.stringify(t.email)})" ${messagesSelected.has(t.email)?'checked':''}>
-        <div style="flex:1;cursor:pointer;" onclick='openThreadModal(${JSON.stringify(t.email)},${JSON.stringify(t.name)})'>${t.hasUnread ? '<span class="tab-dot"></span>' : ''}<b>${escapeHtml(t.name)}</b><br><span class="muted">${threadPreviewText(t)}</span></div></div>`).join('')
+        <div style="flex:1;cursor:pointer;" onclick='openThreadModal(${JSON.stringify(t.email)},${JSON.stringify(t.name)})'>
+          <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;">
+            <span>${t.hasUnread ? '<span class="tab-dot"></span>' : ''}<b>${escapeHtml(t.name)}</b></span>
+            <span class="muted" style="font-size:11.5px;white-space:nowrap;">${t.lastAt ? new Date(t.lastAt).toLocaleString() : ''}</span>
+          </div>
+          <span class="muted">${threadPreviewText(t)}</span>
+        </div></div>`).join('')
       || `<div class="muted">No ${messagesFilter==='all'?'':messagesFilter+' '}conversations${messagesSearch ? ' match' : ''}.</div>`
   }</div>` + pagerHtml(filtered.length, adminMessagesPage, 'changeAdminMessagesPage', 10);
 }
@@ -5785,15 +5798,16 @@ function renderAdminErrorsList_() {
     errorsFilter, 'toggleErrorsFilter');
   const pageRows = pageSlice(filtered, adminErrorsPage);
   const pageAllSelected = pageRows.length > 0 && pageRows.every(e => errorsSelected.has(e.id));
-  wrap.innerHTML = filterBar + errorsBulkBarHtml_(filtered) + `<div class="table-wrap"><table><tr><th><input type="checkbox" ${pageAllSelected?'checked':''} onchange="toggleErrorsPageSelected(this.checked)" title="Select all on this page"></th><th>Status</th><th>Song</th><th>Reported by</th><th>Description</th><th></th></tr>` +
+  wrap.innerHTML = filterBar + errorsBulkBarHtml_(filtered) + `<div class="table-wrap"><table><tr><th><input type="checkbox" ${pageAllSelected?'checked':''} onchange="toggleErrorsPageSelected(this.checked)" title="Select all on this page"></th><th>Status</th><th>Song</th><th>Reported by</th><th>Description</th><th>Reported</th><th></th></tr>` +
     (pageRows.map(e => `<tr>
       <td><input type="checkbox" ${errorsSelected.has(e.id)?'checked':''} onchange="toggleErrorRowSelected('${e.id}')"></td>
       <td><button class="status-icon-btn ${e.status}" onclick="setErrorStatus('${e.id}','${e.status==='open'?'resolved':'open'}')" title="${e.status==='open'?'Mark resolved':'Mark open'}" aria-label="${e.status==='open'?'Mark resolved':'Mark open'}">${e.status==='open'?SVG_ICONS.statusOpen:SVG_ICONS.statusResolved}</button></td>
       <td>${escapeHtml(e.song_title)}<br><span class="muted">${escapeHtml(e.artist)}</span>${e.song_id && songs.some(s=>s.id===e.song_id) ? `<br><span class="adv-link" onclick="goTo('detail',{id:'${e.song_id}'})">Go to song</span>` : ''}</td>
       <td>${escapeHtml(e.user_name)}<br><span class="muted">${escapeHtml(e.user_email)}</span><br><span class="adv-link" onclick='openThreadModal(${JSON.stringify(e.user_email)},${JSON.stringify(e.user_name)})'>Message</span></td>
       <td>${escapeHtml(e.description)}</td>
+      <td class="muted" style="white-space:nowrap;">${e.created_at ? new Date(e.created_at).toLocaleString() : ''}</td>
       <td><button class="status-icon-btn archive-action" onclick="setErrorArchived('${e.id}',${e.archived==='true'?'false':'true'})" title="${e.archived==='true'?'Unarchive':'Archive'}" aria-label="${e.archived==='true'?'Unarchive':'Archive'}">${e.archived==='true'?SVG_ICONS.unarchive:SVG_ICONS.archive}</button></td>
-    </tr>`).join('') || `<tr><td colspan="6" class="muted">No error reports${errorsFilter.length===0 && !errorsSearch?'':' in this view'}.</td></tr>`) + `</table></div>` +
+    </tr>`).join('') || `<tr><td colspan="7" class="muted">No error reports${errorsFilter.length===0 && !errorsSearch?'':' in this view'}.</td></tr>`) + `</table></div>` +
     pagerHtml(filtered.length, adminErrorsPage, 'changeAdminErrorsPage');
 }
 function changeAdminErrorsPage(p) { adminErrorsPage = p; renderAdminErrorsList_(); }
