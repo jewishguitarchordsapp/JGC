@@ -916,6 +916,7 @@ let unreadInfo = { count: 0, emails: [] }; // cheap admin-badge/dot data (which 
 let backupStatus = ''; // '' | 'running' | 'done' | 'error: <msg>' - drives the admin "Backup Now" button (see renderAdminBackup()/runManualBackup())
 let unreadLoaded = false; // set once unreadInfo has been populated at least once this admin-panel visit
 let errorsCache = [];
+let errorsLoaded = false; // set once errorsCache has been populated this admin-panel visit - see loadAdminErrors()
 let currentUser = null;    // {idToken, email, name, picture, isAdmin}
 let lastSynced = null;
 let view = { name: 'home' };
@@ -1860,45 +1861,65 @@ async function supaApi(action, fields) {
     return { success: true };
   }
 
-  // Admin > Stats > Overview. app_visits only holds rows an admin can read
-  // (see its own RLS policy), and this only ever asks for the last 30 days
-  // of them - a small, date-bounded read no matter how large that table
-  // eventually gets, same reasoning as getUnreadMessagesInfo above never
-  // scaling with total history. Aggregates into one row per calendar day
-  // (including days with zero visits, so the chart's x-axis has no gaps)
-  // plus two rolling-window active-user counts, all computed here rather
-  // than shipping every raw row to the browser.
+  // Admin > Stats > Overview — Daily/Weekly/Monthly/Yearly breakdowns, all
+  // computed from ONE date-bounded read of app_visits (never scaling with
+  // total history, same reasoning as getUnreadMessagesInfo above):
+  //  - days: one entry per of the last 30 calendar days (including
+  //    zero-visit days, so chart x-axes have no gaps) - backs the Weekly
+  //    tab (its last 7 entries) and the Monthly tab (all 30).
+  //  - months: one entry per of the last 12 calendar months, each a
+  //    distinct-visitor count from a Set of user_ids seen that month -
+  //    can't be derived from the daily counts above without double-
+  //    counting a visitor who opened the app on more than one day in the
+  //    same month - backs the Yearly tab.
+  //  - todayVisits: the raw first_seen_at timestamp of every visitor who's
+  //    opened the app today (one per visitor - app_visits is already one
+  //    row per user per day), left un-bucketed so the frontend can group
+  //    them by HOUR IN THE ADMIN'S OWN LOCAL TIME ZONE, which this
+  //    server-side code has no way to know - backs the Daily tab. This is
+  //    each visitor's FIRST open of the day, not every individual page
+  //    load - that's all app_visits tracks per user per day, so someone
+  //    who opens the app again later the same day doesn't add a second
+  //    entry here.
   if (action === 'getVisitStats') {
     await supaRequireAdmin_();
-    const DAYS = 30;
+    const YEAR_DAYS = 371; // comfortably covers 12 full calendar months back from today
     const toDateStr = d => d.toISOString().slice(0, 10);
-    const since = new Date(); since.setUTCDate(since.getUTCDate() - (DAYS - 1));
-    const sinceStr = toDateStr(since);
-    const last7Start = new Date(); last7Start.setUTCDate(last7Start.getUTCDate() - 6);
-    const last7StartStr = toDateStr(last7Start);
+    const todayStr = toDateStr(new Date());
+    const since30 = new Date(); since30.setUTCDate(since30.getUTCDate() - 29);
+    const since30Str = toDateStr(since30);
+    const sinceYear = new Date(); sinceYear.setUTCDate(sinceYear.getUTCDate() - (YEAR_DAYS - 1));
+    const sinceYearStr = toDateStr(sinceYear);
     const [visitsRes, countRes] = await Promise.all([
-      getSupa_().from('app_visits').select('user_id,visit_date,visit_count').gte('visit_date', sinceStr),
+      getSupa_().from('app_visits').select('user_id,visit_date,visit_count,first_seen_at').gte('visit_date', sinceYearStr),
       getSupa_().from('profiles').select('id', { count: 'exact', head: true }),
     ]);
     throwIfErr_(visitsRes.error);
     throwIfErr_(countRes.error);
-    const byDay = {}; // 'YYYY-MM-DD' -> { visitors: Set<user_id>, visits: number }
-    const active7 = new Set(), active30 = new Set();
+    const byDay = {};   // 'YYYY-MM-DD' -> Set<user_id>, last 30 days only
+    const byMonth = {}; // 'YYYY-MM' -> Set<user_id>, full year window
+    const todayVisits = [];
     (visitsRes.data || []).forEach(r => {
-      const bucket = byDay[r.visit_date] || (byDay[r.visit_date] = { visitors: new Set(), visits: 0 });
-      bucket.visitors.add(r.user_id);
-      bucket.visits += Number(r.visit_count) || 1;
-      active30.add(r.user_id);
-      if (r.visit_date >= last7StartStr) active7.add(r.user_id);
+      if (r.visit_date >= since30Str) {
+        (byDay[r.visit_date] || (byDay[r.visit_date] = new Set())).add(r.user_id);
+      }
+      const monthKey = r.visit_date.slice(0, 7);
+      (byMonth[monthKey] || (byMonth[monthKey] = new Set())).add(r.user_id);
+      if (r.visit_date === todayStr && r.first_seen_at) todayVisits.push(r.first_seen_at);
     });
     const days = [];
-    for (let i = 0; i < DAYS; i++) {
-      const d = new Date(since); d.setUTCDate(d.getUTCDate() + i);
+    for (let i = 0; i < 30; i++) {
+      const d = new Date(since30); d.setUTCDate(d.getUTCDate() + i);
       const key = toDateStr(d);
-      const bucket = byDay[key];
-      days.push({ date: key, visitors: bucket ? bucket.visitors.size : 0, visits: bucket ? bucket.visits : 0 });
+      days.push({ date: key, visitors: byDay[key] ? byDay[key].size : 0 });
     }
-    return { success: true, totalUsers: countRes.count || 0, active7: active7.size, active30: active30.size, days };
+    const months = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - i);
+      const key = d.toISOString().slice(0, 7);
+      months.push({ month: key, visitors: byMonth[key] ? byMonth[key].size : 0 });
+    }
+    return { success: true, totalUsers: countRes.count || 0, days, months, todayVisits };
   }
 
   // Lets an admin manually kick off the same-database nightly_backup snapshot
@@ -2082,7 +2103,11 @@ async function supaApi(action, fields) {
   }
   if (action === 'updateRequestStatus') {
     await supaRequireAdmin_();
-    const { error } = await getSupa_().from('requests').update({ status: fields.status }).eq('id', fields.id);
+    const update = { status: fields.status };
+    // Only a decline carries a reason - clears any stale one if a request
+    // is later reopened/re-processed into some other status.
+    update.decline_reason = fields.status === 'declined' ? (String(fields.reason || '').trim() || null) : null;
+    const { error } = await getSupa_().from('requests').update(update).eq('id', fields.id);
     throwIfErr_(error);
     return { success: true };
   }
@@ -2174,6 +2199,7 @@ function supaRequestToOld_(r, emailMap) {
     song_title: r.song_title, artist: r.artist, note: r.note || '', status: r.status,
     created_at: r.created_at, archived: supaBool_(r.archived),
     youtube_url: r.youtube_url || '', categories: r.categories || [], lyrics: r.lyrics || '',
+    decline_reason: r.decline_reason || '',
   };
 }
 function supaMessageToOld_(m, emailMap) {
@@ -5180,7 +5206,7 @@ function renderContactBody() {
   html += `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h2 style="margin:0">${requestsHeading}</h2><button class="btn" onclick="openRequestSongModal()">+ Request a Song</button></div>
       <p class="muted">Up to 2 requests per week.</p>`;
   html += `<div class="table-wrap"><table><tr><th>Status</th><th>Song</th><th>Artist</th></tr>
-      ${pageSlice(myRequests, contactRequestsPage, 10).map(r => `<tr><td><span class="badge ${r.status}" title="${escapeHtml(r.status)}">${requestStatusSymbol(r.status)}</span></td><td>${escapeHtml(r.song_title)}</td><td>${escapeHtml(r.artist)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No requests yet.</td></tr>'}
+      ${pageSlice(myRequests, contactRequestsPage, 10).map(r => `<tr><td><span class="badge ${r.status}" title="${escapeHtml(r.status)}">${requestStatusSymbol(r.status)}</span>${r.status==='declined' && r.decline_reason ? `<br><span class="muted" style="font-size:11.5px;">${escapeHtml(r.decline_reason)}</span>` : ''}</td><td>${escapeHtml(r.song_title)}</td><td>${escapeHtml(r.artist)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No requests yet.</td></tr>'}
       </table></div>
       ${pagerHtml(myRequests.length, contactRequestsPage, 'changeContactRequestsPage', 10)}`;
   // The chat card is a clickable preview that expands into the full thread —
@@ -5504,7 +5530,7 @@ function renderAdminRequestsList_() {
       <td><input type="checkbox" ${requestsSelected.has(r.id)?'checked':''} onchange="toggleRequestRowSelected('${r.id}')"></td>
       <td>${r.status==='pending'
         ? `<span class="admin-grid-icons"><button class="status-icon-btn added" onclick="setRequestStatus('${r.id}','added')" title="Mark added" aria-label="Mark added">${SVG_ICONS.statusResolved}</button><button class="status-icon-btn declined" onclick="setRequestStatus('${r.id}','declined')" title="Decline" aria-label="Decline">${SVG_ICONS.decline}</button></span>`
-        : `<span class="badge ${r.status}" title="${escapeHtml(r.status)}">${requestStatusSymbol(r.status)}</span>`}</td>
+        : `<span class="badge ${r.status}" title="${escapeHtml(r.status)}">${requestStatusSymbol(r.status)}</span>${r.status==='declined' && r.decline_reason ? `<br><span class="muted" style="font-size:11.5px;">${escapeHtml(r.decline_reason)}</span>` : ''}`}</td>
       <td>${r.youtube_url ? `<a href="${escapeHtml(r.youtube_url)}" target="_blank" rel="noopener">${escapeHtml(r.song_title)}</a>` : escapeHtml(r.song_title)}${(r.categories||[]).length || r.lyrics ? `<br><span class="adv-link" onclick="viewRequestDetails('${r.id}')">Details</span>` : ''}</td>
       <td>${escapeHtml(r.artist)}</td>
       <td>${escapeHtml(r.user_name)}<br><span class="muted">${escapeHtml(r.user_email)}</span></td><td>${escapeHtml(r.note)}</td>
@@ -5527,12 +5553,32 @@ function viewRequestDetails(id) {
 }
 function changeAdminRequestsPage(p) { adminRequestsPage = p; renderAdminRequestsList_(); }
 function setRequestStatus(id, status) {
+  if (status === 'declined') {
+    customPromptAsync('Reason (optional) — the requester will see this', '', {
+      title: 'Decline this request?',
+      placeholder: 'e.g. We already have a very similar song',
+      submitLabel: 'Decline',
+    }).then(reason => {
+      if (reason === null) return; // cancelled - leave the request untouched
+      api('updateRequestStatus', { id, status, reason }).then(() => loadAdminRequests(true)).catch(err => alert(err.message));
+    });
+    return;
+  }
   api('updateRequestStatus', { id, status }).then(() => loadAdminRequests(true)).catch(err => alert(err.message));
 }
 function setRequestArchived(id, archived) {
   api('archiveRequest', { id, archived }).then(() => loadAdminRequests(true)).catch(err => alert(err.message));
 }
-function loadAdminMessages() {
+function loadAdminMessages(force) {
+  // Switching tabs away from Messages and back used to re-fetch the WHOLE
+  // messages table every single time, even though messagesLoaded/
+  // messagesCache already held it from the last time this tab was opened
+  // this admin-panel visit - the one list tab that never got this guard
+  // when Requests/Errors/Users did. sendAdminReply() and the archive
+  // actions already keep messagesCache correct on their own (optimistic
+  // update, or their own direct getMessages refetch), so nothing else
+  // needs force=true here.
+  if (messagesLoaded && !force) { renderAdminMessages(); return; }
   api('getMessages', {}).then(data => {
     messagesCache = data.messages || [];
     messagesLoaded = true;
@@ -5709,9 +5755,14 @@ function sendAdminReply() {
     renderAdminNav();
   }).catch(err => alert(err.message));
 }
-function loadAdminErrors() {
+function loadAdminErrors(force) {
+  // Same fix as loadAdminMessages() above - this had no cache guard at all
+  // (not even an errorsLoaded flag existed), so every switch back to the
+  // Error Reports tab re-downloaded the whole errors table from scratch.
+  if (errorsLoaded && !force) { renderAdminErrors(); return; }
   api('getErrors', {}).then(data => {
     errorsCache = data.errors || [];
+    errorsLoaded = true;
     if (adminTab === 'errors') renderAdminErrors();
   }).catch(err => { if (adminTab === 'errors') document.getElementById('adminBody').innerHTML = `<div class="error">${err.message}</div>`; });
 }
@@ -5774,7 +5825,7 @@ function bulkArchiveSelectedErrors_() {
   const archived = !errorsFilter.includes('archived');
   Promise.all(ids.map(id => api('archiveError', { id, archived }))).then(() => {
     errorsSelected.clear();
-    loadAdminErrors();
+    loadAdminErrors(true);
   }).catch(err => alert(err.message));
 }
 function errorsBulkBarHtml_(filtered) {
@@ -5811,8 +5862,8 @@ function renderAdminErrorsList_() {
     pagerHtml(filtered.length, adminErrorsPage, 'changeAdminErrorsPage');
 }
 function changeAdminErrorsPage(p) { adminErrorsPage = p; renderAdminErrorsList_(); }
-function setErrorStatus(id, status) { api('updateErrorReport', { id, status }).then(loadAdminErrors).catch(err => alert(err.message)); }
-function setErrorArchived(id, archived) { api('archiveError', { id, archived }).then(loadAdminErrors).catch(err => alert(err.message)); }
+function setErrorStatus(id, status) { api('updateErrorReport', { id, status }).then(() => loadAdminErrors(true)).catch(err => alert(err.message)); }
+function setErrorArchived(id, archived) { api('archiveError', { id, archived }).then(() => loadAdminErrors(true)).catch(err => alert(err.message)); }
 
 /* ============================================================
    TOP SONGS (admin) — how often each song has actually been opened, per the
@@ -5839,14 +5890,31 @@ function renderAdminTopSongs() {
 function changeAdminTopSongsPage(p) { adminTopSongsPage = p; renderAdminTopSongs(); }
 
 /* ============================================================
-   STATS > OVERVIEW (admin) — total/active user counts plus a simple daily-
-   visitors chart, backed by the app_visits table (see getVisitStats/
-   logVisit and add_visit_tracking_and_admin_stats.sql). Cached in memory
-   for this admin-panel visit (statsOverviewCache) the same way
-   usersCache/requestsCache etc. are - switching away to another tab and
-   back shows the same numbers instantly rather than re-fetching.
+   STATS > OVERVIEW (admin) — total users plus a Daily/Weekly/Monthly/
+   Yearly visitors breakdown, backed by the app_visits table (see
+   getVisitStats/logVisit and add_visit_tracking_and_admin_stats.sql).
+   Cached in memory for this admin-panel visit (statsOverviewCache) the
+   same way usersCache/requestsCache etc. are - switching away to another
+   tab and back shows the same numbers instantly rather than re-fetching;
+   flipping between the four period tabs is pure client-side re-slicing
+   of that one cached response, no extra network call at all.
    ============================================================ */
 let statsOverviewCache = null;
+let statsPeriod = 'daily'; // 'daily' | 'weekly' | 'monthly' | 'yearly' - which Stats > Overview chart tab is showing
+function changeStatsPeriod(p) { statsPeriod = p; renderAdminStatsOverview(); }
+// 0 -> "12:00 AM", 13 -> "1:00 PM", etc. - used only by the Daily tab's
+// per-hour tooltips below.
+function hourLabel_(hour) {
+  const h12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${h12}:00 ${hour < 12 ? 'AM' : 'PM'}`;
+}
+// Shared bar-sizing: bars are sized relative to the busiest bucket in
+// THIS view, not to total user count - a quiet app with 5 regular users
+// should still show a readable chart, not a row of near-invisible slivers.
+function statsBarsHtml_(values, titleFn) {
+  const max = Math.max(1, ...values);
+  return values.map((v, i) => `<div class="stat-bar" style="height:${v > 0 ? Math.max(Math.round(v / max * 100), 4) : 0}%;" title="${escapeHtml(titleFn(v, i))}"></div>`).join('');
+}
 function loadAdminStatsOverview() {
   if (statsOverviewCache && usersLoaded) { renderAdminStatsOverview(); return; }
   const body = document.getElementById('adminBody');
@@ -5869,34 +5937,52 @@ function renderAdminStatsOverview() {
   if (!body) return;
   const d = statsOverviewCache;
   if (!d) { body.innerHTML = '<div class="muted">Loading stats…</div>'; return; }
-  // Bars are sized relative to the busiest day in this 30-day window, not
-  // to total user count - a quiet app with 5 regular users should still
-  // show a readable chart, not 30 nearly-invisible slivers.
-  const maxVisitors = Math.max(1, ...d.days.map(x => x.visitors));
-  const barsHtml = d.days.map(day => {
-    const pct = Math.round((day.visitors / maxVisitors) * 100);
-    const dateLabel = new Date(day.date + 'T00:00:00Z').toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
-    const title = `${dateLabel}: ${day.visitors} visitor${day.visitors === 1 ? '' : 's'}`;
-    return `<div class="stat-bar" style="height:${day.visitors > 0 ? Math.max(pct, 4) : 0}%;" title="${escapeHtml(title)}"></div>`;
-  }).join('');
+
+  const periodTabs = `<div class="subtabs" style="margin-bottom:10px;">
+      <button class="${statsPeriod==='daily'?'active':''}" onclick="changeStatsPeriod('daily')">Daily</button>
+      <button class="${statsPeriod==='weekly'?'active':''}" onclick="changeStatsPeriod('weekly')">Weekly</button>
+      <button class="${statsPeriod==='monthly'?'active':''}" onclick="changeStatsPeriod('monthly')">Monthly</button>
+      <button class="${statsPeriod==='yearly'?'active':''}" onclick="changeStatsPeriod('yearly')">Yearly</button>
+    </div>`;
+
+  let caption, barsHtml;
+  if (statsPeriod === 'daily') {
+    const hourCounts = new Array(24).fill(0);
+    (d.todayVisits || []).forEach(ts => { hourCounts[new Date(ts).getHours()]++; });
+    barsHtml = statsBarsHtml_(hourCounts, (v, h) => `${hourLabel_(h)}: ${v} visitor${v === 1 ? '' : 's'}`);
+    const todayCount = (d.todayVisits || []).length;
+    caption = `Today's visits by hour, in your local time (first app-open per visitor — ${todayCount} visitor${todayCount === 1 ? '' : 's'} so far today)`;
+  } else if (statsPeriod === 'weekly' || statsPeriod === 'monthly') {
+    const list = statsPeriod === 'weekly' ? d.days.slice(-7) : d.days;
+    barsHtml = statsBarsHtml_(list.map(x => x.visitors), (v, i) => {
+      const dateLabel = new Date(list[i].date + 'T00:00:00Z').toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
+      return `${dateLabel}: ${v} visitor${v === 1 ? '' : 's'}`;
+    });
+    caption = statsPeriod === 'weekly' ? 'Visitors per day — last 7 days (hover a bar for its date)' : 'Visitors per day — last 30 days (hover a bar for its date)';
+  } else {
+    barsHtml = statsBarsHtml_(d.months.map(x => x.visitors), (v, i) => {
+      const monthLabel = new Date(d.months[i].month + '-01T00:00:00Z').toLocaleDateString(undefined, { month: 'short', year: 'numeric', timeZone: 'UTC' });
+      return `${monthLabel}: ${v} visitor${v === 1 ? '' : 's'}`;
+    });
+    caption = 'Visitors per month — last 12 months (hover a bar for its month)';
+  }
+
   body.innerHTML = `
     <div class="detail-tiles-row" style="margin-bottom:18px;">
       <div class="detail-tile"><div class="tile-value">${d.totalUsers}</div><div class="tile-label">Total Users</div></div>
-      <div class="detail-tile"><div class="tile-value">${d.active7}</div><div class="tile-label">Active, Last 7 Days</div></div>
-      <div class="detail-tile"><div class="tile-value">${d.active30}</div><div class="tile-label">Active, Last 30 Days</div></div>
     </div>
+    ${periodTabs}
     <div class="card">
-      <div class="muted" style="margin-bottom:10px;">Daily visitors — last 30 days (hover a bar for its date)</div>
+      <div class="muted" style="margin-bottom:10px;">${caption}</div>
       <div class="stat-chart">${barsHtml}</div>
-    </div>
-    <div class="muted" style="margin:18px 0 6px;">User activity (a broader measure than visitors above — see note)</div>
-    ${renderUsersSummary_()}`;
+    </div>`;
 }
 
 /* ============================================================
    USERS (admin) + "View As" read-only impersonation
    ============================================================ */
 function loadAdminUsers() {
+  if (usersLoaded) { renderUsersTable(); return; }
   api('getUsers', {}).then(data => {
     usersCache = data.users || [];
     usersLoaded = true;
@@ -5932,32 +6018,6 @@ function renderUsersTable() {
   const sel = document.getElementById('userSortSelect');
   if (sel) sel.addEventListener('change', e => { userSort = e.target.value; usersPage = 0; renderUsersList(); });
   renderUsersList();
-}
-// "Active" here means admin_user_roster's last_activity timestamp falls
-// within the window - any favorite/playlist edit/request/message/error
-// report/sign-in, not just opening the app - same definition already used
-// for the per-user "last active" column and the Users-tab sort option, so
-// these counts are consistent with what's shown per row right below them.
-function renderUsersSummary_() {
-  const list = usersCache || [];
-  const now = Date.now();
-  const DAY = 24 * 60 * 60 * 1000;
-  let activeToday = 0, activeWeek = 0, activeMonth = 0;
-  list.forEach(u => {
-    if (!u.lastActivity) return;
-    const age = now - new Date(u.lastActivity).getTime();
-    if (age <= DAY) activeToday++;
-    if (age <= 7 * DAY) activeWeek++;
-    if (age <= 30 * DAY) activeMonth++;
-  });
-  const tile = (label, value) => `<div class="user-stat-tile"><div class="user-stat-value">${value}</div><div class="user-stat-label">${label}</div></div>`;
-  return `<div class="user-stats-row">${
-    tile('Total users', list.length) +
-    tile('Active today*', activeToday) +
-    tile('Active this week*', activeWeek) +
-    tile('Active this month*', activeMonth)
-  }</div>
-  <div class="muted" style="font-size:12px;margin-top:6px;">* Rolling window from right now, counting ANY activity — a favorite, playlist edit, song request, message, error report, or even a silent sign-in refresh the app does on every load. That's a much wider net than "visitors" above, which only counts an actual app open, once per person per calendar day. The two are expected to disagree, often by a lot — it's not a bug.</div>`;
 }
 function sortUsersList_(list) {
   const arr = list.slice();
