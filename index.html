@@ -536,6 +536,19 @@
        default tap-flash rectangle from doing the same thing on a press. */
     .bottom-nav button.active{color:#fff;font-weight:600;background:rgba(255,255,255,0.15);}
   }
+  /* iPhone notch / status bar: the app is installed with a see-through
+     status bar (apple-mobile-web-app-status-bar-style: black-translucent +
+     viewport-fit=cover), so without these insets the header sat underneath
+     the clock/notch and the menu button was hard or impossible to tap.
+     env(...) is 0 everywhere else, so other devices are unaffected. */
+  header{padding-top:calc(12px + env(safe-area-inset-top));padding-left:calc(18px + env(safe-area-inset-left));padding-right:calc(18px + env(safe-area-inset-right));}
+  .mobile-drawer-panel{padding-top:calc(20px + env(safe-area-inset-top));padding-left:calc(16px + env(safe-area-inset-left));}
+  .offline-banner{padding-top:calc(9px + env(safe-area-inset-top));}
+  .offline-banner + header{padding-top:12px;}
+  @media (max-width:640px){
+    header{padding-top:calc(10px + env(safe-area-inset-top));padding-left:calc(12px + env(safe-area-inset-left));padding-right:calc(12px + env(safe-area-inset-right));}
+    .offline-banner + header{padding-top:10px;}
+  }
 </style>
 </head>
 <body>
@@ -1055,7 +1068,19 @@ let songContentLoaded = false; // true once the full-corpus background text fetc
 // once they land — this is a "show the old thing now, update it in the
 // background" cache, never the only copy of the truth.
 const CATALOG_CACHE_KEY = 'jgc_catalog_cache_v2';
-try { localStorage.removeItem('jgc_catalog_cache_v1'); } catch (e) {}
+// One-time carry-over: a v1 cache saved by a recent version (its songs
+// already have artist_hebrew/chords_used/updated_at) is a fine starting
+// point for delta sync, so keep it instead of making every device download
+// the whole catalog again. Older-format v1 caches are just discarded.
+try {
+  const v1 = localStorage.getItem('jgc_catalog_cache_v1');
+  if (v1 && !localStorage.getItem(CATALOG_CACHE_KEY)) {
+    const parsed = JSON.parse(v1);
+    const s0 = parsed && parsed.songs && parsed.songs[0];
+    if (s0 && 'artist_hebrew' in s0 && 'chords_used' in s0 && s0.updated_at) localStorage.setItem(CATALOG_CACHE_KEY, v1);
+  }
+  localStorage.removeItem('jgc_catalog_cache_v1');
+} catch (e) {}
 // True when `songs` is a complete copy of the server's catalog (from a
 // server load or this cache) - only then can a refresh ask for just the
 // songs changed since (see loadSongsInner_). False after an offline-only load.
@@ -1284,7 +1309,7 @@ function signOut() {
   // memory, no network call needed at all. Signing out is exactly the moment
   // that content should stop being available, so clear both copies here.
   songs = []; playlists = []; songContentById = {}; songContentLoaded = false;
-  try { localStorage.removeItem(CATALOG_CACHE_KEY); } catch (e) {}
+  try { localStorage.removeItem(CATALOG_CACHE_KEY); localStorage.removeItem('jgc_song_text_v1'); _songTextCache = null; } catch (e) {}
   if (view.name === 'edit' || view.name === 'admin' || view.name === 'playlistDetail') goTo('list');
   renderUserArea(); render();
 }
@@ -2435,7 +2460,7 @@ function expireSession_() {
   // in — nothing left over from the cached song/chord/lyric text (see
   // saveCatalogCache) either in memory or in localStorage.
   songs = []; playlists = []; songContentById = {}; songContentLoaded = false;
-  try { localStorage.removeItem(CATALOG_CACHE_KEY); } catch (e) {}
+  try { localStorage.removeItem(CATALOG_CACHE_KEY); localStorage.removeItem('jgc_song_text_v1'); _songTextCache = null; } catch (e) {}
   renderUserArea();
   render();
 }
@@ -2483,10 +2508,34 @@ function applySongsDelta_(d) {
   songs = merged;
   return true;
 }
+let lastPlaylistsFetchAt = 0;
+async function loadStaticCatalog_() {
+  try {
+    const res = await fetch('songs.json', { cache: 'no-cache' });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const list = data && Array.isArray(data.songs) ? data.songs : null;
+    if (!list || list.length < 100) return null;
+    return list.filter(s => s && s.id && s.updated_at).map(s => ({
+      id: s.id, title: s.title || '', title_hebrew: s.title_hebrew || '', artist: s.artist || '', artist_hebrew: s.artist_hebrew || '',
+      categories: s.categories || [], capo: s.capo || 0, youtube_url: s.youtube_url || '',
+      date_added: s.date_added, updated_at: s.updated_at, chords_used: s.chords_used || [],
+    }));
+  } catch (e) { return null; }
+}
 async function loadSongsInner_(showSpinner) {
   const footer = document.getElementById('footerStatus');
   if (showSpinner) footer.textContent = 'Loading songs…';
   try {
+    // A device with no saved catalog starts from songs.json, a copy of the
+    // song list that a nightly GitHub Action publishes next to index.html
+    // (see export-songs.yml / export_song_catalog()). It's served by GitHub
+    // Pages, so it doesn't count against the Supabase data-transfer quota;
+    // the delta request right below then fetches only songs changed since.
+    if (CONFIG.USE_SUPABASE && !(songsCompleteFromServer && songs.length)) {
+      const base = await loadStaticCatalog_();
+      if (base) { songs = base; songsCompleteFromServer = true; }
+    }
     let delta = null;
     if (CONFIG.USE_SUPABASE && songsCompleteFromServer && songs.length) {
       const since = songsSyncSince_();
@@ -2502,8 +2551,17 @@ async function loadSongsInner_(showSpinner) {
     // re-apply any full song text we already fetched, since it persists across
     // this periodic refresh replacing the `songs` array wholesale.
     songs.forEach(s => { const c = songContentById[s.id]; if (c) { s.chords_lyrics = c.chords_lyrics; s.lyrics_only = c.lyrics_only; } });
-    const pl = await api('getPlaylists', {});
-    playlists = pl.playlists || [];
+    // Playlists (incl. everyone's public ones, with all their songs) are only
+    // re-fetched on the first load, when the Playlists pages are open, or
+    // every 30 minutes - not on every 5-minute tick. Your own playlist edits
+    // already update locally (applyPlaylistPatch_), so this only affects how
+    // soon you see someone ELSE's changes.
+    const plStale = !lastPlaylistsFetchAt || Date.now() - lastPlaylistsFetchAt > 30 * 60 * 1000;
+    if (plStale || view.name === 'playlists' || view.name === 'playlistDetail') {
+      const pl = await api('getPlaylists', {});
+      playlists = pl.playlists || [];
+      lastPlaylistsFetchAt = Date.now();
+    }
     lastSynced = new Date();
     renderFooter();
     // Admin's own tabs (Requests/Messages/Errors/Users) don't read the
@@ -2605,7 +2663,45 @@ function startAfterSignIn() {
 // Fetches one song's full text on demand — used when its detail page is
 // opened before the background fetch above has finished, so viewing a chart
 // is never stuck waiting on every other song's text too.
+// Chord/lyric text of songs this device has already opened, kept in
+// localStorage keyed by id and tagged with the song's updated_at - reopening
+// a song costs no download unless the song was edited since. Capped to the
+// most recent SONG_TEXT_CACHE_MAX songs so it stays well inside storage limits.
+const SONG_TEXT_CACHE_KEY = 'jgc_song_text_v1';
+const SONG_TEXT_CACHE_MAX = 250;
+let _songTextCache = null;
+function songTextCache_() {
+  if (_songTextCache) return _songTextCache;
+  try { _songTextCache = JSON.parse(localStorage.getItem(SONG_TEXT_CACHE_KEY) || '{}') || {}; } catch (e) { _songTextCache = {}; }
+  return _songTextCache;
+}
+function saveSongText_(id, updatedAt, cl, lo) {
+  if (!updatedAt) return;
+  const cache = songTextCache_();
+  cache[id] = { u: updatedAt, cl: cl || '', lo: lo || '', t: Date.now() };
+  const ids = Object.keys(cache);
+  if (ids.length > SONG_TEXT_CACHE_MAX) {
+    ids.sort((a, b) => cache[a].t - cache[b].t).slice(0, ids.length - SONG_TEXT_CACHE_MAX).forEach(k => delete cache[k]);
+  }
+  for (let tries = 0; tries < 3; tries++) {
+    try { localStorage.setItem(SONG_TEXT_CACHE_KEY, JSON.stringify(cache)); return; }
+    catch (e) { // storage full - drop the older half and retry
+      const ks = Object.keys(cache).sort((a, b) => cache[a].t - cache[b].t);
+      ks.slice(0, Math.ceil(ks.length / 2)).forEach(k => delete cache[k]);
+    }
+  }
+}
 async function loadSongContentFor(id) {
+  const cachedSong = songs.find(s => s.id === id);
+  const hit = cachedSong && cachedSong.updated_at && songTextCache_()[id];
+  if (hit && hit.u === cachedSong.updated_at) {
+    hit.t = Date.now();
+    songContentById[id] = { chords_lyrics: hit.cl, lyrics_only: hit.lo };
+    cachedSong.chords_lyrics = hit.cl; cachedSong.lyrics_only = hit.lo;
+    delete cachedSong._contentPending;
+    if (view.name === 'detail' && view.id === id) renderDetail();
+    return;
+  }
   if (isOffline) return;
   try {
     // 'songContent' now requires sign-in too, and takes the id in the POST
@@ -2615,7 +2711,7 @@ async function loadSongContentFor(id) {
     const data = await api('songContent', { id });
     songContentById[id] = { chords_lyrics: data.chords_lyrics, lyrics_only: data.lyrics_only };
     const song = songs.find(s => s.id === id);
-    if (song) { song.chords_lyrics = data.chords_lyrics; song.lyrics_only = data.lyrics_only; }
+    if (song) { song.chords_lyrics = data.chords_lyrics; song.lyrics_only = data.lyrics_only; saveSongText_(id, song.updated_at, data.chords_lyrics, data.lyrics_only); }
   } catch (err) { console.error('Failed to load song text', err); }
   const song2 = songs.find(s => s.id === id);
   if (song2) delete song2._contentPending;
@@ -3739,6 +3835,10 @@ function goTo(name, extra) {
   render();
   window.scrollTo(0,0);
   if (name === 'detail' && view.id) recordSongView_(view.id);
+  if (name === 'playlists' && !viewAsUser && currentUser && !isOffline && lastPlaylistsFetchAt && Date.now() - lastPlaylistsFetchAt > 5 * 60 * 1000) {
+    lastPlaylistsFetchAt = Date.now();
+    refreshPlaylistsOnly().then(() => { if (view.name === 'playlists') render(); saveCatalogCache(); }).catch(() => {});
+  }
 }
 // Makes a phone's native Back button (and a desktop browser's Back button)
 // step back through whichever screens were actually visited inside the
@@ -4625,7 +4725,7 @@ function openMyCapoPicker() {
     <h2>Set your capo</h2>
     <p class="muted">Pick the capo fret that's most comfortable for you on this song. This won't change how the chords are displayed.</p>
     <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">
-      ${Array.from({length:10},(_,i)=>i+1).map(n => `<button class="stepper-btn" style="width:38px;height:38px;font-size:15px;${playerState.myCapo===n?'background:var(--teal);color:#fff;border-color:var(--teal);':''}" onclick="setMyCapo(${n})">${n}</button>`).join('')}
+      ${Array.from({length:11},(_,i)=>i).map(n => `<button class="stepper-btn" style="width:38px;height:38px;font-size:15px;${playerState.myCapo===n?'background:var(--teal);color:#fff;border-color:var(--teal);':''}" onclick="setMyCapo(${n})">${n}</button>`).join('')}
     </div>
     <div class="modal-actions">
       ${playerState.myCapo!=null ? `<span class="adv-link" style="margin-right:auto;" onclick="clearMyCapo()">Clear</span>` : ''}
@@ -7265,7 +7365,7 @@ try { history.replaceState({ jgcView: view }, ''); } catch (e) {}
 // A device that already had this cache saved from BEFORE that clearing
 // existed won't have had it wiped by either of those, so also sweep it
 // away right here, once, for a visitor who's (still, or already) signed out.
-if (!currentUser) { try { localStorage.removeItem(CATALOG_CACHE_KEY); } catch (e) {} }
+if (!currentUser) { try { localStorage.removeItem(CATALOG_CACHE_KEY); localStorage.removeItem('jgc_song_text_v1'); _songTextCache = null; } catch (e) {} }
 const cachedCatalog = currentUser ? loadCatalogCache() : null;
 if (cachedCatalog) {
   songs = cachedCatalog.songs || [];
