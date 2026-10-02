@@ -1572,6 +1572,22 @@ async function supaRequireAdmin_() {
 // never used to have to think about nonces at all).
 async function supaSignInWithGoogleIdToken_(idToken) {
   await ensureSupabaseLib_();
+  // Reuse the session supabase-js already saved in this browser (it refreshes
+  // itself automatically) when it belongs to the same Google account. Signing
+  // in again on every page load - and on every silent Google token reissue -
+  // created a brand-new session each time, writing to auth.sessions,
+  // auth.refresh_tokens and auth.users: one of the biggest recurring
+  // disk-write costs on the database. "Last active" now comes from the
+  // once-per-load visit log instead (see reduce_disk_io.sql).
+  try {
+    const email = String((decodeJwt(idToken) || {}).email || '').toLowerCase();
+    const { data: sd, error: se } = await getSupa_().auth.getSession();
+    const sess = !se && sd && sd.session;
+    if (email && sess && sess.user && String(sess.user.email || '').toLowerCase() === email) {
+      if (!supaProfileCache) await supaCurrentProfile_(true);
+      return;
+    }
+  } catch (e) { /* fall through to a fresh sign-in */ }
   const { error } = await getSupa_().auth.signInWithIdToken({ provider: 'google', token: idToken, nonce: _googleSignInNonce || undefined });
   if (error) throw new Error(error.message);
   await supaCurrentProfile_(true); // refresh the cached profile now that a session exists
@@ -1721,8 +1737,10 @@ async function supaApi(action, fields) {
       // file that hasn't been run yet) doesn't exist, drop just that column
       // and retry rather than failing the whole song list - the app then
       // simply shows 0 for that number until the SQL is run.
-      let cols = ['id','title','title_hebrew','artist','artist_hebrew','categories','capo','youtube_url','date_added','updated_at','chords_used','view_count','unique_view_count'];
-      const optional = ['artist_hebrew','chords_used','view_count','unique_view_count'];
+      let cols = ['id','title','title_hebrew','artist','artist_hebrew','categories','capo','youtube_url','date_added','updated_at','chords_used'];
+      // (Open counts are no longer part of the song list - only Admin > Top
+      // Songs needs them, and it fetches them itself via getTopSongCounts.)
+      const optional = ['artist_hebrew','chords_used'];
       for (let attempt = 0; ; attempt++) {
         const { data, error } = await supaSelectAll_((from, to) => getSupa_().from('songs')
           .select(cols.join(',')).order('id').range(from, to));
@@ -1916,6 +1934,20 @@ async function supaApi(action, fields) {
   // opens, every viewing counts) and unique_view_count (distinct viewers,
   // each person counts once no matter how often they reopen it) can both
   // be shown - see Admin > Stats > Top Songs' two columns.
+  if (action === 'getTopSongCounts') {
+    await supaRequireAdmin_();
+    let res = await supaSelectAll_((from, to) => getSupa_().from('song_view_counts')
+      .select('song_id,view_count,unique_view_count').order('song_id').range(from, to));
+    if (res.error && /song_view_counts/.test(res.error.message || '')) {
+      // reduce_disk_io.sql not run yet - the counts still live on songs.
+      res = await supaSelectAll_((from, to) => getSupa_().from('songs')
+        .select('id,view_count,unique_view_count').order('id').range(from, to));
+      throwIfErr_(res.error);
+      return { success: true, counts: (res.data || []).map(r => ({ song_id: r.id, view_count: r.view_count || 0, unique_view_count: r.unique_view_count || 0 })) };
+    }
+    throwIfErr_(res.error);
+    return { success: true, counts: res.data || [] };
+  }
   if (action === 'incrementSongView') {
     await supaRequireUser_();
     if (!fields.id) return { success: false, error: 'Missing id' };
@@ -3587,11 +3619,9 @@ function loadViewCache() {
 function recordSongView_(id) {
   if (!id) return;
   api('incrementSongView', { id }).catch(() => {}); // best-effort - never blocks navigation or surfaces an error to the user
-  const song = songs.find(s => s.id === id);
-  if (song) {
-    song.view_count = (song.view_count || 0) + 1; // optimistic local bump so Admin > Top Songs feels live without waiting on the next periodic refresh
-    song.unique_view_count = (song.unique_view_count || 0) + 1; // same optimism applied to the distinct-viewer count - see incrementSongView above
-  }
+  // Optimistic bump of the admin's already-loaded Top Songs numbers (total
+  // opens only - whether this was a first-time viewer is only known server-side).
+  if (topSongCounts) { const c = topSongCounts[id] || (topSongCounts[id] = { view_count: 0, unique_view_count: 0 }); c.view_count++; }
 }
 function goTo(name, extra) {
   // Leaving the Tuner page: always release the microphone rather than
@@ -6377,13 +6407,31 @@ function setErrorArchived(id, archived) { api('archiveError', { id, archived }).
 // time the song was opened (one fan opening it 5x a day for a week = 35),
 // "Unique users" counts each person once no matter how often they reopen
 // it. Click either column header to rank by it.
+let topSongCounts = null;     // { songId: {view_count, unique_view_count} } - admin only, see getTopSongCounts
+let topSongCountsAt = 0;      // when it was fetched; re-fetched after 5 minutes
+let topSongCountsLoading = false;
 function renderAdminTopSongs() {
   const body = document.getElementById('adminBody');
   if (!body) return;
   if (!songs.length) { body.innerHTML = '<div class="muted">Loading songs…</div>'; return; }
+  if (!topSongCounts || Date.now() - topSongCountsAt > 5 * 60 * 1000) {
+    if (!topSongCounts) body.innerHTML = '<div class="muted">Loading counts…</div>';
+    if (!topSongCountsLoading) {
+      topSongCountsLoading = true;
+      api('getTopSongCounts', {}).then(d => {
+        const m = {};
+        (d.counts || []).forEach(r => { m[r.song_id] = { view_count: Number(r.view_count) || 0, unique_view_count: Number(r.unique_view_count) || 0 }; });
+        topSongCounts = m; topSongCountsAt = Date.now();
+      }).catch(err => {
+        if (!topSongCounts) { const b = document.getElementById('adminBody'); if (b && adminTab === 'topSongs') b.innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`; }
+      }).finally(() => { topSongCountsLoading = false; if (topSongCounts && adminTab === 'topSongs') renderAdminTopSongs(); });
+    }
+    if (!topSongCounts) return;
+  }
   const key = adminTopSongsSort;
   const other = key === 'view_count' ? 'unique_view_count' : 'view_count';
-  const sorted = songs.slice().sort((a, b) => (b[key] || 0) - (a[key] || 0) || (b[other] || 0) - (a[other] || 0) || (a.title || '').localeCompare(b.title || ''));
+  const cnt = s => topSongCounts[s.id] || { view_count: 0, unique_view_count: 0 };
+  const sorted = songs.map(s => Object.assign({}, s, cnt(s))).sort((a, b) => (b[key] || 0) - (a[key] || 0) || (b[other] || 0) - (a[other] || 0) || (a.title || '').localeCompare(b.title || ''));
   const page = adminTopSongsPage;
   const th = (k, label, title) => `<th class="sortable-th num${key === k ? ' sorted' : ''}" title="${title}" onclick="setAdminTopSongsSort('${k}')">${label}${key === k ? ' ▾' : ''}</th>`;
   const rows = pageSlice(sorted, page).map((s, i) => `<tr>
