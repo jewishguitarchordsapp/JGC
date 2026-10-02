@@ -1054,7 +1054,12 @@ let songContentLoaded = false; // true once the full-corpus background text fetc
 // exactly as before and silently refresh both the live data and this cache
 // once they land — this is a "show the old thing now, update it in the
 // background" cache, never the only copy of the truth.
-const CATALOG_CACHE_KEY = 'jgc_catalog_cache_v1';
+const CATALOG_CACHE_KEY = 'jgc_catalog_cache_v2';
+try { localStorage.removeItem('jgc_catalog_cache_v1'); } catch (e) {}
+// True when `songs` is a complete copy of the server's catalog (from a
+// server load or this cache) - only then can a refresh ask for just the
+// songs changed since (see loadSongsInner_). False after an offline-only load.
+let songsCompleteFromServer = false;
 function saveCatalogCache() {
   try {
     // Deliberately excludes chords_lyrics/lyrics_only and songContentById.
@@ -1720,6 +1725,25 @@ async function supaApi(action, fields) {
   await ensureSupabaseLib_();
 
   // ================= reads =================
+  if (action === 'list' && fields.since) {
+    // Delta refresh: only songs created/edited since the newest updated_at
+    // this browser already has, plus the total row count (so a deleted song
+    // is noticed and triggers one full reload). Songs rarely change, so a
+    // routine refresh is now a few KB instead of the whole ~1 MB catalog -
+    // this was a large share of the project's monthly data-transfer quota.
+    await supaRequireUser_();
+    const cols = 'id,title,title_hebrew,artist,artist_hebrew,categories,capo,youtube_url,date_added,updated_at,chords_used';
+    const [{ data, error }, { count, error: cErr }] = await Promise.all([
+      getSupa_().from('songs').select(cols).gte('updated_at', fields.since).order('id').limit(1000),
+      getSupa_().from('songs').select('id', { count: 'exact', head: true }),
+    ]);
+    throwIfErr_(error); throwIfErr_(cErr);
+    return { success: true, delta: true, total: count, songs: (data || []).map(s => ({
+      id: s.id, title: s.title, title_hebrew: s.title_hebrew || '', artist: s.artist || '', artist_hebrew: s.artist_hebrew || '',
+      categories: s.categories || [], capo: s.capo || 0, youtube_url: s.youtube_url || '',
+      date_added: s.date_added, updated_at: s.updated_at, chords_used: s.chords_used || [],
+    })) };
+  }
   if (action === 'list') {
     await supaRequireUser_();
     // Measured: chords_lyrics (the full chord chart text) averages ~4.2KB
@@ -1764,6 +1788,18 @@ async function supaApi(action, fields) {
     })) };
   }
 
+  if (action === 'searchLyrics') {
+    // Lyric search runs in the database and returns only matching song ids,
+    // instead of downloading every song's full text (~11-15 MB) to search it
+    // in the browser. Same case-insensitive "contains" match as before.
+    await supaRequireUser_();
+    const q = String(fields.q || '').trim();
+    if (q.length < 2) return { success: true, ids: [] };
+    const pattern = '%' + q.replace(/[\\%_]/g, m => '\\' + m) + '%';
+    const { data, error } = await getSupa_().from('songs').select('id').ilike('lyrics_only', pattern).limit(1000);
+    throwIfErr_(error);
+    return { success: true, ids: (data || []).map(r => r.id) };
+  }
   if (action === 'listContent') {
     await supaRequireUser_();
     const { data, error } = await supaSelectAll_((from, to) => getSupa_().from('songs').select('id,chords_lyrics,lyrics_only').order('id').range(from, to));
@@ -2416,11 +2452,52 @@ function loadSongs(showSpinner) {
   loadSongsInFlight = loadSongsInner_(showSpinner).finally(() => { loadSongsInFlight = null; });
   return loadSongsInFlight;
 }
+// Newest updated_at among the songs this browser has (ISO string), used as
+// the "since" point for a delta refresh.
+function songsSyncSince_() {
+  let max = 0;
+  songs.forEach(s => { const t = Date.parse(s.updated_at); if (t > max) max = t; });
+  return max ? new Date(max).toISOString() : null;
+}
+// Merges a delta 'list' response into `songs`. Returns false (caller then
+// does a full reload) if the merged count doesn't match the server's total,
+// e.g. because a song was deleted.
+function applySongsDelta_(d) {
+  if (!d || !d.delta) return false;
+  if ((d.songs || []).length >= 1000) return false; // hit the delta cap - just reload everything
+  const byId = {};
+  songs.forEach(s => { byId[s.id] = s; });
+  const merged = songs.slice();
+  (d.songs || []).forEach(row => {
+    const cur = byId[row.id];
+    if (cur) {
+      if (cur.updated_at === row.updated_at) return; // unchanged (gte boundary)
+      // Chart text may have changed - drop the cached copy so it re-fetches.
+      delete cur.chords_lyrics; delete cur.lyrics_only; delete songContentById[row.id];
+      Object.assign(cur, row);
+    } else {
+      merged.push(row); byId[row.id] = row;
+    }
+  });
+  if (typeof d.total === 'number' && d.total !== merged.length) return false;
+  songs = merged;
+  return true;
+}
 async function loadSongsInner_(showSpinner) {
   const footer = document.getElementById('footerStatus');
   if (showSpinner) footer.textContent = 'Loading songs…';
   try {
-    songs = await apiList();
+    let delta = null;
+    if (CONFIG.USE_SUPABASE && songsCompleteFromServer && songs.length) {
+      const since = songsSyncSince_();
+      if (since) delta = await api('list', { since });
+    }
+    if (delta && applySongsDelta_(delta)) {
+      // merged in place
+    } else {
+      songs = await apiList();
+    }
+    songsCompleteFromServer = true;
     // The list endpoint only sends lightweight fields (see loadSongContentAll) —
     // re-apply any full song text we already fetched, since it persists across
     // this periodic refresh replacing the `songs` array wholesale.
@@ -2479,6 +2556,23 @@ async function loadSongContentAll() {
 // lyric search typed into the Songs search box — instead of unconditionally
 // on every sign-in. Safe to call repeatedly; only ever fetches once (per
 // page load) thanks to the songContentLoading/songContentLoaded guards.
+// Server-side lyric search (see 'searchLyrics'): debounced while typing;
+// title/artist matches still show instantly from the local list, and lyric
+// matches are added as soon as the database answers.
+let lyricHits = null; // { q, ids: Set }
+let lyricSearchTimer = null;
+function scheduleLyricSearch_() {
+  if (!CONFIG.USE_SUPABASE) { ensureSongContentLoaded(); return; }
+  clearTimeout(lyricSearchTimer);
+  const q = (filters.q || '').trim();
+  if (q.length < 2 || isOffline) return;
+  lyricSearchTimer = setTimeout(() => {
+    api('searchLyrics', { q }).then(d => {
+      lyricHits = { q, ids: new Set(d.ids || []) };
+      if ((filters.q || '').trim() === q && view.name === 'list') renderSongListBody();
+    }).catch(err => { console.warn('Lyric search failed', err && err.message); });
+  }, 350);
+}
 let songContentLoading = false;
 function ensureSongContentLoaded() {
   if (songContentLoaded || songContentLoading || isOffline) return;
@@ -2662,6 +2756,7 @@ async function loadFromOfflineCache() {
     const allIds = new Set();
     sets.forEach(s => (s.songIds || []).forEach(id => allIds.add(id)));
     songs = await offlineDb.getSongs(Array.from(allIds));
+    songsCompleteFromServer = false;
     songs.forEach(s => { songContentById[s.id] = { chords_lyrics: s.chords_lyrics, lyrics_only: s.lyrics_only }; });
     songContentLoaded = true;
     const favSet = sets.find(s => s.id === 'favorites');
@@ -3486,6 +3581,16 @@ function buildChordHtmlFromPlainText(text) {
   }
   return out.join('');
 }
+// Plain lyrics from a chord chart: chord-only lines and [bracket] chords removed.
+function deriveLyricsOnly_(chart) {
+  let text = String(chart || '');
+  if (isHtmlChordFormat(text)) text = htmlChordFormatToPlainText(text);
+  text = text.replace(/<[^>]*>/g, ' ').replace(/\[[^\]\n]{1,16}\]/g, '');
+  return text.split('\n')
+    .filter(l => l.trim() && !looksLikeChordLine(l))
+    .map(l => l.replace(/[ \t\u00a0]+/g, ' ').trim())
+    .join('\n').trim();
+}
 function htmlChordFormatToPlainText(html) {
   const container = document.createElement('div');
   container.innerHTML = html;
@@ -3899,7 +4004,7 @@ function filteredSongs() {
     if (filters.tag && !tags.includes(filters.tag)) return false;
     if (filters.q) {
       const q = filters.q.toLowerCase();
-      const inLyrics = (s.lyrics_only || '').toLowerCase().includes(q);
+      const inLyrics = (s.lyrics_only || '').toLowerCase().includes(q) || !!(lyricHits && lyricHits.q === filters.q.trim() && lyricHits.ids.has(s.id));
       if (!(s.title||'').toLowerCase().includes(q) && !(s.title_hebrew||'').includes(filters.q) && !(s.artist||'').toLowerCase().includes(q) && !(s.artist_hebrew||'').includes(filters.q) && !inLyrics) return false;
     }
     return true;
@@ -4019,7 +4124,8 @@ function renderList() {
   }
   html += `<div id="songListBody"></div>` + alphabetSidebarHtml_();
   document.getElementById('app').innerHTML = html;
-  document.getElementById('searchBox').addEventListener('input', e => { filters.q = e.target.value; songListPage = 0; if (filters.q) ensureSongContentLoaded(); renderSongListBody(); });
+  document.getElementById('searchBox').addEventListener('input', e => { filters.q = e.target.value; songListPage = 0; if (filters.q) scheduleLyricSearch_(); renderSongListBody(); });
+  if (filters.q && !(lyricHits && lyricHits.q === filters.q.trim())) scheduleLyricSearch_();
   renderSongListBody();
   if (songTab === 'favorites' && currentUser && !isOffline) refreshFavOfflineButton();
 }
@@ -5124,6 +5230,10 @@ function saveSong(evt, id) {
     youtube_url: document.getElementById('f_youtube').value.trim(),
     chords_lyrics: currentChordsLyricsValue()
   };
+  // lyrics_only (what lyric search and the database's search index read) is
+  // derived from the chart on every save - it used to be omitted here, which
+  // blanked it whenever a song was edited.
+  song.lyrics_only = deriveLyricsOnly_(song.chords_lyrics);
   const statusEl = document.getElementById('saveStatus');
   statusEl.textContent = 'Saving…'; statusEl.className = 'status';
   // Any language added on this form gets saved to the language list first,
@@ -7160,6 +7270,7 @@ const cachedCatalog = currentUser ? loadCatalogCache() : null;
 if (cachedCatalog) {
   songs = cachedCatalog.songs || [];
   playlists = cachedCatalog.playlists || [];
+  songsCompleteFromServer = songs.length > 0;
   songContentById = cachedCatalog.songContentById || {};
   songContentLoaded = Object.keys(songContentById).length > 0;
 }
