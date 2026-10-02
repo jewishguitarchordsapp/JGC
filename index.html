@@ -198,6 +198,35 @@
   .preview-box{margin-top:8px;}
   .status{font-size:13px;color:var(--muted);margin-top:6px;}
   .error{color:#b33;font-size:13px;margin-top:6px;}
+  /* Song Edit Form pickers (artist / language / tag) */
+  .picker{flex:1;min-width:220px;margin-bottom:6px;}
+  .picker-row{align-items:flex-start;}
+  .picker-selected{display:flex;flex-wrap:wrap;gap:2px;margin-bottom:6px;}
+  .picker-selected:has(.picker-artist-row){flex-direction:column;gap:6px;}
+  .picker-empty{font-size:13px;padding:2px 0;}
+  .picker-chip{cursor:default;display:inline-flex;align-items:center;gap:4px;}
+  .picker-chip button{background:none;border:none;color:inherit;cursor:pointer;font-size:15px;line-height:1;padding:0 2px;}
+  .picker-artist-row{display:flex;align-items:center;gap:8px;background:#eef4f4;border:1px solid #d7e6e6;border-radius:8px;padding:6px 8px;}
+  .picker-artist-en{flex:1;min-width:0;font-size:14px;font-weight:600;color:var(--accent);overflow-wrap:anywhere;}
+  .picker-artist-row input[type=text]{flex:1;min-width:0;padding:6px 8px;}
+  .picker-mini{background:#fff;border:1px solid var(--border);border-radius:6px;width:28px;height:28px;cursor:pointer;font-size:15px;color:var(--muted);flex:none;}
+  .picker-mini:hover{color:var(--text);border-color:var(--teal);}
+  .picker-mini-spacer{width:28px;flex:none;}
+  input.picker-search{width:100%;}
+  .picker-list{max-height:200px;overflow-y:auto;border:1px solid var(--border);border-top:none;border-radius:0 0 7px 7px;background:#fff;margin-top:-3px;}
+  .picker-opt{display:flex;align-items:center;gap:8px;margin:0;padding:6px 10px;font-size:14px;color:var(--text);cursor:pointer;border-bottom:1px solid #f0f2f3;}
+  .picker-opt:last-child{border-bottom:none;}
+  .picker-opt:hover{background:#f5f9f9;}
+  .picker-opt input{margin:0;flex:none;}
+  .picker-opt > span:first-of-type{flex:1;min-width:0;overflow-wrap:anywhere;}
+  .picker-opt .count{font-size:11px;color:var(--muted);flex:none;}
+  .picker-more{font-size:12px;padding:6px 10px;}
+  .picker-add{margin-top:6px;}
+  .picker-add-btn{padding:6px 10px;font-size:13px;}
+  .picker-add-form{display:flex;flex-wrap:wrap;gap:6px;align-items:center;}
+  .picker-add-form input[type=text]{flex:1;min-width:120px;}
+  .picker-add-form .error{flex-basis:100%;margin-top:0;}
+  .picker-add-form .error:empty{display:none;}
   footer{text-align:center;color:var(--muted);font-size:12px;padding:24px;}
   .empty{text-align:center;color:var(--muted);padding:40px 10px;}
   table{width:100%;border-collapse:collapse;font-size:14px;}
@@ -1977,6 +2006,21 @@ async function supaApi(action, fields) {
   }
 
   // ================= writes =================
+  if (action === 'getLanguages') {
+    await supaRequireUser_();
+    const { data, error } = await getSupa_().from('languages').select('name,sort_order').order('sort_order').order('name');
+    throwIfErr_(error);
+    return { success: true, languages: (data || []).map(r => r.name) };
+  }
+  if (action === 'addLanguages') {
+    await supaRequireAdmin_();
+    const names = Array.from(new Set((fields.names || []).map(n => String(n || '').trim()).filter(Boolean)));
+    if (!names.length) return { success: true };
+    const { error } = await getSupa_().from('languages')
+      .upsert(names.map(name => ({ name })), { onConflict: 'name', ignoreDuplicates: true });
+    throwIfErr_(error);
+    return { success: true };
+  }
   if (action === 'createSong' || action === 'updateSong') {
     await supaRequireAdmin_();
     const s = fields.song || {};
@@ -2307,7 +2351,9 @@ async function loadSongsInner_(showSpinner) {
     // wiped the whole admin panel back to "Loading…" and re-fired whichever
     // tab's fetch was current, even mid-click — this is what admins were
     // seeing as "always loading" / "jumps to a different tab".
-    if (view.name !== 'admin') render();
+    // Same for an Add/Edit Song form that's already on screen: re-rendering
+    // it would throw away everything typed or picked since it opened.
+    if (view.name !== 'admin' && !(view.name === 'edit' && document.getElementById('f_title'))) render();
     saveCatalogCache();
   } catch (err) {
     if (isOffline && songs.length === 0) {
@@ -2368,6 +2414,7 @@ function startAfterSignIn() {
   if (dataStarted) return;
   dataStarted = true;
   loadSongs(true);
+  loadLanguages_();
   refreshTimer = setInterval(() => loadSongs(false), CONFIG.AUTO_REFRESH_SECONDS * 1000);
   // Once per page load/session (the dataStarted guard above), not on every
   // periodic refresh - feeds Admin > Stats > Overview's daily-visitors
@@ -3365,12 +3412,43 @@ function htmlChordFormatToPlainText(html) {
 // Categories in the sheet are a single comma list mixing "language" values
 // (Lashon Hakodesh, English, Yiddish…) with topical tags (Shabbos, Wedding…).
 // This is how the original database stores them too — split for display.
-const LANGUAGE_VALUES = ['Lashon Hakodesh','English','Hebrew - General','Yiddish','Hebrew - Torah Theme','Aramaic','Russian','French','Italian','Spanish','Ladino','Ukrainian'];
+// The language list now lives in the database (public.languages - see
+// add_languages_table.sql) so a new language can be added from the
+// Add/Edit Song form. This built-in copy is only the fallback used until
+// that list loads (or if it can't - offline, Sheets backend, or before the
+// SQL file has been run). loadLanguages_() replaces it after sign-in.
+const DEFAULT_LANGUAGE_VALUES = ['Lashon Hakodesh','English','Hebrew - General','Yiddish','Hebrew - Torah Theme','Aramaic','Russian','French','Italian','Spanish','Ladino','Ukrainian'];
+let LANGUAGE_VALUES = DEFAULT_LANGUAGE_VALUES.slice();
+// A song can now have more than one language. `languages` is all of them
+// (in stored order); `language` is kept as the first one for any caller
+// that only needs a single value. Everything that isn't a language is a tag.
 function splitCategories(cats) {
   const list = cats || [];
-  const language = list.find(c => LANGUAGE_VALUES.includes(c)) || '';
-  const tags = list.filter(c => c !== language);
-  return { language, tags };
+  const languages = list.filter(c => LANGUAGE_VALUES.includes(c));
+  const tags = list.filter(c => !LANGUAGE_VALUES.includes(c));
+  return { language: languages[0] || '', languages, tags };
+}
+async function loadLanguages_() {
+  try {
+    const res = await api('getLanguages', {});
+    const names = ((res && res.languages) || []).map(n => String(n || '').trim()).filter(Boolean);
+    if (!names.length) return;
+    LANGUAGE_VALUES = names;
+    // Re-render only views that show languages; never the edit form (it
+    // reads LANGUAGE_VALUES live when its picker list is redrawn, and a
+    // full re-render would wipe whatever is being typed).
+    if (view.name === 'categories' || view.name === 'list') render();
+    if (view.name === 'edit' && document.getElementById('pk_languages_list')) {
+      // A song's languages were split using the fallback list; re-split
+      // now that the real list is here, keeping any manual changes.
+      const all = editPick.languages.concat(editPick.tags);
+      editPick.languages = all.filter(x => LANGUAGE_VALUES.includes(x) || editPick.newLanguages.includes(x));
+      editPick.tags = all.filter(x => !editPick.languages.includes(x));
+      renderPicker_('languages'); renderPicker_('tags');
+    }
+  } catch (err) {
+    console.warn('Using the built-in language list:', err && err.message);
+  }
 }
 
 // A song's "artist" field is stored as one string, but can list more than
@@ -3733,9 +3811,9 @@ function songDaysAgoLabel(s) {
 
 function filteredSongs() {
   let list = songs.filter(s => {
-    const { language, tags } = splitCategories(s.categories);
+    const { languages, tags } = splitCategories(s.categories);
     if (filters.artist && !splitArtists(s.artist).includes(filters.artist)) return false;
-    if (filters.language && language !== filters.language) return false;
+    if (filters.language && !languages.includes(filters.language)) return false;
     if (filters.tag && !tags.includes(filters.tag)) return false;
     if (filters.q) {
       const q = filters.q.toLowerCase();
@@ -4149,8 +4227,8 @@ function renderArtistsGrid_() {
 function renderCategories() {
   const langCounts = {}, tagCounts = {};
   songs.forEach(s => {
-    const { language, tags } = splitCategories(s.categories);
-    if (language) langCounts[language] = (langCounts[language]||0)+1;
+    const { languages, tags } = splitCategories(s.categories);
+    languages.forEach(l => langCounts[l] = (langCounts[l]||0)+1);
     tags.forEach(t => tagCounts[t] = (tagCounts[t]||0)+1);
   });
   const langs = Object.keys(langCounts).sort((a,b)=>a.localeCompare(b));
@@ -4204,7 +4282,7 @@ function renderDetail() {
   const queuePrevId = hasQueue && view.queueIdx > 0 ? view.queue[view.queueIdx - 1] : null;
   const queueNextId = hasQueue && view.queueIdx < view.queue.length - 1 ? view.queue[view.queueIdx + 1] : null;
 
-  const { language, tags } = splitCategories(song.categories);
+  const { languages, tags } = splitCategories(song.categories);
 
   // The 4 action tiles are always Favorite/+Playlist/Report/Print - Report
   // always attributes to the real signed-in admin (createErrorReport uses
@@ -4296,7 +4374,7 @@ function renderDetail() {
 
     <div id="chartScroll" class="${playerState.showChords ? '' : 'hide-chords'}${playerState.playing ? ' chart-playing' : ''}" style="--chart-step:${playerState.fontSize||0}px;--chart-fw:${playerState.bold?700:400};">${contentReady ? renderChart(song.chords_lyrics, transpose) : '<div class="muted" style="padding:24px 4px">Loading chart…</div>'}</div>
     ${playerState.playing ? '' : `${ytId ? `<div class="yt-wrap"><iframe src="https://www.youtube.com/embed/${ytId}" allowfullscreen></iframe></div>` : ''}
-    <div class="grid-cats" style="margin-top:10px">${tags.map(t=>`<span class="chip">${escapeHtml(t)}</span>`).join('')}${language ? `<span class="chip">${escapeHtml(language)}</span>` : ''}</div>`}
+    <div class="grid-cats" style="margin-top:10px">${tags.map(t=>`<span class="chip">${escapeHtml(t)}</span>`).join('')}${languages.map(l=>`<span class="chip">${escapeHtml(l)}</span>`).join('')}</div>`}
     ${playerState.playing ? playFloatBarHtml() : ''}`;
 
   document.getElementById('app').innerHTML = html;
@@ -4609,7 +4687,7 @@ function renderEdit() {
     return;
   }
   const s = song || { title:'', title_hebrew:'', artist:'', artist_hebrew:'', categories:[], capo:0, youtube_url:'', chords_lyrics:'', lyrics_only:'' };
-  const { language, tags } = splitCategories(s.categories);
+  initEditPick_(s);
   const stored = s.chords_lyrics || '';
   const storedIsHtml = isHtmlChordFormat(stored);
   editChordMode = (stored === '' || storedIsHtml) ? 'simple' : 'raw';
@@ -4624,16 +4702,13 @@ function renderEdit() {
         <div><label>Title</label><input type="text" id="f_title" value="${escapeHtml(s.title)}" required></div>
         <div><label>Title (Hebrew, optional)</label><input type="text" id="f_title_hebrew" dir="auto" value="${escapeHtml(s.title_hebrew||'')}"></div>
       </div>
-      <div class="row">
-        <div><label>Artist</label><input type="text" id="f_artist" value="${escapeHtml(s.artist)}"></div>
-        <div><label>Artist (Hebrew, optional)</label><input type="text" id="f_artist_hebrew" dir="auto" value="${escapeHtml(s.artist_hebrew||'')}"></div>
-      </div>
+      ${pickerHtml_('artists', 'Artist(s)')}
       <div class="row">
         <div><label>YouTube URL (optional)</label><input type="text" id="f_youtube" value="${escapeHtml(s.youtube_url||'')}" placeholder="https://youtube.com/watch?v=…"></div>
       </div>
-      <div class="row">
-        <div><label>Language</label><input type="text" id="f_language" value="${escapeHtml(language)}" placeholder="e.g. Lashon Hakodesh, English, Yiddish"></div>
-        <div><label>Tags (comma separated)</label><input type="text" id="f_tags" value="${escapeHtml(tags.join(', '))}" placeholder="e.g. Shabbos, Wedding"></div>
+      <div class="row picker-row">
+        ${pickerHtml_('languages', 'Language(s)')}
+        ${pickerHtml_('tags', 'Tags')}
       </div>
       <div class="row">
         <div><label>Capo (fret the chords below assume)</label><input type="number" id="f_capo" value="${s.capo||0}" min="0" max="11"></div>
@@ -4672,6 +4747,7 @@ function renderEdit() {
       </div>
     </form>`;
   document.getElementById('app').innerHTML = html;
+  renderPicker_('artists'); renderPicker_('languages'); renderPicker_('tags');
 }
 function currentChordsLyricsValue() {
   return editChordMode === 'simple'
@@ -4715,24 +4791,251 @@ function setChordTextAlign(align) {
   document.getElementById('alignRightBtn').classList.toggle('active', align === 'right');
 }
 function updatePreview() { document.getElementById('previewChart').innerHTML = renderChart(currentChordsLyricsValue(), 0); }
+/* ============================================================
+   SONG EDIT FORM — artist / language / tag pickers
+   Each picker shows what's already in the catalog as a searchable
+   checkbox list, plus "+ Add new" for something that isn't there yet.
+   Values are passed through data-* attributes (read back via dataset)
+   rather than embedded in onclick strings, so names containing quotes
+   or apostrophes can't break the markup.
+   ============================================================ */
+let editPick = null;
+const PICKER_MAX_SHOWN = 80;
+
+// Most common Hebrew spelling seen for each English artist name, taken from
+// songs whose English and Hebrew artist lists line up one-to-one.
+function artistHebrewMap_() {
+  const tally = {};
+  songs.forEach(s => {
+    const en = splitArtists(s.artist), he = splitArtists(s.artist_hebrew);
+    if (!he.length || he.length !== en.length) return;
+    en.forEach((name, i) => {
+      if (!he[i] || he[i] === name) return;
+      const t = tally[name] || (tally[name] = {});
+      t[he[i]] = (t[he[i]] || 0) + 1;
+    });
+  });
+  const out = {};
+  Object.keys(tally).forEach(name => {
+    out[name] = Object.keys(tally[name]).sort((a, b) => tally[name][b] - tally[name][a])[0];
+  });
+  return out;
+}
+function initEditPick_(s) {
+  const { languages, tags } = splitCategories(s.categories);
+  const hm = artistHebrewMap_();
+  const en = splitArtists(s.artist), he = splitArtists(s.artist_hebrew);
+  editPick = {
+    artists: en.map((name, i) => {
+      let h = he[i] || hm[name] || '';
+      if (h === name) h = '';
+      return { en: name, he: h };
+    }),
+    languages: languages.slice(),
+    tags: tags.slice(),
+    newArtists: [], newLanguages: [], newTags: [],
+    q: { artists: '', languages: '', tags: '' },
+    adding: { artists: false, languages: false, tags: false },
+    hebrewMap: hm,
+  };
+}
+function pickerOptions_(kind) {
+  const counts = {};
+  if (kind === 'artists') {
+    songs.forEach(s => splitArtists(s.artist).forEach(a => counts[a] = (counts[a] || 0) + 1));
+    editPick.newArtists.forEach(a => { if (!(a in counts)) counts[a] = 0; });
+  } else if (kind === 'languages') {
+    LANGUAGE_VALUES.forEach(l => counts[l] = 0);
+    editPick.newLanguages.forEach(l => counts[l] = 0);
+    songs.forEach(s => splitCategories(s.categories).languages.forEach(l => counts[l] = (counts[l] || 0) + 1));
+  } else {
+    songs.forEach(s => splitCategories(s.categories).tags.forEach(t => counts[t] = (counts[t] || 0) + 1));
+    editPick.newTags.forEach(t => { if (!(t in counts)) counts[t] = 0; });
+    editPick.tags.forEach(t => { if (!(t in counts)) counts[t] = 0; });
+  }
+  let names = Object.keys(counts);
+  if (kind === 'languages') {
+    // Keep the language list in its own order (as set in the database).
+    const order = LANGUAGE_VALUES.concat(editPick.newLanguages);
+    names.sort((a, b) => (order.indexOf(a) + 1 || 9999) - (order.indexOf(b) + 1 || 9999) || a.localeCompare(b));
+  } else {
+    names.sort((a, b) => a.localeCompare(b));
+  }
+  return names.map(name => ({ name, count: counts[name], he: kind === 'artists' ? (editPick.hebrewMap[name] || '') : '' }));
+}
+function pickIsNew_(kind, name) {
+  const key = { artists: 'newArtists', languages: 'newLanguages', tags: 'newTags' }[kind];
+  return editPick[key].includes(name);
+}
+function pickIsSelected_(kind, name) {
+  return kind === 'artists' ? editPick.artists.some(a => a.en === name) : editPick[kind].includes(name);
+}
+function pickerHtml_(kind, label) {
+  const noun = { artists: 'artists', languages: 'languages', tags: 'tags' }[kind];
+  return `<div class="picker" id="pk_${kind}">
+    <label>${label}</label>
+    <div class="picker-selected" id="pk_${kind}_sel"></div>
+    <input type="text" class="picker-search" id="pk_${kind}_q" dir="auto" autocomplete="off" placeholder="Search ${noun}…"
+      data-kind="${kind}" oninput="editPick.q[this.dataset.kind]=this.value;renderPickerList_(this.dataset.kind);renderPickerAdd_(this.dataset.kind)"
+      onkeydown="if(event.key==='Enter'){event.preventDefault();}">
+    <div class="picker-list" id="pk_${kind}_list"></div>
+    <div class="picker-add" id="pk_${kind}_add"></div>
+  </div>`;
+}
+function renderPicker_(kind) {
+  renderPickerSelected_(kind); renderPickerList_(kind); renderPickerAdd_(kind);
+}
+function renderPickerSelected_(kind) {
+  const el = document.getElementById('pk_' + kind + '_sel');
+  if (!el) return;
+  if (kind === 'artists') {
+    el.innerHTML = editPick.artists.length ? editPick.artists.map((a, i) => `
+      <div class="picker-artist-row">
+        <span class="picker-artist-en" dir="auto">${escapeHtml(a.en)}</span>
+        <input type="text" dir="rtl" placeholder="Hebrew name" value="${escapeHtml(a.he)}" data-i="${i}"
+          oninput="editPick.artists[+this.dataset.i].he=this.value">
+        ${i > 0 ? `<button type="button" class="picker-mini" title="Move up" data-i="${i}" onclick="pickMoveArtistUp_(+this.dataset.i)">↑</button>` : '<span class="picker-mini-spacer"></span>'}
+        <button type="button" class="picker-mini" title="Remove" data-v="${escapeHtml(a.en)}" onclick="pickToggle_('artists', this.dataset.v)">×</button>
+      </div>`).join('') : '<div class="muted picker-empty">No artist picked yet.</div>';
+    return;
+  }
+  const list = editPick[kind];
+  el.innerHTML = list.length
+    ? list.map(v => `<span class="chip active picker-chip" dir="auto">${escapeHtml(v)} <button type="button" title="Remove" data-v="${escapeHtml(v)}" onclick="pickToggle_('${kind}', this.dataset.v)">×</button></span>`).join('')
+    : `<div class="muted picker-empty">None picked yet.</div>`;
+}
+function renderPickerList_(kind) {
+  const el = document.getElementById('pk_' + kind + '_list');
+  if (!el) return;
+  const q = (editPick.q[kind] || '').trim().toLowerCase();
+  let opts = pickerOptions_(kind);
+  if (q) opts = opts.filter(o => o.name.toLowerCase().includes(q) || (o.he && o.he.includes(editPick.q[kind].trim())));
+  const shown = opts.slice(0, PICKER_MAX_SHOWN);
+  el.innerHTML = shown.map(o => `
+    <label class="picker-opt">
+      <input type="checkbox" ${pickIsSelected_(kind, o.name) ? 'checked' : ''} data-v="${escapeHtml(o.name)}" onchange="pickToggle_('${kind}', this.dataset.v)">
+      <span dir="auto">${escapeHtml(o.name)}${o.he ? ` <span class="muted">·</span> <span class="muted" dir="rtl">${escapeHtml(o.he)}</span>` : ''}</span>
+      <span class="count">${pickIsNew_(kind, o.name) ? 'new' : (o.count || '')}</span>
+    </label>`).join('')
+    + (opts.length > shown.length ? `<div class="muted picker-more">Showing ${shown.length} of ${opts.length} — keep typing to narrow it down.</div>` : '')
+    + (!opts.length ? `<div class="muted picker-more">No matches.</div>` : '');
+}
+function renderPickerAdd_(kind) {
+  const el = document.getElementById('pk_' + kind + '_add');
+  if (!el) return;
+  const noun = { artists: 'artist', languages: 'language', tags: 'tag' }[kind];
+  const q = (editPick.q[kind] || '').trim();
+  if (!editPick.adding[kind]) {
+    el.innerHTML = `<button type="button" class="btn secondary picker-add-btn" onclick="pickStartAdd_('${kind}')">+ Add new ${noun}${q ? ` “${escapeHtml(q)}”` : ''}</button>`;
+    return;
+  }
+  if (kind === 'artists') {
+    el.innerHTML = `<div class="picker-add-form">
+      <input type="text" id="pk_artists_new_en" placeholder="English name" value="${escapeHtml(q)}">
+      <input type="text" id="pk_artists_new_he" dir="rtl" placeholder="Hebrew name">
+      <button type="button" class="btn" onclick="pickConfirmAdd_('artists')">Add</button>
+      <button type="button" class="btn secondary" onclick="pickCancelAdd_('artists')">Cancel</button>
+      <div class="error" id="pk_artists_add_err"></div>
+    </div>`;
+  } else {
+    el.innerHTML = `<div class="picker-add-form">
+      <input type="text" id="pk_${kind}_new" dir="auto" placeholder="New ${noun}" value="${escapeHtml(q)}"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();pickConfirmAdd_('${kind}');}">
+      <button type="button" class="btn" onclick="pickConfirmAdd_('${kind}')">Add</button>
+      <button type="button" class="btn secondary" onclick="pickCancelAdd_('${kind}')">Cancel</button>
+      <div class="error" id="pk_${kind}_add_err"></div>
+    </div>`;
+  }
+  const first = document.getElementById(kind === 'artists' ? 'pk_artists_new_en' : 'pk_' + kind + '_new');
+  if (first) first.focus();
+}
+function pickToggle_(kind, name) {
+  if (kind === 'artists') {
+    const i = editPick.artists.findIndex(a => a.en === name);
+    if (i >= 0) editPick.artists.splice(i, 1);
+    else editPick.artists.push({ en: name, he: editPick.hebrewMap[name] || '' });
+  } else {
+    const list = editPick[kind];
+    const i = list.indexOf(name);
+    if (i >= 0) list.splice(i, 1); else list.push(name);
+  }
+  renderPickerSelected_(kind); renderPickerList_(kind);
+}
+function pickMoveArtistUp_(i) {
+  if (i <= 0) return;
+  const a = editPick.artists;
+  [a[i - 1], a[i]] = [a[i], a[i - 1]];
+  renderPickerSelected_('artists');
+}
+function pickStartAdd_(kind) { editPick.adding[kind] = true; renderPickerAdd_(kind); }
+function pickCancelAdd_(kind) { editPick.adding[kind] = false; renderPickerAdd_(kind); }
+function pickConfirmAdd_(kind) {
+  const errEl = document.getElementById('pk_' + kind + '_add_err');
+  const fail = msg => { if (errEl) errEl.textContent = msg; };
+  const raw = document.getElementById(kind === 'artists' ? 'pk_artists_new_en' : 'pk_' + kind + '_new').value.trim().replace(/\s+/g, ' ');
+  if (!raw) return fail('Please type a name.');
+  // Artist names (and their Hebrew names) are stored comma-separated, and
+  // tags/languages were too in the old system - a comma would split it.
+  if (raw.includes(',')) return fail('Names can’t contain a comma.');
+  const existing = pickerOptions_(kind).find(o => o.name.toLowerCase() === raw.toLowerCase());
+  const name = existing ? existing.name : raw;
+  if (kind === 'artists') {
+    const he = document.getElementById('pk_artists_new_he').value.trim().replace(/\s+/g, ' ');
+    if (he.includes(',')) return fail('Names can’t contain a comma.');
+    if (!existing) editPick.newArtists.push(name);
+    const cur = editPick.artists.find(a => a.en === name);
+    if (cur) { if (he) cur.he = he; }
+    else editPick.artists.push({ en: name, he: he || editPick.hebrewMap[name] || '' });
+  } else {
+    if (kind === 'languages' && !existing && pickerOptions_('tags').some(o => o.name.toLowerCase() === raw.toLowerCase())) {
+      return fail('“' + raw + '” is already used as a tag. Pick it under Tags instead.');
+    }
+    if (kind === 'tags' && !existing && pickerOptions_('languages').some(o => o.name.toLowerCase() === raw.toLowerCase())) {
+      return fail('“' + raw + '” is a language. Pick it under Language(s) instead.');
+    }
+    if (!existing) editPick[kind === 'languages' ? 'newLanguages' : 'newTags'].push(name);
+    if (!editPick[kind].includes(name)) editPick[kind].push(name);
+  }
+  editPick.adding[kind] = false;
+  editPick.q[kind] = '';
+  const qEl = document.getElementById('pk_' + kind + '_q');
+  if (qEl) qEl.value = '';
+  renderPicker_(kind);
+}
+// Builds songs.artist / songs.artist_hebrew from the picked artists, in
+// order. Hebrew names pair up by position (see songDisplayArtist_), so an
+// artist without a Hebrew name gets its English name in that slot rather
+// than being skipped - skipping would shift every Hebrew name after it.
+function pickedArtistField_(which) {
+  const list = editPick.artists.map(a => ({ en: a.en.trim(), he: a.he.trim().replace(/,/g, ' ') })).filter(a => a.en);
+  if (which === 'en') return list.map(a => a.en).join(', ');
+  if (!list.some(a => a.he)) return '';
+  return list.map(a => a.he || a.en).join(', ');
+}
+
 function saveSong(evt, id) {
   evt.preventDefault();
   const song = {
     id: id || undefined,
     title: document.getElementById('f_title').value.trim(),
     title_hebrew: document.getElementById('f_title_hebrew').value.trim(),
-    artist: document.getElementById('f_artist').value.trim(),
-    artist_hebrew: document.getElementById('f_artist_hebrew').value.trim(),
-    categories: [document.getElementById('f_language').value.trim()].concat(
-      document.getElementById('f_tags').value.split(',').map(t=>t.trim())
-    ).filter(Boolean),
+    artist: pickedArtistField_('en'),
+    artist_hebrew: pickedArtistField_('he'),
+    categories: Array.from(new Set(editPick.languages.concat(editPick.tags).map(x => x.trim()).filter(Boolean))),
     capo: Number(document.getElementById('f_capo').value) || 0,
     youtube_url: document.getElementById('f_youtube').value.trim(),
     chords_lyrics: currentChordsLyricsValue()
   };
   const statusEl = document.getElementById('saveStatus');
   statusEl.textContent = 'Saving…'; statusEl.className = 'status';
-  api(id ? 'updateSong' : 'createSong', { song })
+  // Any language added on this form gets saved to the language list first,
+  // so the song's new language is recognised as a language (not a tag)
+  // everywhere else in the app.
+  const newLangs = editPick.newLanguages.filter(l => editPick.languages.includes(l));
+  (newLangs.length ? api('addLanguages', { names: newLangs }).then(() => {
+      newLangs.forEach(l => { if (!LANGUAGE_VALUES.includes(l)) LANGUAGE_VALUES.push(l); });
+    }) : Promise.resolve())
+    .then(() => api(id ? 'updateSong' : 'createSong', { song }))
     .then(() => {
       // The save just succeeded on the server, but this song's chart text
       // may already be sitting in songContentById from before the edit
