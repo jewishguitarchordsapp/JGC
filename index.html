@@ -5656,7 +5656,7 @@ function threadModalHtml() {
     <div class="muted" style="margin-top:-10px;margin-bottom:12px;font-size:12.5px;">${escapeHtml(chatTarget.email)}</div>
     <div class="chat-thread" id="adminChatThread">${renderChatMessages(active ? active.msgs : [])}</div>
     <div style="display:flex;gap:8px;margin-bottom:14px;align-items:flex-end;"><textarea id="adminChatInput" placeholder="Reply…" style="flex:1;min-height:64px;max-height:200px;font-family:inherit;font-size:14px;resize:vertical;" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAdminReply();}"></textarea><button class="btn" onclick="sendAdminReply()">Send</button></div>
-    <div class="modal-actions"><button class="btn secondary" onclick="setThreadArchived(${JSON.stringify(chatTarget.email)},${active && active.archived ? 'false' : 'true'})">${active && active.archived ? 'Unarchive' : 'Archive'} conversation</button><button class="btn secondary" onclick="closeModal()">Close</button></div>`;
+    <div class="modal-actions"><button class="btn secondary" onclick='setThreadArchived(${JSON.stringify(chatTarget.email)},${active && active.archived ? 'false' : 'true'})'>${active && active.archived ? 'Unarchive' : 'Archive'} conversation</button><button class="btn secondary" onclick="closeModal()">Close</button></div>`;
 }
 function openThreadModal(email, name) {
   chatTarget = { email, name };
