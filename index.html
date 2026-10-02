@@ -222,6 +222,9 @@
   .picker-opt .count{font-size:11px;color:var(--muted);flex:none;}
   .picker-more{font-size:12px;padding:6px 10px;}
   .picker-add{margin-top:6px;}
+  .picker-pills{margin:0 -3px;}
+  .picker-pills .chip{user-select:none;}
+  .chip.chip-add{background:#fff;border-style:dashed;border-color:var(--teal);color:var(--teal-dark);}
   .picker-add-btn{padding:6px 10px;font-size:13px;}
   .picker-add-form{display:flex;flex-wrap:wrap;gap:6px;align-items:center;}
   .picker-add-form input[type=text]{flex:1;min-width:120px;}
@@ -294,6 +297,20 @@
   .msg.user{align-self:flex-start;background:#eef2f2;}
   .msg.admin{align-self:flex-end;background:var(--teal);color:#fff;}
   .msg .meta{font-size:11px;opacity:0.7;margin-top:3px;}
+  .reply-ref{border-radius:8px;padding:6px 10px;margin-bottom:6px;font-size:13px;background:#fff;border:1px solid var(--border);border-left:3px solid var(--teal);color:var(--text);}
+  .msg.admin .reply-ref{background:rgba(255,255,255,0.16);border-color:rgba(255,255,255,0.35);border-left-color:#fff;color:#fff;}
+  .reply-ref-kind{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;opacity:.75;}
+  .reply-ref-label{margin:1px 0 2px;overflow-wrap:anywhere;}
+  .reply-ref-link{font-size:12.5px;font-weight:600;cursor:pointer;color:var(--accent);text-decoration:underline;}
+  .msg.admin .reply-ref-link{color:#fff;}
+  .reply-ref-draft{display:flex;flex-direction:column;align-items:flex-start;gap:4px;margin-bottom:8px;}
+  .reply-ref-draft .reply-ref{max-width:100%;margin-bottom:0;}
+  .focus-banner{background:#fff8e1;border:1px solid #f0d98a;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:13.5px;}
+  tr.row-flash td{background:#fff3c4;transition:background .4s;}
+  th.sortable-th{cursor:pointer;user-select:none;white-space:nowrap;}
+  th.sortable-th:hover{color:var(--accent);}
+  td.num,th.num{text-align:right;}
+  td.num.sorted{font-weight:700;}
   .thread-list-item{padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;cursor:pointer;display:flex;justify-content:space-between;}
   .thread-list-item.active{border-color:var(--teal);background:#eef4f4;}
   .signin-gate{text-align:center;padding:30px;color:var(--muted);}
@@ -979,11 +996,13 @@ function adminSectionFor_(tab) {
   return Object.keys(ADMIN_SECTIONS).find(sec => ADMIN_SECTIONS[sec].tabs.includes(tab)) || 'communication';
 }
 function goAdminSection(section) {
+  requestsFocusId = null; errorsFocusId = null;
   adminSection = section;
   adminTab = ADMIN_SECTIONS[section].default;
   render();
 }
 function goAdminTab(tab) {
+  requestsFocusId = null; errorsFocusId = null;
   adminTab = tab;
   render();
 }
@@ -1097,10 +1116,12 @@ let adminRequestsPage = 0;
 let adminErrorsPage = 0;
 let adminMessagesPage = 0; // paginates the admin Messages tab's conversation list, 10/page
 let adminTopSongsPage = 0; // paginates the admin Top Songs tab's "Top Opens" column
-let adminTopSongsPage2 = 0; // paginates its "Top Opens by Unique Users" column
+let adminTopSongsSort = 'view_count'; // which column the Top Songs table ranks by: 'view_count' | 'unique_view_count'
 let requestsFilter = [];  // multi-select subset of 'pending'/'added'/'declined'/'archived' — empty means all non-archived
 let errorsFilter = [];    // multi-select subset of 'open'/'resolved'/'archived' — empty means all non-archived
 let messagesFilter = 'all';  // 'all' | 'unread' | 'archived'
+let requestsFocusId = null; // set when opened from a message's "View request" link - shows just that one request
+let errorsFocusId = null;   // same, for "View error report"
 let requestsSearch = '';   // admin Requests tab free-text search (song/artist/requester/note)
 let errorsSearch = '';     // admin Error Reports tab free-text search (song/artist/reporter/description)
 let messagesSearch = '';   // admin Messages tab free-text search (name/email/message text)
@@ -1696,11 +1717,24 @@ async function supaApi(action, fields) {
     // only for the one song actually being viewed (songContent) or once
     // lyrics search is actually used (listContent).
     const data = await supaCached_(() => _supaListCache, c => _supaListCache = c, async () => {
-      const { data, error } = await supaSelectAll_((from, to) => getSupa_().from('songs')
-        .select('id,title,title_hebrew,artist,artist_hebrew,categories,capo,youtube_url,date_added,updated_at,chords_used,view_count,unique_view_count')
-        .order('id').range(from, to));
-      throwIfErr_(error);
-      return data;
+      // If a newer optional column (e.g. unique_view_count, added by a SQL
+      // file that hasn't been run yet) doesn't exist, drop just that column
+      // and retry rather than failing the whole song list - the app then
+      // simply shows 0 for that number until the SQL is run.
+      let cols = ['id','title','title_hebrew','artist','artist_hebrew','categories','capo','youtube_url','date_added','updated_at','chords_used','view_count','unique_view_count'];
+      const optional = ['artist_hebrew','chords_used','view_count','unique_view_count'];
+      for (let attempt = 0; ; attempt++) {
+        const { data, error } = await supaSelectAll_((from, to) => getSupa_().from('songs')
+          .select(cols.join(',')).order('id').range(from, to));
+        const missing = error && /column songs\.(\w+) does not exist/.exec(error.message || '');
+        if (missing && optional.includes(missing[1]) && cols.includes(missing[1]) && attempt < optional.length) {
+          console.warn('songs.' + missing[1] + ' is missing - loading songs without it. Run the matching SQL file to add it.');
+          cols = cols.filter(x => x !== missing[1]);
+          continue;
+        }
+        throwIfErr_(error);
+        return data;
+      }
     });
     return { success: true, songs: data.map(s => ({
       id: s.id, title: s.title, title_hebrew: s.title_hebrew || '', artist: s.artist || '', artist_hebrew: s.artist_hebrew || '',
@@ -2193,10 +2227,26 @@ async function supaApi(action, fields) {
       targetProfile = me;
     }
     const sender = isViewAsSend ? 'user' : ((me.is_admin && fields.target_email) ? 'admin' : 'user');
-    const { error } = await getSupa_().from('messages').insert({
+    const row = {
       user_id: targetProfile.id, sender, text: fields.text || '',
       read_by_admin: sender === 'admin', // an admin's own reply is implicitly already "read" by the admin who sent it
-    });
+    };
+    // Reference to the Song Request / Error Report this reply is about (shown
+    // as a separate linked box above the message - see replyRefBoxHtml_).
+    const ref = fields.reply_to;
+    if (ref && (ref.type === 'request' || ref.type === 'error') && ref.id) {
+      row.reply_to_type = ref.type; row.reply_to_id = ref.id;
+      row.reply_to_label = String(ref.label || '').slice(0, 200);
+      row.reply_to_song_id = ref.song_id || null;
+    }
+    let { error } = await getSupa_().from('messages').insert(row);
+    if (error && row.reply_to_type && /reply_to_/.test(error.message || '')) {
+      // add_message_reply_to.sql hasn't been run yet - don't lose the
+      // message: send it with the old-style "Re:" line in the text instead.
+      const plain = { user_id: row.user_id, sender: row.sender, read_by_admin: row.read_by_admin,
+        text: 'Re: ' + row.reply_to_label + '\n\n' + row.text };
+      ({ error } = await getSupa_().from('messages').insert(plain));
+    }
     throwIfErr_(error);
     return { success: true };
   }
@@ -2279,6 +2329,8 @@ function supaMessageToOld_(m, emailMap) {
     sender: m.sender, text: m.text, created_at: m.created_at,
     archived: supaBool_(m.archived), read_by_admin: supaBool_(m.read_by_admin),
     edited_at: m.edited_at || null,
+    reply_to_type: m.reply_to_type || null, reply_to_id: m.reply_to_id || null,
+    reply_to_label: m.reply_to_label || '', reply_to_song_id: m.reply_to_song_id || null,
   };
 }
 function supaErrorToOld_(e, emailMap) {
@@ -4706,10 +4758,8 @@ function renderEdit() {
       <div class="row">
         <div><label>YouTube URL (optional)</label><input type="text" id="f_youtube" value="${escapeHtml(s.youtube_url||'')}" placeholder="https://youtube.com/watch?v=…"></div>
       </div>
-      <div class="row picker-row">
-        ${pickerHtml_('languages', 'Language(s)')}
-        ${pickerHtml_('tags', 'Tags')}
-      </div>
+      ${pickerHtml_('languages', 'Language(s)')}
+      ${pickerHtml_('tags', 'Tags')}
       <div class="row">
         <div><label>Capo (fret the chords below assume)</label><input type="number" id="f_capo" value="${s.capo||0}" min="0" max="11"></div>
       </div>
@@ -4872,6 +4922,13 @@ function pickIsSelected_(kind, name) {
 }
 function pickerHtml_(kind, label) {
   const noun = { artists: 'artists', languages: 'languages', tags: 'tags' }[kind];
+  // Languages and tags are tap-to-toggle pills (same look as the
+  // Categories page) - no search box or dropdown list.
+  if (kind !== 'artists') return `<div class="picker" id="pk_${kind}">
+    <label>${label} <span class="muted" style="font-size:12px;">— tap to pick as many as you like</span></label>
+    <div class="grid-cats picker-pills" id="pk_${kind}_list"></div>
+    <div class="picker-add" id="pk_${kind}_add"></div>
+  </div>`;
   return `<div class="picker" id="pk_${kind}">
     <label>${label}</label>
     <div class="picker-selected" id="pk_${kind}_sel"></div>
@@ -4907,6 +4964,15 @@ function renderPickerSelected_(kind) {
 function renderPickerList_(kind) {
   const el = document.getElementById('pk_' + kind + '_list');
   if (!el) return;
+  if (kind !== 'artists') {
+    const opts = pickerOptions_(kind);
+    el.innerHTML = opts.map(o => {
+      const on = pickIsSelected_(kind, o.name);
+      return `<span class="chip${on ? ' active' : ''}" role="button" tabindex="0" aria-pressed="${on}" dir="auto" data-v="${escapeHtml(o.name)}"
+        onclick="pickToggle_('${kind}', this.dataset.v)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();pickToggle_('${kind}', this.dataset.v)}">${on ? '✓ ' : ''}${escapeHtml(o.name)} <span class="count">${pickIsNew_(kind, o.name) ? '(new)' : (o.count ? '(' + o.count + ')' : '')}</span></span>`;
+    }).join('') || `<span class="muted">None yet.</span>`;
+    return;
+  }
   const q = (editPick.q[kind] || '').trim().toLowerCase();
   let opts = pickerOptions_(kind);
   if (q) opts = opts.filter(o => o.name.toLowerCase().includes(q) || (o.he && o.he.includes(editPick.q[kind].trim())));
@@ -4926,7 +4992,9 @@ function renderPickerAdd_(kind) {
   const noun = { artists: 'artist', languages: 'language', tags: 'tag' }[kind];
   const q = (editPick.q[kind] || '').trim();
   if (!editPick.adding[kind]) {
-    el.innerHTML = `<button type="button" class="btn secondary picker-add-btn" onclick="pickStartAdd_('${kind}')">+ Add new ${noun}${q ? ` “${escapeHtml(q)}”` : ''}</button>`;
+    el.innerHTML = kind === 'artists'
+      ? `<button type="button" class="btn secondary picker-add-btn" onclick="pickStartAdd_('${kind}')">+ Add new ${noun}${q ? ` “${escapeHtml(q)}”` : ''}</button>`
+      : `<span class="chip chip-add" role="button" tabindex="0" onclick="pickStartAdd_('${kind}')" onkeydown="if(event.key==='Enter'){pickStartAdd_('${kind}')}">+ New ${noun}</span>`;
     return;
   }
   if (kind === 'artists') {
@@ -5542,7 +5610,7 @@ function renderContactBody() {
   html += `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h2 style="margin:0">${requestsHeading}</h2><button class="btn" onclick="openRequestSongModal()">+ Request a Song</button></div>
       <p class="muted">Up to 2 requests per week.</p>`;
   html += `<div class="table-wrap"><table><tr><th>Status</th><th>Song</th><th>Artist</th></tr>
-      ${pageSlice(myRequests, contactRequestsPage, 10).map(r => `<tr><td><span class="badge ${r.status}" title="${escapeHtml(r.status)}">${requestStatusSymbol(r.status)}</span>${r.status==='declined' && r.decline_reason ? `<br><span class="muted" style="font-size:11.5px;">${escapeHtml(r.decline_reason)}</span>` : ''}</td><td>${escapeHtml(r.song_title)}</td><td>${escapeHtml(r.artist)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No requests yet.</td></tr>'}
+      ${pageSlice(myRequests, contactRequestsPage, 10).map(r => `<tr data-req-id="${escapeHtml(r.id)}"><td><span class="badge ${r.status}" title="${escapeHtml(r.status)}">${requestStatusSymbol(r.status)}</span>${r.status==='declined' && r.decline_reason ? `<br><span class="muted" style="font-size:11.5px;">${escapeHtml(r.decline_reason)}</span>` : ''}</td><td>${escapeHtml(r.song_title)}</td><td>${escapeHtml(r.artist)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No requests yet.</td></tr>'}
       </table></div>
       ${pagerHtml(myRequests.length, contactRequestsPage, 'changeContactRequestsPage', 10)}`;
   // The chat card is a clickable preview that expands into the full thread —
@@ -5575,6 +5643,48 @@ function renderContactBody() {
 }
 function changeContactRequestsPage(p) { contactRequestsPage = p; renderContactBody(); }
 function toggleContactChat() { contactChatOpen = !contactChatOpen; renderContactBody(); }
+// The "Re: Song Request / Error Report" reference on a message, drawn as its
+// own small box with a link, separate from the message text itself.
+// ctx 'admin' (the admin's thread modal) links to the request/error in the
+// admin panel; ctx 'user' (Contact page, incl. View As) links to the
+// user's own request row, or for an error report, to the song.
+function replyRefBoxHtml_(m, ctx) {
+  const isReq = m.reply_to_type === 'request';
+  const kind = isReq ? 'Song Request' : 'Error Report';
+  let label = String(m.reply_to_label || kind);
+  if (label.indexOf(kind + ' – ') === 0) label = label.slice(kind.length + 3);
+  const canLink = ctx === 'admin' || isReq || (m.reply_to_song_id && songs.some(s => s.id === m.reply_to_song_id));
+  const linkText = ctx === 'admin' ? (isReq ? 'View request' : 'View error report') : (isReq ? 'View request' : 'Go to song');
+  return `<div class="reply-ref">
+      <div class="reply-ref-kind">${isReq ? '♪' : '⚠'} ${kind}</div>
+      <div class="reply-ref-label" dir="auto">${escapeHtml(label)}</div>
+      ${canLink ? `<span class="reply-ref-link" data-ctx="${ctx}" data-type="${escapeHtml(m.reply_to_type)}" data-id="${escapeHtml(m.reply_to_id || '')}" data-song="${escapeHtml(m.reply_to_song_id || '')}" onclick="event.stopPropagation();openReplyRef_(this.dataset)">${linkText} ›</span>` : ''}
+    </div>`;
+}
+function clearReplyTo_() { if (chatTarget) chatTarget.replyTo = null; refreshThreadModalIfOpen(); }
+function openReplyRef_(d) {
+  if (d.ctx === 'admin') {
+    closeModal();
+    adminSection = 'communication';
+    if (d.type === 'request') { requestsFocusId = d.id; adminTab = 'requests'; adminRequestsPage = 0; }
+    else { errorsFocusId = d.id; adminTab = 'errors'; adminErrorsPage = 0; }
+    if (view.name !== 'admin') goTo('admin'); else render();
+    return;
+  }
+  if (d.type === 'error') { if (d.song) goTo('detail', { id: d.song }); return; }
+  focusContactRequest_(d.id);
+}
+// Jumps the Contact page's "My Song Requests" table to the page holding
+// this request and briefly highlights its row.
+function focusContactRequest_(id) {
+  const mine = effectiveRequests().slice().sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
+  const idx = mine.findIndex(r => r.id === id);
+  if (idx < 0) { alert('That request isn’t in the list anymore.'); return; }
+  contactRequestsPage = Math.floor(idx / 10);
+  renderContactBody();
+  const row = document.querySelector('tr[data-req-id="' + id + '"]');
+  if (row) { row.classList.add('row-flash'); row.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => row.classList.remove('row-flash'), 2500); }
+}
 function renderChatMessages(list, opts) {
   const editable = !!(opts && opts.editable);
   return list.slice().sort((a,b)=> new Date(a.created_at)-new Date(b.created_at))
@@ -5583,7 +5693,7 @@ function renderChatMessages(list, opts) {
       const editLink = (editable && m.sender === 'admin')
         ? ` · <span class="adv-link" onclick='startEditAdminMessage_(${escapeHtml(JSON.stringify(m.id))},${escapeHtml(JSON.stringify(m.text))})'>Edit</span>`
         : '';
-      return `<div class="msg ${m.sender}">${escapeHtml(m.text)}<div class="meta">${new Date(m.created_at).toLocaleString()}${editedTag}${editLink}</div></div>`;
+      return `<div class="msg ${m.sender}">${m.reply_to_type ? replyRefBoxHtml_(m, editable ? 'admin' : 'user') : ''}${escapeHtml(m.text)}<div class="meta">${new Date(m.created_at).toLocaleString()}${editedTag}${editLink}</div></div>`;
     }).join('') || '<div class="muted">No messages yet — say hi!</div>';
 }
 // Mirrors Code.gs's YOUTUBE_URL_RE — a shape check only (youtu.be/<id>,
@@ -5807,7 +5917,7 @@ function renderAdminRequests() {
   // cursor position while typing (replacing the box itself would).
   if (!document.getElementById('requestsSearchBox')) {
     body.innerHTML = `<div class="searchRow"><input type="text" id="requestsSearchBox" placeholder="Search requests…" value="${escapeHtml(requestsSearch)}"></div><div id="adminRequestsListWrap"></div>`;
-    document.getElementById('requestsSearchBox').addEventListener('input', e => { requestsSearch = e.target.value; adminRequestsPage = 0; requestsSelected.clear(); renderAdminRequestsList_(); });
+    document.getElementById('requestsSearchBox').addEventListener('input', e => { requestsFocusId = null; requestsSearch = e.target.value; adminRequestsPage = 0; requestsSelected.clear(); renderAdminRequestsList_(); });
   }
   renderAdminRequestsList_();
 }
@@ -5815,6 +5925,7 @@ function renderAdminRequests() {
 // below (bulk select-all, page-level select, bulk archive) instead of
 // threading it through onclick-string params.
 function requestsFilteredSorted_() {
+  if (requestsFocusId) return requestsCache.filter(r => r.id === requestsFocusId);
   return filterRequestsSearch_(filterRequests(requestsCache)).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
 }
 function toggleRequestRowSelected(id) {
@@ -5868,7 +5979,8 @@ function renderAdminRequestsList_() {
     requestsFilter, 'toggleRequestsFilter');
   const pageRows = pageSlice(filtered, adminRequestsPage);
   const pageAllSelected = pageRows.length > 0 && pageRows.every(r => requestsSelected.has(r.id));
-  wrap.innerHTML = filterBar + requestsBulkBarHtml_(filtered) + `<div class="table-wrap"><table><tr><th><input type="checkbox" ${pageAllSelected?'checked':''} onchange="toggleRequestsPageSelected(this.checked)" title="Select all on this page"></th><th>Status</th><th>Song</th><th>Artist</th><th>Requested by</th><th>Note</th><th>Requested</th><th></th></tr>` +
+  const focusBar = requestsFocusId ? `<div class="focus-banner">${filtered.length ? 'Showing the request this message is about.' : 'That request couldn’t be found (it may have been deleted).'} <span class="adv-link" onclick="requestsFocusId=null;renderAdminRequestsList_()">Show all requests</span></div>` : '';
+  wrap.innerHTML = focusBar + filterBar + requestsBulkBarHtml_(filtered) + `<div class="table-wrap"><table><tr><th><input type="checkbox" ${pageAllSelected?'checked':''} onchange="toggleRequestsPageSelected(this.checked)" title="Select all on this page"></th><th>Status</th><th>Song</th><th>Artist</th><th>Requested by</th><th>Note</th><th>Requested</th><th></th></tr>` +
     (pageRows.map(r => `<tr>
       <td><input type="checkbox" ${requestsSelected.has(r.id)?'checked':''} onchange="toggleRequestRowSelected('${r.id}')"></td>
       <td>${r.status==='pending'
@@ -5876,7 +5988,7 @@ function renderAdminRequestsList_() {
         : `<span class="badge ${r.status}" title="${escapeHtml(r.status)}">${requestStatusSymbol(r.status)}</span>${r.status==='declined' && r.decline_reason ? `<br><span class="muted" style="font-size:11.5px;">${escapeHtml(r.decline_reason)}</span>` : ''}`}</td>
       <td>${r.youtube_url ? `<a href="${escapeHtml(r.youtube_url)}" target="_blank" rel="noopener">${escapeHtml(r.song_title)}</a>` : escapeHtml(r.song_title)}${(r.categories||[]).length || r.lyrics ? `<br><span class="adv-link" onclick="viewRequestDetails('${r.id}')">Details</span>` : ''}</td>
       <td>${escapeHtml(r.artist)}</td>
-      <td>${escapeHtml(r.user_name)}<br><span class="muted">${escapeHtml(r.user_email)}</span><br><span class="adv-link" onclick='openThreadModal(${escapeHtml(JSON.stringify(r.user_email))},${escapeHtml(JSON.stringify(r.user_name))},${escapeHtml(JSON.stringify('Re: Song Request - "' + r.song_title + '"'))})'>Message</span></td><td>${escapeHtml(r.note)}</td>
+      <td>${escapeHtml(r.user_name)}<br><span class="muted">${escapeHtml(r.user_email)}</span><br><span class="adv-link" onclick='openThreadModal(${escapeHtml(JSON.stringify(r.user_email))},${escapeHtml(JSON.stringify(r.user_name))},${escapeHtml(JSON.stringify({ type: 'request', id: r.id, label: 'Song Request – "' + r.song_title + '"' }))})'>Message</span></td><td>${escapeHtml(r.note)}</td>
       <td class="muted" style="white-space:nowrap;">${r.created_at ? new Date(r.created_at).toLocaleString() : ''}</td>
       <td><button class="status-icon-btn archive-action" onclick="setRequestArchived('${r.id}',${r.archived==='true'?'false':'true'})" title="${r.archived==='true'?'Unarchive':'Archive'}" aria-label="${r.archived==='true'?'Unarchive':'Archive'}">${r.archived==='true'?SVG_ICONS.unarchive:SVG_ICONS.archive}</button></td>
     </tr>`).join('') || `<tr><td colspan="8" class="muted">No requests${requestsFilter.length===0 && !requestsSearch?' yet':' match'}.</td></tr>`) + `</table></div>` +
@@ -6047,6 +6159,7 @@ function threadModalHtml() {
     <div class="muted" style="margin-top:-10px;margin-bottom:12px;font-size:12.5px;">${escapeHtml(chatTarget.email)}</div>
     <div class="chat-thread" id="adminChatThread">${renderChatMessages(active ? active.msgs : [], { editable: true })}</div>
     ${editingMessageId ? `<div class="muted" style="font-size:12px;margin-bottom:6px;">Editing your message below — <span class="adv-link" onclick="cancelEditAdminMessage_()">Cancel</span></div>` : ''}
+    ${!editingMessageId && chatTarget.replyTo ? `<div class="reply-ref-draft"><span class="muted" style="font-size:12px;">Replying about:</span>${replyRefBoxHtml_({ reply_to_type: chatTarget.replyTo.type, reply_to_id: chatTarget.replyTo.id, reply_to_label: chatTarget.replyTo.label, reply_to_song_id: chatTarget.replyTo.song_id }, 'admin')}<span class="adv-link" style="font-size:12px;" onclick="clearReplyTo_()">Remove</span></div>` : ''}
     <div style="display:flex;gap:8px;margin-bottom:14px;align-items:flex-end;"><textarea id="adminChatInput" placeholder="Reply…" style="flex:1;min-height:64px;max-height:200px;font-family:inherit;font-size:14px;resize:vertical;" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAdminReply();}">${escapeHtml(prefillVal)}</textarea><button class="btn" onclick="sendAdminReply()">${editingMessageId ? 'Save' : 'Send'}</button></div>
     <div class="modal-actions"><button class="btn secondary" onclick='setThreadArchived(${escapeHtml(JSON.stringify(chatTarget.email))},${active && active.archived ? 'false' : 'true'})'>${active && active.archived ? 'Unarchive' : 'Archive'} conversation</button><button class="btn secondary" onclick="closeModal()">Close</button></div>`;
 }
@@ -6058,7 +6171,11 @@ function threadModalHtml() {
 let editingMessageId = null; // id of the admin's OWN message currently being edited, if any - see startEditAdminMessage_()/cancelEditAdminMessage_()/sendAdminReply()
 function openThreadModal(email, name, prefill) {
   editingMessageId = null;
-  chatTarget = { email, name, prefill: prefill || '' };
+  // From a Song Request / Error Report row, the 3rd argument is a reference
+  // object ({type, id, label, song_id}) - kept separate from the typed text
+  // and shown as its own box (see replyRefBoxHtml_), not pasted into it.
+  const replyTo = (prefill && typeof prefill === 'object') ? prefill : null;
+  chatTarget = { email, name, prefill: replyTo ? '' : (prefill || ''), replyTo };
   const afterMessagesReady_ = () => {
     openModal(threadModalHtml());
     const t = document.getElementById('adminChatThread'); if (t) t.scrollTop = t.scrollHeight;
@@ -6122,7 +6239,9 @@ function sendAdminReply() {
     }).catch(err => alert(err.message));
     return;
   }
-  api('sendMessage', { text, target_email: chatTarget.email, target_name: chatTarget.name }).then(() => api('getMessages', {})).then(data => {
+  const replyTo = chatTarget.replyTo || null;
+  chatTarget.replyTo = null;
+  api('sendMessage', { text, target_email: chatTarget.email, target_name: chatTarget.name, reply_to: replyTo }).then(() => api('getMessages', {})).then(data => {
     messagesCache = data.messages || [];
     messagesLoaded = true;
     refreshThreadModalIfOpen();
@@ -6164,6 +6283,7 @@ function filterErrorsSearch_(list) {
     (e.user_name||'').toLowerCase().includes(q) || (e.user_email||'').toLowerCase().includes(q) || (e.description||'').toLowerCase().includes(q));
 }
 function errorsFilteredSorted_() {
+  if (errorsFocusId) return errorsCache.filter(e => e.id === errorsFocusId);
   return filterErrorsSearch_(filterErrors(errorsCache)).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
 }
 function renderAdminErrors() {
@@ -6173,7 +6293,7 @@ function renderAdminErrors() {
   // never replaced, so typing doesn't get interrupted by re-renders.
   if (!document.getElementById('errorsSearchBox')) {
     body.innerHTML = `<div class="searchRow"><input type="text" id="errorsSearchBox" placeholder="Search error reports…" value="${escapeHtml(errorsSearch)}"></div><div id="adminErrorsListWrap"></div>`;
-    document.getElementById('errorsSearchBox').addEventListener('input', e => { errorsSearch = e.target.value; adminErrorsPage = 0; errorsSelected.clear(); renderAdminErrorsList_(); });
+    document.getElementById('errorsSearchBox').addEventListener('input', e => { errorsFocusId = null; errorsSearch = e.target.value; adminErrorsPage = 0; errorsSelected.clear(); renderAdminErrorsList_(); });
   }
   renderAdminErrorsList_();
 }
@@ -6224,12 +6344,13 @@ function renderAdminErrorsList_() {
     errorsFilter, 'toggleErrorsFilter');
   const pageRows = pageSlice(filtered, adminErrorsPage);
   const pageAllSelected = pageRows.length > 0 && pageRows.every(e => errorsSelected.has(e.id));
-  wrap.innerHTML = filterBar + errorsBulkBarHtml_(filtered) + `<div class="table-wrap"><table><tr><th><input type="checkbox" ${pageAllSelected?'checked':''} onchange="toggleErrorsPageSelected(this.checked)" title="Select all on this page"></th><th>Status</th><th>Song</th><th>Reported by</th><th>Description</th><th>Reported</th><th></th></tr>` +
+  const focusBar = errorsFocusId ? `<div class="focus-banner">${filtered.length ? 'Showing the error report this message is about.' : 'That error report couldn’t be found (it may have been deleted).'} <span class="adv-link" onclick="errorsFocusId=null;renderAdminErrorsList_()">Show all error reports</span></div>` : '';
+  wrap.innerHTML = focusBar + filterBar + errorsBulkBarHtml_(filtered) + `<div class="table-wrap"><table><tr><th><input type="checkbox" ${pageAllSelected?'checked':''} onchange="toggleErrorsPageSelected(this.checked)" title="Select all on this page"></th><th>Status</th><th>Song</th><th>Reported by</th><th>Description</th><th>Reported</th><th></th></tr>` +
     (pageRows.map(e => `<tr>
       <td><input type="checkbox" ${errorsSelected.has(e.id)?'checked':''} onchange="toggleErrorRowSelected('${e.id}')"></td>
       <td><button class="status-icon-btn ${e.status}" onclick="setErrorStatus('${e.id}','${e.status==='open'?'resolved':'open'}')" title="${e.status==='open'?'Mark resolved':'Mark open'}" aria-label="${e.status==='open'?'Mark resolved':'Mark open'}">${e.status==='open'?SVG_ICONS.statusOpen:SVG_ICONS.statusResolved}</button></td>
       <td>${escapeHtml(e.song_title)}<br><span class="muted">${escapeHtml(e.artist)}</span>${e.song_id && songs.some(s=>s.id===e.song_id) ? `<br><span class="adv-link" onclick="goTo('detail',{id:'${e.song_id}',backTo:'errorReport'})">Go to song</span>` : ''}</td>
-      <td>${escapeHtml(e.user_name)}<br><span class="muted">${escapeHtml(e.user_email)}</span><br><span class="adv-link" onclick='openThreadModal(${escapeHtml(JSON.stringify(e.user_email))},${escapeHtml(JSON.stringify(e.user_name))},${escapeHtml(JSON.stringify('Re: Error Report - ' + (e.description||'').slice(0,60)))})'>Message</span></td>
+      <td>${escapeHtml(e.user_name)}<br><span class="muted">${escapeHtml(e.user_email)}</span><br><span class="adv-link" onclick='openThreadModal(${escapeHtml(JSON.stringify(e.user_email))},${escapeHtml(JSON.stringify(e.user_name))},${escapeHtml(JSON.stringify({ type: 'error', id: e.id, song_id: e.song_id || null, label: 'Error Report – ' + (e.song_title ? '"' + e.song_title + '": ' : '') + (e.description||'').slice(0,60) }))})'>Message</span></td>
       <td>${escapeHtml(e.description)}</td>
       <td class="muted" style="white-space:nowrap;">${e.created_at ? new Date(e.created_at).toLocaleString() : ''}</td>
       <td><button class="status-icon-btn archive-action" onclick="setErrorArchived('${e.id}',${e.archived==='true'?'false':'true'})" title="${e.archived==='true'?'Unarchive':'Archive'}" aria-label="${e.archived==='true'?'Unarchive':'Archive'}">${e.archived==='true'?SVG_ICONS.unarchive:SVG_ICONS.archive}</button></td>
@@ -6252,31 +6373,32 @@ function setErrorArchived(id, archived) { api('archiveError', { id, archived }).
    song up) vs. distinct viewers (each person counts once no matter how
    often they reopen it) - each with its own sort and its own page.
    ============================================================ */
-function topSongsTableHtml_(metricKey, label, page, changeFn) {
-  const sorted = songs.slice().sort((a, b) => (b[metricKey] || 0) - (a[metricKey] || 0));
-  const rows = pageSlice(sorted, page).map((s, i) => `<tr>
-      <td class="muted">${page * PAGE_SIZE + i + 1}</td>
-      <td><span class="adv-link" onclick="goTo('detail',{id:'${s.id}'})">${escapeHtml(s.title)}</span></td>
-      <td>${escapeHtml(s.artist || '')}</td>
-      <td>${s[metricKey] || 0}</td>
-    </tr>`).join('') || `<tr><td colspan="4" class="muted">No songs yet.</td></tr>`;
-  return `<div style="flex:1 1 320px;min-width:280px;">
-      <div class="muted" style="margin-bottom:6px;font-weight:600;">${escapeHtml(label)}</div>
-      <div class="table-wrap"><table><tr><th>#</th><th>Song</th><th>Artist</th><th>Opens</th></tr>${rows}</table></div>
-      ${pagerHtml(sorted.length, page, changeFn)}
-    </div>`;
-}
+// One leaderboard with both numbers side by side: "Opens" counts every
+// time the song was opened (one fan opening it 5x a day for a week = 35),
+// "Unique users" counts each person once no matter how often they reopen
+// it. Click either column header to rank by it.
 function renderAdminTopSongs() {
   const body = document.getElementById('adminBody');
   if (!body) return;
   if (!songs.length) { body.innerHTML = '<div class="muted">Loading songs…</div>'; return; }
-  body.innerHTML = `<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start;">` +
-    topSongsTableHtml_('view_count', 'Top Opens', adminTopSongsPage, 'changeAdminTopSongsPage') +
-    topSongsTableHtml_('unique_view_count', 'Top Opens by Unique Users', adminTopSongsPage2, 'changeAdminTopSongsPage2') +
-    `</div>`;
+  const key = adminTopSongsSort;
+  const other = key === 'view_count' ? 'unique_view_count' : 'view_count';
+  const sorted = songs.slice().sort((a, b) => (b[key] || 0) - (a[key] || 0) || (b[other] || 0) - (a[other] || 0) || (a.title || '').localeCompare(b.title || ''));
+  const page = adminTopSongsPage;
+  const th = (k, label, title) => `<th class="sortable-th num${key === k ? ' sorted' : ''}" title="${title}" onclick="setAdminTopSongsSort('${k}')">${label}${key === k ? ' ▾' : ''}</th>`;
+  const rows = pageSlice(sorted, page).map((s, i) => `<tr>
+      <td class="muted">${page * PAGE_SIZE + i + 1}</td>
+      <td><span class="adv-link" onclick="goTo('detail',{id:'${s.id}'})">${escapeHtml(s.title)}</span></td>
+      <td>${escapeHtml(s.artist || '')}</td>
+      <td class="num${key === 'view_count' ? ' sorted' : ''}">${s.view_count || 0}</td>
+      <td class="num${key === 'unique_view_count' ? ' sorted' : ''}">${s.unique_view_count || 0}</td>
+    </tr>`).join('') || `<tr><td colspan="5" class="muted">No songs yet.</td></tr>`;
+  body.innerHTML = `<div class="muted" style="font-size:12.5px;margin-bottom:8px;"><b>Opens</b> counts every time a song was opened. <b>Unique users</b> counts each person once, however many times they open it. Click a column to rank by it.</div>
+    <div class="table-wrap"><table><tr><th>#</th><th>Song</th><th>Artist</th>${th('view_count', 'Opens', 'Total times opened')}${th('unique_view_count', 'Unique users', 'Different people who opened it')}</tr>${rows}</table></div>
+    ${pagerHtml(sorted.length, page, 'changeAdminTopSongsPage')}`;
 }
+function setAdminTopSongsSort(k) { adminTopSongsSort = k; adminTopSongsPage = 0; renderAdminTopSongs(); }
 function changeAdminTopSongsPage(p) { adminTopSongsPage = p; renderAdminTopSongs(); }
-function changeAdminTopSongsPage2(p) { adminTopSongsPage2 = p; renderAdminTopSongs(); }
 
 /* ============================================================
    STATS > OVERVIEW (admin) — total users plus a Daily/Weekly/Monthly/
