@@ -348,6 +348,11 @@
   #mainNav button svg{width:17px;height:17px;vertical-align:-3px;stroke:#fff;}
   .fav-btn svg{width:15px;height:14px;vertical-align:-2px;margin-right:5px;}
   .html-chord-row{position:relative;height:1.35em;font-family:"CustomCourier",'Courier New',monospace;color:var(--chord);font-weight:700;white-space:pre;line-height:1.35;font-size:calc(14px + var(--chart-step,0px));}
+  .line-editor{width:100%;min-height:220px;max-height:60vh;overflow:auto;border:1px solid var(--border);border-radius:7px;background:#fff;padding:9px 10px;font-family:"CustomCourier",'Courier New',monospace;font-size:14px;line-height:1.45;white-space:pre-wrap;word-break:normal;outline:none;}
+  .line-editor:focus{border-color:var(--teal);box-shadow:0 0 0 2px rgba(74,155,155,.2);}
+  .line-editor > div{min-height:1.45em;}
+  .line-editor > div.le-chord{color:var(--chord);font-weight:700;}
+  .line-editor > div.le-override{background:linear-gradient(to right, rgba(74,155,155,.07), rgba(74,155,155,.07));}
   .html-lyric-row{font-family:"CustomCourier",'Courier New',monospace;white-space:pre;line-height:1.35;font-size:calc(14px + var(--chart-step,0px));font-weight:var(--chart-fw,400);margin-bottom:5px;}
   .title-hebrew{color:var(--muted);font-size:13px;direction:rtl;}
   .home-tile{display:flex;align-items:flex-start;gap:14px;background:#f2f4f5;border:1px solid rgba(0,0,0,.10);border-radius:14px;padding:16px 18px;margin-bottom:12px;cursor:pointer;transition:background .15s ease;}
@@ -3267,9 +3272,12 @@ function renderChordHtmlBody(html, transposeSemitones) {
   return paragraphs.map((p, i) => {
     const cls = (p.className || '').toLowerCase();
     const text = texts[i];
-    if (text === '') return '<div class="chord-line">&nbsp;</div>';
+    // An empty line is one normal chart line tall (it used to use the much
+    // taller bracket-format .chord-line, which looked like a huge gap).
+    if (text === '') return '<div class="html-lyric-row html-blank-row">&nbsp;</div>';
     const isChordRow = cls.includes('red');
     let rtl = isRtl[i];
+    const ov = (p.getAttribute('data-align') || '').toLowerCase(); // per-line Left/Right set in the editor
     if (isChordRow && !rtl) {
       // Borrow direction from the next non-blank line (normally the lyric
       // line right below this chord line) so chords over Hebrew/Yiddish
@@ -3291,10 +3299,12 @@ function renderChordHtmlBody(html, transposeSemitones) {
       // row hugs changes, keeping chords over Hebrew/Yiddish lyrics right-
       // aligned (with each row's own natural spacing preserved) and chords
       // over English lyrics left-aligned.
+      if (ov === 'left' || ov === 'right') rtl = ov === 'right';
       const inner = renderFixedChordRow_(p.innerHTML, transposeSemitones || 0, rtl);
       return `<div class="html-chord-row" style="direction:ltr;">${inner}</div>`;
     }
-    const lyricAlignStyle = rtl ? 'direction:rtl;text-align:right;' : 'direction:ltr;text-align:left;';
+    const align = (ov === 'left' || ov === 'right') ? ov : (rtl ? 'right' : 'left');
+    const lyricAlignStyle = `direction:${rtl ? 'rtl' : 'ltr'};text-align:${align};`;
     return `<div class="html-lyric-row" style="${lyricAlignStyle}">${p.innerHTML}</div>`;
   }).join('');
 }
@@ -3923,24 +3933,171 @@ function looksLikeChordLine(line) {
   const tokens = t.split(/\s+/);
   return tokens.length > 0 && tokens.every(isChordToken);
 }
-function buildChordHtmlFromPlainText(text) {
+// aligns (optional): per-line 'left'/'right' overrides set in the editor,
+// indexed like the text's lines; saved as data-align on that line's <p>.
+function buildChordHtmlFromPlainText(text, aligns) {
   const lines = String(text || '').replace(/\r\n?/g, '\n').split('\n');
+  const al = i => { const a = aligns && aligns[i]; return (a === 'left' || a === 'right') ? ` data-align="${a}"` : ''; };
   const out = [];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (line.trim() === '') { out.push('<p class="black">&nbsp;</p>'); continue; }
     if (looksLikeChordLine(line)) {
-      out.push(`<p class="red">${escapeHtml(line)}</p>`);
+      out.push(`<p class="red"${al(i)}>${escapeHtml(line)}</p>`);
       if (i + 1 < lines.length) {
         const next = lines[i + 1];
-        out.push(`<p class="black">${next.trim() === '' ? '&nbsp;' : escapeHtml(next)}</p>`);
+        out.push(`<p class="black"${next.trim() === '' ? '' : al(i + 1)}>${next.trim() === '' ? '&nbsp;' : escapeHtml(next)}</p>`);
         i++;
       }
       continue;
     }
-    out.push(`<p class="black">${escapeHtml(line)}</p>`);
+    out.push(`<p class="black"${al(i)}>${escapeHtml(line)}</p>`);
   }
   return out.join('');
+}
+// The HTML chart format back into editor lines, keeping any per-line align.
+function htmlChordFormatToLines_(html) {
+  const container = document.createElement('div');
+  container.innerHTML = html;
+  return Array.from(container.querySelectorAll('p')).map(p => {
+    const t = (p.textContent || '').replace(/\u00a0/g, ' ');
+    const a = (p.getAttribute('data-align') || '').toLowerCase();
+    return { text: t.trim() === '' ? '' : t.replace(/\s+$/, ''), align: (a === 'left' || a === 'right') ? a : '' };
+  });
+}
+
+/* ---- Simple-mode line editor ------------------------------------------
+   A contenteditable box with one <div> per line, so each line can have its
+   own direction and alignment (a plain textarea can only do one for the
+   whole box). Plain text only - pasting strips formatting. The hidden
+   #f_chords_simple textarea is kept in sync and is what gets saved. */
+let editSimpleAligns = [];
+function lineEditorEl_() { return document.getElementById('f_chords_simple_ed'); }
+function initLineEditor_(lines) {
+  const ed = lineEditorEl_();
+  if (!ed) return;
+  try { document.execCommand('defaultParagraphSeparator', false, 'div'); } catch (e) {}
+  ed.addEventListener('input', onLineEditorInput_);
+  ed.addEventListener('paste', onLineEditorPaste_);
+  ed.addEventListener('drop', e => e.preventDefault());
+  ed.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && /^[biu]$/i.test(e.key)) e.preventDefault(); // no bold/italic/underline
+  });
+  lineEditorSetLines_(lines);
+}
+function lineEditorSetLines_(lines) {
+  const ed = lineEditorEl_();
+  if (!ed) return;
+  const list = (lines && lines.length) ? lines : [{ text: '', align: '' }];
+  ed.innerHTML = list.map(l => `<div${l.align ? ` data-align="${l.align}"` : ''}>${l.text ? escapeHtml(l.text) : '<br>'}</div>`).join('');
+  styleLineEditor_();
+  syncLineEditor_();
+}
+function normalizeLineEditor_() {
+  const ed = lineEditorEl_();
+  const ok = ed.childNodes.length > 0 && Array.from(ed.childNodes).every(n => n.nodeType === 1 && n.tagName === 'DIV' && !n.querySelector('div,p'));
+  if (ok) return;
+  const caret = lineEditorCaret_(true);
+  const text = (ed.innerText || '').replace(/\n$/, '');
+  ed.innerHTML = text.split('\n').map(t => `<div>${t ? escapeHtml(t) : '<br>'}</div>`).join('') || '<div><br></div>';
+  if (caret) setLineEditorCaret_(caret.line, caret.offset);
+}
+function lineEditorLines_() {
+  return Array.from(lineEditorEl_().children).map(d => ({ text: (d.textContent || '').replace(/\u00a0/g, ' '), align: d.getAttribute('data-align') || '' }));
+}
+function styleLineEditor_() {
+  const divs = Array.from(lineEditorEl_().children);
+  const texts = divs.map(d => (d.textContent || '').replace(/\u00a0/g, ' '));
+  divs.forEach((d, i) => {
+    const t = texts[i];
+    const isChord = t.trim() !== '' && looksLikeChordLine(t);
+    const heb = containsHebrew(t);
+    let rtl = heb;
+    if (isChord) { rtl = false; for (let j = i + 1; j < texts.length; j++) { if (texts[j].trim() !== '') { rtl = containsHebrew(texts[j]); break; } } }
+    const ov = d.getAttribute('data-align') || '';
+    d.style.direction = (heb && !isChord) ? 'rtl' : 'ltr';
+    d.style.textAlign = ov || (rtl ? 'right' : 'left');
+    d.classList.toggle('le-chord', isChord);
+    d.classList.toggle('le-override', !!ov);
+  });
+}
+function syncLineEditor_() {
+  const lines = lineEditorLines_();
+  const ta = document.getElementById('f_chords_simple');
+  if (ta) ta.value = lines.map(l => l.text).join('\n');
+  editSimpleAligns = lines.map(l => l.align);
+  if (document.getElementById('previewChart')) updatePreview();
+}
+function onLineEditorInput_() {
+  normalizeLineEditor_();
+  styleLineEditor_();
+  syncLineEditor_();
+}
+// Caret position as {line, offset}; `end` = the end of the selection.
+function lineEditorCaret_(atStart, useEnd) {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return null;
+  const ed = lineEditorEl_();
+  const r = sel.getRangeAt(0);
+  const container = useEnd ? r.endContainer : r.startContainer;
+  const off = useEnd ? r.endOffset : r.startOffset;
+  if (!ed.contains(container)) return null;
+  if (container === ed) return { line: Math.max(0, Math.min(off, ed.childNodes.length - 1)), offset: 0 };
+  let node = container;
+  while (node && node.parentNode !== ed) node = node.parentNode;
+  if (!node) return null;
+  const line = Array.prototype.indexOf.call(ed.childNodes, node);
+  const pre = document.createRange();
+  pre.selectNodeContents(node);
+  pre.setEnd(container, off);
+  return { line, offset: pre.toString().length };
+}
+function setLineEditorCaret_(line, offset) {
+  const ed = lineEditorEl_();
+  const div = ed.children[Math.max(0, Math.min(line, ed.children.length - 1))];
+  if (!div) return;
+  const range = document.createRange();
+  let remaining = offset, placed = false;
+  const walker = document.createTreeWalker(div, NodeFilter.SHOW_TEXT);
+  let n;
+  while ((n = walker.nextNode())) {
+    if (remaining <= n.length) { range.setStart(n, remaining); placed = true; break; }
+    remaining -= n.length;
+  }
+  if (!placed) { range.selectNodeContents(div); range.collapse(false); }
+  range.collapse(true);
+  const sel = window.getSelection();
+  sel.removeAllRanges(); sel.addRange(range);
+}
+function onLineEditorPaste_(e) {
+  e.preventDefault();
+  const text = ((e.clipboardData || window.clipboardData).getData('text/plain') || '').replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ');
+  normalizeLineEditor_();
+  const s = lineEditorCaret_(false, false), en = lineEditorCaret_(false, true);
+  const lines = lineEditorLines_();
+  if (!s || !en) { lineEditorSetLines_(lines.concat(text.split('\n').map(t => ({ text: t, align: '' })))); return; }
+  const before = (lines[s.line] ? lines[s.line].text : '').slice(0, s.offset);
+  const after = (lines[en.line] ? lines[en.line].text : '').slice(en.offset);
+  const pasted = text.split('\n');
+  const repl = pasted.map((t, i) => ({ text: (i === 0 ? before : '') + t + (i === pasted.length - 1 ? after : ''), align: i === 0 && lines[s.line] ? lines[s.line].align : '' }));
+  const next = lines.slice(0, s.line).concat(repl, lines.slice(en.line + 1));
+  lineEditorSetLines_(next);
+  const lastLine = s.line + pasted.length - 1;
+  setLineEditorCaret_(lastLine, (pasted.length === 1 ? before.length : 0) + pasted[pasted.length - 1].length);
+}
+// Left / Right / Auto buttons: apply to every line the selection touches.
+function setSelectedLinesAlign_(align) {
+  const ed = lineEditorEl_();
+  if (!ed) return;
+  const s = lineEditorCaret_(false, false), en = lineEditorCaret_(false, true);
+  if (!s || !en) { ed.focus(); return; }
+  for (let i = Math.min(s.line, en.line); i <= Math.max(s.line, en.line); i++) {
+    const d = ed.children[i];
+    if (!d) continue;
+    if (align) d.setAttribute('data-align', align); else d.removeAttribute('data-align');
+  }
+  styleLineEditor_();
+  syncLineEditor_();
 }
 // Plain lyrics from a chord chart: chord-only lines and [bracket] chords removed.
 function deriveLyricsOnly_(chart) {
@@ -5270,27 +5427,20 @@ function renderEdit() {
           <button type="button" id="modeSimpleBtn" class="${editChordMode==='simple'?'active':''}" onclick="setEditChordMode('simple')">Simple</button>
           <button type="button" id="modeRawBtn" class="${editChordMode==='raw'?'active':''}" onclick="setEditChordMode('raw')">Advanced</button>
         </div>
-        <div style="margin-left:auto;display:flex;gap:16px;flex-wrap:wrap;">
-          <div title="Which way typing/the cursor flows in the box below — switch to RTL while typing a Hebrew/Yiddish lyric line, back to LTR for a chord line.">
-            <span class="muted" style="font-size:12px;margin-right:4px;">Typing direction:</span>
-            <div class="subtabs" style="margin:0;display:inline-flex;">
-              <button type="button" id="dirLtrBtn" class="${editChordDir==='ltr'?'active':''}" onclick="setChordTextDir('ltr')">LTR</button>
-              <button type="button" id="dirRtlBtn" class="${editChordDir==='rtl'?'active':''}" onclick="setChordTextDir('rtl')">RTL</button>
-            </div>
-          </div>
-          <div title="Which edge the lines in the box hug — the final song page always right-aligns Hebrew/Yiddish lines, so switch this to Right to preview chord spacing the way it'll actually look.">
-            <span class="muted" style="font-size:12px;margin-right:4px;">Align:</span>
-            <div class="subtabs" style="margin:0;display:inline-flex;">
-              <button type="button" id="alignLeftBtn" class="${editChordAlign==='left'?'active':''}" onclick="setChordTextAlign('left')">Left</button>
-              <button type="button" id="alignRightBtn" class="${editChordAlign==='right'?'active':''}" onclick="setChordTextAlign('right')">Right</button>
-            </div>
+        <div id="lineAlignControls" style="margin-left:auto;" ${editChordMode==='simple'?'':'hidden'} title="Put the cursor on a line (or select several lines), then choose how they line up. Auto: Hebrew/Yiddish lines go right, English lines go left, and chord lines follow the lyric line under them.">
+          <span class="muted" style="font-size:12px;margin-right:4px;">Selected line(s):</span>
+          <div class="subtabs" style="margin:0;display:inline-flex;">
+            <button type="button" id="laAuto" onmousedown="event.preventDefault()" onclick="setSelectedLinesAlign_('')">Auto</button>
+            <button type="button" id="laLeft" onmousedown="event.preventDefault()" onclick="setSelectedLinesAlign_('left')">Left</button>
+            <button type="button" id="laRight" onmousedown="event.preventDefault()" onclick="setSelectedLinesAlign_('right')">Right</button>
           </div>
         </div>
       </div>
-      <div id="simpleHint" class="muted" style="margin:4px 0 6px;font-size:13px;" ${editChordMode==='simple'?'':'hidden'}>Type the chord line, then the lyric line right below it — just like on paper. Leave a blank line between sections. (No coloring or special formatting needed — this box is plain text.) Chord names are always English, so for a Hebrew/Yiddish song use the Typing direction / Align controls above to switch back and forth as you go.</div>
+      <div id="simpleHint" class="muted" style="margin:4px 0 6px;font-size:13px;" ${editChordMode==='simple'?'':'hidden'}>Type the chord line, then the lyric line right below it — just like on paper. Leave one empty line between sections. Each line sets itself up automatically: Hebrew/Yiddish lines go right-to-left, chord lines stay left-to-right and line up with the lyric line below them. To change how a line lines up, put the cursor on it (or select several lines) and tap <b>Left</b> or <b>Right</b>; <b>Auto</b> puts it back.</div>
       <div id="rawHint" class="muted" style="margin:4px 0 6px;font-size:13px;" ${editChordMode==='raw'?'':'hidden'}>Put each chord in brackets right before the word it plays over, e.g. <code>[D]ארבעים [G]יום</code> — or paste in HTML chord-chart markup directly.</div>
-      <textarea id="f_chords_simple" dir="${editChordDir}" style="text-align:${editChordAlign};" oninput="updatePreview()" ${editChordMode==='simple'?'':'hidden'}>${escapeHtml(simpleText)}</textarea>
-      <textarea id="f_chords_raw" dir="${editChordDir}" style="text-align:${editChordAlign};" oninput="updatePreview()" ${editChordMode==='raw'?'':'hidden'}>${escapeHtml(rawText)}</textarea>
+      <div id="f_chords_simple_ed" class="line-editor" contenteditable="true" spellcheck="false" ${editChordMode==='simple'?'':'hidden'}></div>
+      <textarea id="f_chords_simple" style="display:none;">${escapeHtml(simpleText)}</textarea>
+      <textarea id="f_chords_raw" style="unicode-bidi:plaintext;" oninput="updatePreview()" ${editChordMode==='raw'?'':'hidden'}>${escapeHtml(rawText)}</textarea>
       <div class="card preview-box"><div class="muted" style="margin-bottom:6px">Live preview</div><div id="previewChart">${renderChart(stored, 0)}</div></div>
       <div style="margin-top:14px;display:flex;gap:10px;align-items:center;">
         <button class="btn" type="submit">${song ? 'Save Changes' : 'Add Song'}</button>
@@ -5299,10 +5449,11 @@ function renderEdit() {
     </form>`;
   document.getElementById('app').innerHTML = html;
   renderPicker_('artists'); renderPicker_('languages'); renderPicker_('tags');
+  initLineEditor_(storedIsHtml ? htmlChordFormatToLines_(stored) : String(simpleText || '').split('\n').map(t => ({ text: t, align: '' })));
 }
 function currentChordsLyricsValue() {
   return editChordMode === 'simple'
-    ? buildChordHtmlFromPlainText(document.getElementById('f_chords_simple').value)
+    ? buildChordHtmlFromPlainText(document.getElementById('f_chords_simple').value, editSimpleAligns)
     : document.getElementById('f_chords_raw').value;
 }
 function setEditChordMode(mode) {
@@ -5310,12 +5461,13 @@ function setEditChordMode(mode) {
   const simpleEl = document.getElementById('f_chords_simple');
   const rawEl = document.getElementById('f_chords_raw');
   if (mode === 'raw') {
-    rawEl.value = buildChordHtmlFromPlainText(simpleEl.value);
+    rawEl.value = buildChordHtmlFromPlainText(simpleEl.value, editSimpleAligns);
   } else {
-    simpleEl.value = isHtmlChordFormat(rawEl.value) ? htmlChordFormatToPlainText(rawEl.value) : rawEl.value;
+    lineEditorSetLines_(isHtmlChordFormat(rawEl.value) ? htmlChordFormatToLines_(rawEl.value) : rawEl.value.split('\n').map(t => ({ text: t, align: '' })));
   }
   editChordMode = mode;
-  simpleEl.hidden = mode !== 'simple';
+  const edEl = document.getElementById('f_chords_simple_ed'); if (edEl) edEl.hidden = mode !== 'simple';
+  const laEl = document.getElementById('lineAlignControls'); if (laEl) laEl.hidden = mode !== 'simple';
   rawEl.hidden = mode !== 'raw';
   document.getElementById('simpleHint').hidden = mode !== 'simple';
   document.getElementById('rawHint').hidden = mode !== 'raw';
