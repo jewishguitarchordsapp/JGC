@@ -907,12 +907,13 @@ let playlists = [];
 let favorites = [];        // array of song ids the signed-in user favorited
 let knownChords = [];      // array of chord names the signed-in user knows
 let requestsCache = [];    // Admin tab only: ALL users' song requests
+let requestsLoaded = false; // set once requestsCache has been populated this admin-panel visit - lets switching tabs and back reuse it instead of re-fetching/re-paginating the whole table every time (see loadAdminRequests())
 let messagesCache = [];    // Admin tab only: ALL users' messages
 let contactRequestsCache = []; // Contact tab only: the signed-in user's own requests (scope:'mine')
 let contactMessagesCache = []; // Contact tab only: the signed-in user's own messages (scope:'mine')
 let messagesLoaded = false; // set once messagesCache has been populated with the FULL messages history this admin-panel visit (Messages tab actually opened, or a reply sent) - not set by the lightweight unread-only fetch below
 let unreadInfo = { count: 0, emails: [] }; // cheap admin-badge/dot data (which threads have an unread user message) - populated by the lightweight getUnreadMessagesInfo action instead of downloading the entire messages table just to compute a badge count
-let backupStatus = ''; // '' | 'running' | 'done' | 'error: <msg>' - drives the admin "Backup Now" button (see renderAdminToolbar()/runManualBackup())
+let backupStatus = ''; // '' | 'running' | 'done' | 'error: <msg>' - drives the admin "Backup Now" button (see renderAdminBackup()/runManualBackup())
 let unreadLoaded = false; // set once unreadInfo has been populated at least once this admin-panel visit
 let errorsCache = [];
 let currentUser = null;    // {idToken, email, name, picture, isAdmin}
@@ -929,11 +930,14 @@ let adminTab = 'requests'; // 'requests' | 'messages' | 'errors' | 'users' | 'to
 // change. adminSectionFor_() derives the section from whatever adminTab
 // already is, so jumping straight to a specific tab (nothing currently does
 // this, but cheap insurance) still lands on the right section's nav.
-let adminSection = 'communication'; // 'communication' | 'users' | 'stats'
+let adminSection = 'communication'; // 'communication' | 'users' | 'stats' | 'backup'
 const ADMIN_SECTIONS = {
   communication: { tabs: ['requests', 'messages', 'errors'], default: 'requests' },
   users:         { tabs: ['users'],                          default: 'users' },
   stats:         { tabs: ['overview', 'topSongs'],            default: 'overview' },
+  // Its own top-level section (not a toolbar living on every tab - see the
+  // old renderAdminToolbar()) with one pane, same shape as Users above.
+  backup:        { tabs: ['backup'],                          default: 'backup' },
 };
 function adminSectionFor_(tab) {
   return Object.keys(ADMIN_SECTIONS).find(sec => ADMIN_SECTIONS[sec].tabs.includes(tab)) || 'communication';
@@ -978,6 +982,7 @@ let myDataReady = false;
 let viewAsUser = null;     // {email,name} — admin "View As" impersonation target; actions taken while set act as this user, or null
 let viewAsData = null;     // {favorites,knownChords,playlists,requests,messages} snapshot for viewAsUser, kept in sync via refreshAfterWrite()
 let usersCache = [];       // admin Users tab cache
+let usersLoaded = false;   // set once usersCache has been populated this admin-panel visit (see loadAdminUsers()/loadAdminStatsOverview())
 let userSearch = '';
 let usersPage = 0;
 let userSort = 'lastActive';   // 'name' | 'email' | 'lastActive' - see sortUsersList_ (defaults to Last active so the most engaged/recent users surface first)
@@ -1545,10 +1550,18 @@ async function supaEffectiveProfile_(me, fields) {
 // URL a safe, bounded size no matter how many playlists/shares/owners exist.
 async function supaSelectAllByIdChunks_(buildQuery, ids, chunkSize) {
   chunkSize = chunkSize || 150;
+  const chunks = [];
+  for (let i = 0; i < ids.length; i += chunkSize) chunks.push(ids.slice(i, i + chunkSize));
+  // Each chunk is an independent slice of the same id list (no chunk's
+  // result depends on another's), so firing them all concurrently instead
+  // of one sequential round trip per chunk cuts this from N awaited
+  // round trips to 1 - the main reason reads that touch a lot of distinct
+  // users (Song Requests, Messages, Error Reports, playlist hydration) felt
+  // slow: resolving ~700 requests down to maybe 400-500 distinct submitters
+  // meant 3-5 chunks, each waiting for the one before it to finish first.
+  const results = await Promise.all(chunks.map(chunk => supaSelectAll_((from, to) => buildQuery(chunk, from, to))));
   let all = [];
-  for (let i = 0; i < ids.length; i += chunkSize) {
-    const chunk = ids.slice(i, i + chunkSize);
-    const { data, error } = await supaSelectAll_((from, to) => buildQuery(chunk, from, to));
+  for (const { data, error } of results) {
     if (error) return { data: null, error };
     all = all.concat(data || []);
   }
@@ -5216,7 +5229,7 @@ function computeThreads(list) {
     const nameMsg = msgs.slice().reverse().find(m => m.sender !== 'admin') || msgs[0];
     return {
       email, name: nameMsg.user_name || email, msgs,
-      archived: !!last && last.archived === 'true',
+      archived: msgs.length > 0 && msgs.every(m => m.archived === 'true'),
       hasUnread: msgs.some(m => m.sender === 'user' && m.read_by_admin !== 'true'),
       lastAt: last ? last.created_at : null
     };
@@ -5241,15 +5254,15 @@ function renderAdmin() {
   // than adminSection currently says (e.g. a stale value from before a
   // reload) - resync here rather than trusting the two to always agree.
   adminSection = adminSectionFor_(adminTab);
-  document.getElementById('app').innerHTML = `<div class="subtabs" id="adminSectionNav"></div><div class="subtabs" id="adminNav"></div><div id="adminToolbar"></div><div id="adminBody">Loading…</div>`;
+  document.getElementById('app').innerHTML = `<div class="subtabs" id="adminSectionNav"></div><div class="subtabs" id="adminNav"></div><div id="adminBody">Loading…</div>`;
   renderAdminSectionNav();
   renderAdminNav();
-  renderAdminToolbar();
   if (adminTab === 'requests') loadAdminRequests();
   else if (adminTab === 'messages') loadAdminMessages();
   else if (adminTab === 'errors') loadAdminErrors();
   else if (adminTab === 'topSongs') renderAdminTopSongs();
   else if (adminTab === 'overview') loadAdminStatsOverview();
+  else if (adminTab === 'backup') renderAdminBackup();
   else loadAdminUsers();
   // The unread badge (Messages tab) and the per-user unread dot (Users tab)
   // used to require downloading the ENTIRE messages table — every message
@@ -5284,7 +5297,8 @@ function renderAdminSectionNav() {
   nav.innerHTML = `
       <button class="${adminSection==='communication'?'active':''}" onclick="goAdminSection('communication')">Communication${tabBadgeHtml(unread)}</button>
       <button class="${adminSection==='users'?'active':''}" onclick="goAdminSection('users')">Users${tabBadgeHtml(unread)}</button>
-      <button class="${adminSection==='stats'?'active':''}" onclick="goAdminSection('stats')">Stats</button>`;
+      <button class="${adminSection==='stats'?'active':''}" onclick="goAdminSection('stats')">Stats</button>
+      <button class="${adminSection==='backup'?'active':''}" onclick="goAdminSection('backup')">Backup</button>`;
 }
 // Sub-tab row for whichever section is active. Users has only the one
 // pane, so it gets no sub-tab row at all rather than a row with one
@@ -5306,39 +5320,43 @@ function renderAdminNav() {
     nav.innerHTML = '';
   }
 }
-// Small standalone toolbar under the admin tab strip - deliberately NOT one
-// of the subtabs buttons above, so it never looks like a tab you "switch
-// into" and stays visible/consistent no matter which admin tab is open.
-// Lets an admin fire the same-database nightly_backup snapshot on demand
-// (see the 'triggerManualBackup' action) without leaving the app or touching
-// GitHub at all. Button label/disabled state is driven by backupStatus.
-function renderAdminToolbar() {
-  const bar = document.getElementById('adminToolbar');
-  if (!bar) return;
+// Its own admin tab (Backup, after Stats) - used to be a small toolbar
+// living on top of every other tab regardless of which one was open; moved
+// here so it reads as a destination you go to, not a stray control
+// floating over whatever else you were looking at. Lets an admin fire the
+// same-database nightly_backup snapshot on demand (see the
+// 'triggerManualBackup' action) without leaving the app or touching GitHub
+// at all. Button label/disabled state is driven by backupStatus.
+function renderAdminBackup() {
+  const body = document.getElementById('adminBody');
+  if (!body) return;
   const running = backupStatus === 'running';
   const label = running ? 'Backing up…' : (backupStatus === 'done' ? 'Backed up ✓' : 'Backup Now');
   const errMsg = backupStatus.startsWith('error') ? backupStatus.slice('error: '.length) : '';
-  bar.innerHTML = `
-      <button ${running ? 'disabled' : ''} onclick="runManualBackup()" style="font-size:13px;padding:6px 12px;">${label}</button>
-      ${errMsg ? `<span class="error" style="margin-left:10px;">${errMsg}</span>` : ''}
-  `;
+  body.innerHTML = `<div class="card">
+      <p class="muted">Takes an on-demand snapshot of the database (the same one that otherwise only runs automatically overnight) - handy right before making a risky change.</p>
+      <button ${running ? 'disabled' : ''} onclick="runManualBackup()">${label}</button>
+      ${errMsg ? `<div class="error" style="margin-top:10px;">${errMsg}</div>` : ''}
+    </div>`;
 }
 function runManualBackup() {
   if (backupStatus === 'running') return;
   backupStatus = 'running';
-  renderAdminToolbar();
+  renderAdminBackup();
   api('triggerManualBackup', {}).then(() => {
     backupStatus = 'done';
-    renderAdminToolbar();
-    setTimeout(() => { if (backupStatus === 'done') { backupStatus = ''; renderAdminToolbar(); } }, 5000);
+    renderAdminBackup();
+    setTimeout(() => { if (backupStatus === 'done') { backupStatus = ''; renderAdminBackup(); } }, 5000);
   }).catch(err => {
     backupStatus = 'error: ' + (err.message || 'Backup failed');
-    renderAdminToolbar();
+    renderAdminBackup();
   });
 }
-function loadAdminRequests() {
+function loadAdminRequests(force) {
+  if (requestsLoaded && !force) { renderAdminRequests(); return; }
   api('getRequests', {}).then(data => {
     requestsCache = data.requests || [];
+    requestsLoaded = true;
     if (adminTab === 'requests') renderAdminRequests();
   }).catch(err => { if (adminTab === 'requests') document.getElementById('adminBody').innerHTML = `<div class="error">${err.message}</div>`; });
 }
@@ -5411,7 +5429,7 @@ function bulkArchiveSelectedRequests_() {
   const archived = !requestsFilter.includes('archived');
   Promise.all(ids.map(id => api('archiveRequest', { id, archived }))).then(() => {
     requestsSelected.clear();
-    loadAdminRequests();
+    loadAdminRequests(true);
   }).catch(err => alert(err.message));
 }
 function requestsBulkBarHtml_(filtered) {
@@ -5462,10 +5480,10 @@ function viewRequestDetails(id) {
 }
 function changeAdminRequestsPage(p) { adminRequestsPage = p; renderAdminRequestsList_(); }
 function setRequestStatus(id, status) {
-  api('updateRequestStatus', { id, status }).then(loadAdminRequests).catch(err => alert(err.message));
+  api('updateRequestStatus', { id, status }).then(() => loadAdminRequests(true)).catch(err => alert(err.message));
 }
 function setRequestArchived(id, archived) {
-  api('archiveRequest', { id, archived }).then(loadAdminRequests).catch(err => alert(err.message));
+  api('archiveRequest', { id, archived }).then(() => loadAdminRequests(true)).catch(err => alert(err.message));
 }
 function loadAdminMessages() {
   api('getMessages', {}).then(data => {
@@ -5539,11 +5557,10 @@ function bulkArchiveSelectedThreads_() {
   const emails = Array.from(messagesSelected);
   if (!emails.length) return;
   const archived = messagesFilter !== 'archived';
-  Promise.all(emails.map(email => api('archiveThread', { user_email: email, archived }))).then(() => {
-    messagesCache.forEach(m => { if (emails.includes(m.user_email)) m.archived = archived ? 'true' : 'false'; });
-    messagesSelected.clear();
-    renderAdminMessagesList_();
-  }).catch(err => alert(err.message));
+  messagesCache.forEach(m => { if (emails.includes(m.user_email)) m.archived = archived ? 'true' : 'false'; });
+  messagesSelected.clear();
+  renderAdminMessagesList_();
+  Promise.all(emails.map(email => api('archiveThread', { user_email: email, archived }))).catch(err => alert(err.message));
 }
 function threadsBulkBarHtml_(filtered) {
   const n = messagesSelected.size;
@@ -5590,13 +5607,30 @@ function threadModalHtml() {
 }
 function openThreadModal(email, name) {
   chatTarget = { email, name };
-  openModal(threadModalHtml());
-  const t = document.getElementById('adminChatThread'); if (t) t.scrollTop = t.scrollHeight;
-  api('markThreadRead', { user_email: email }).then(() => {
+  const afterMessagesReady_ = () => {
+    openModal(threadModalHtml());
+    const t = document.getElementById('adminChatThread'); if (t) t.scrollTop = t.scrollHeight;
+    // Optimistic: clear the dot/badge right away instead of waiting on the
+    // network round trip below - see the comment on this function's old
+    // body in the project history for why that wait made the notification
+    // look stuck. Persist it to the database in the background; on failure
+    // it's simply picked back up next time the Messages tab is actually
+    // loaded (messagesLoaded then becomes the source of truth again).
     messagesCache.forEach(m => { if (m.user_email === email && m.sender === 'user') m.read_by_admin = 'true'; });
     renderAdminSectionNav();
     renderAdminNav();
-  }).catch(() => {});
+    api('markThreadRead', { user_email: email }).catch(() => {});
+  };
+  if (messagesLoaded) { afterMessagesReady_(); return; }
+  // Not loaded yet (e.g. opened via "Message" on an Error Reports row
+  // without ever visiting the Messages tab this visit) - fetch the real
+  // history first so the modal doesn't open looking empty.
+  api('getMessages', {}).then(data => {
+    messagesCache = data.messages || [];
+    messagesLoaded = true;
+    unreadLoaded = true;
+    afterMessagesReady_();
+  }).catch(() => { afterMessagesReady_(); });
 }
 function refreshThreadModalIfOpen() {
   const card = document.querySelector('#modalBackdrop .modal-card');
@@ -5605,11 +5639,10 @@ function refreshThreadModalIfOpen() {
   const t = document.getElementById('adminChatThread'); if (t) t.scrollTop = t.scrollHeight;
 }
 function setThreadArchived(email, archived) {
-  api('archiveThread', { user_email: email, archived }).then(() => {
-    messagesCache.forEach(m => { if (m.user_email === email) m.archived = archived ? 'true' : 'false'; });
-    closeModal();
-    renderAdminMessages();
-  }).catch(err => alert(err.message));
+  messagesCache.forEach(m => { if (m.user_email === email) m.archived = archived ? 'true' : 'false'; });
+  closeModal();
+  renderAdminMessages();
+  api('archiveThread', { user_email: email, archived }).catch(err => alert(err.message));
 }
 function sendAdminReply() {
   const input = document.getElementById('adminChatInput');
@@ -5716,8 +5749,8 @@ function renderAdminErrorsList_() {
     (pageRows.map(e => `<tr>
       <td><input type="checkbox" ${errorsSelected.has(e.id)?'checked':''} onchange="toggleErrorRowSelected('${e.id}')"></td>
       <td><button class="status-icon-btn ${e.status}" onclick="setErrorStatus('${e.id}','${e.status==='open'?'resolved':'open'}')" title="${e.status==='open'?'Mark resolved':'Mark open'}" aria-label="${e.status==='open'?'Mark resolved':'Mark open'}">${e.status==='open'?SVG_ICONS.statusOpen:SVG_ICONS.statusResolved}</button></td>
-      <td>${escapeHtml(e.song_title)}<br><span class="muted">${escapeHtml(e.artist)}</span></td>
-      <td>${escapeHtml(e.user_name)}<br><span class="muted">${escapeHtml(e.user_email)}</span></td>
+      <td>${escapeHtml(e.song_title)}<br><span class="muted">${escapeHtml(e.artist)}</span>${e.song_id && songs.some(s=>s.id===e.song_id) ? `<br><span class="adv-link" onclick="goTo('detail',{id:'${e.song_id}'})">Go to song</span>` : ''}</td>
+      <td>${escapeHtml(e.user_name)}<br><span class="muted">${escapeHtml(e.user_email)}</span><br><span class="adv-link" onclick='openThreadModal(${JSON.stringify(e.user_email)},${JSON.stringify(e.user_name)})'>Message</span></td>
       <td>${escapeHtml(e.description)}</td>
       <td><button class="status-icon-btn archive-action" onclick="setErrorArchived('${e.id}',${e.archived==='true'?'false':'true'})" title="${e.archived==='true'?'Unarchive':'Archive'}" aria-label="${e.archived==='true'?'Unarchive':'Archive'}">${e.archived==='true'?SVG_ICONS.unarchive:SVG_ICONS.archive}</button></td>
     </tr>`).join('') || `<tr><td colspan="6" class="muted">No error reports${errorsFilter.length===0 && !errorsSearch?'':' in this view'}.</td></tr>`) + `</table></div>` +
@@ -5761,11 +5794,19 @@ function changeAdminTopSongsPage(p) { adminTopSongsPage = p; renderAdminTopSongs
    ============================================================ */
 let statsOverviewCache = null;
 function loadAdminStatsOverview() {
-  if (statsOverviewCache) { renderAdminStatsOverview(); return; }
+  if (statsOverviewCache && usersLoaded) { renderAdminStatsOverview(); return; }
   const body = document.getElementById('adminBody');
   if (body) body.innerHTML = '<div class="muted">Loading stats…</div>';
-  api('getVisitStats', {}).then(data => {
-    statsOverviewCache = data;
+  const visitsPromise = statsOverviewCache ? Promise.resolve(statsOverviewCache) : api('getVisitStats', {});
+  // Reuses the Users tab's own cache (and populates it, if this is the
+  // first admin tab opened this visit) rather than keeping two separate
+  // user-activity readings - see renderUsersSummary_() below, now rendered
+  // here instead of at the top of the Users tab.
+  const usersPromise = usersLoaded ? Promise.resolve({ users: usersCache }) : api('getUsers', {});
+  Promise.all([visitsPromise, usersPromise]).then(([visitData, usersData]) => {
+    statsOverviewCache = visitData;
+    usersCache = usersData.users || usersCache;
+    usersLoaded = true;
     if (adminTab === 'overview') renderAdminStatsOverview();
   }).catch(err => { if (adminTab === 'overview') document.getElementById('adminBody').innerHTML = `<div class="error">${err.message}</div>`; });
 }
@@ -5793,7 +5834,9 @@ function renderAdminStatsOverview() {
     <div class="card">
       <div class="muted" style="margin-bottom:10px;">Daily visitors — last 30 days (hover a bar for its date)</div>
       <div class="stat-chart">${barsHtml}</div>
-    </div>`;
+    </div>
+    <div class="muted" style="margin:18px 0 6px;">User activity (moved here from the Users tab)</div>
+    ${renderUsersSummary_()}`;
 }
 
 /* ============================================================
@@ -5802,6 +5845,7 @@ function renderAdminStatsOverview() {
 function loadAdminUsers() {
   api('getUsers', {}).then(data => {
     usersCache = data.users || [];
+    usersLoaded = true;
     // Per-user message COUNT comes pre-aggregated from admin_user_roster
     // (see u.messages column below); the per-row unread DOT comes from the
     // lightweight unreadInfo cache (see renderAdmin()/userHasUnreadMessage())
@@ -5820,7 +5864,7 @@ function renderUsersTable() {
   // focus after every single character typed. Building it once here and
   // only ever touching the container below it keeps focus (and cursor
   // position) intact.
-  body.innerHTML = renderUsersSummary_() + `<div style="margin-bottom:10px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+  body.innerHTML = `<div style="margin-bottom:10px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
       <input type="text" id="userSearchBox" placeholder="Search by name or email…" value="${escapeHtml(userSearch)}" style="max-width:320px;flex:1;min-width:180px;">
       <select id="userSortSelect" style="max-width:220px;">
         <option value="name" ${userSort==='name'?'selected':''}>Sort: Name (A–Z)</option>
