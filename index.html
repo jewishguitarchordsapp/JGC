@@ -468,6 +468,7 @@
   .chord-tap{cursor:pointer;}
   .instr-row{flex-wrap:wrap;gap:6px;}
   .instr-pills{display:flex;gap:4px;flex-wrap:wrap;}
+  .instr-explain{font-size:12.5px;line-height:1.45;margin:2px 0 8px;}
   .instr-pills .chip{margin:0;font-size:12.5px;padding:4px 10px;font-family:inherit;}
   .chord-diagram-popover{position:fixed;z-index:70;background:#fff;border:1px solid var(--border);border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.22);padding:8px 10px 6px;pointer-events:none;max-width:150px;}
   .chord-diagram-pop{display:flex;flex-direction:column;align-items:center;gap:2px;}
@@ -604,6 +605,7 @@
           <button type="button" class="chip" id="prefInstr_piano" onclick="setChordInstrument('piano')">Piano</button>
         </span>
       </div>
+      <div class="instr-explain muted" id="prefInstrExplain" hidden>Tap any chord in a song to see how to play it on <span id="prefInstrName">ukulele</span>. It shows exactly the chord that's written — if the song says <b>F</b>, you'll see an F chord.</div>
     </div>
   </div>
 </div>
@@ -914,6 +916,12 @@ function renderMenuDrawerSettings_() {
     const b = document.getElementById('prefInstr_' + k);
     if (b) { const on = (displayPrefs.instrument || 'guitar') === k; b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on)); }
   });
+  const ex = document.getElementById('prefInstrExplain');
+  if (ex) {
+    const inst = displayPrefs.instrument || 'guitar';
+    ex.hidden = inst === 'guitar';
+    const nm = document.getElementById('prefInstrName'); if (nm) nm.textContent = inst === 'piano' ? 'piano' : 'ukulele';
+  }
   const chordsEl = document.getElementById('prefShowChordsToggle');
   if (chordsEl) { chordsEl.classList.toggle('on', displayPrefs.showChords); chordsEl.setAttribute('aria-pressed', String(displayPrefs.showChords)); }
 }
@@ -3505,7 +3513,9 @@ function respellChordNice_(chord) {
 // shown chords are capo shapes for playerState.capo (see renderDetail), so
 // the real pitch is that many semitones higher.
 function soundingChordFor_(chordName) {
-  const capo = (view && view.name === 'detail' && Number(playerState.capo)) || 0;
+  // Chanale's call: ukulele/piano pictures show the chord exactly as it's
+  // written in the chart, ignoring capo (explained under the menu setting).
+  const capo = 0;
   if (!capo) return { chord: chordName, capo: 0 };
   return { chord: respellChordNice_(transposeChord(chordName, capo)), capo };
 }
