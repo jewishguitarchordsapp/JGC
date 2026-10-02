@@ -492,9 +492,16 @@
   .tuner-headstock-svg{width:100%;height:100%;display:block;}
   .tuner-peg{position:absolute;width:36px;height:36px;margin:-18px 0 0 -18px;border-radius:50%;background:#2b2f31;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;border:2px solid #1c1f21;transition:background .15s ease,color .15s ease;}
   .tuner-peg.closest{background:#fff;color:#111;border-color:var(--teal);box-shadow:0 0 0 3px var(--teal);}
+  .tuner-peg.tuned{background:#2e7d32;color:#fff;border-color:#1b5e20;}
+  .tuner-peg.tuned.closest{background:#2e7d32;color:#fff;box-shadow:0 0 0 3px #66bb6a;}
+  .tuner-peg.tuned::after{content:'✓';position:absolute;right:-7px;top:-7px;width:17px;height:17px;border-radius:50%;background:#fff;color:#2e7d32;border:2px solid #2e7d32;font-size:11px;line-height:13px;text-align:center;font-weight:800;}
+  .tuner-peg.just-tuned{animation:tunerPop .45s ease;}
+  @keyframes tunerPop{0%{transform:scale(1)}40%{transform:scale(1.25)}100%{transform:scale(1)}}
+  .tuner-status-pill.success{background:#2e7d32;}
+  .tuner-dial.locked .tuner-note-circle{background:#2e7d32;color:#fff;border-color:#2e7d32;}
   @media (max-width:640px){
     header{padding:10px 12px;gap:8px;}
-    header h1{font-size:15px;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;margin:0;white-space:nowrap;}
+    header h1{font-size:15px;position:absolute;left:50%;top:calc(50% + env(safe-area-inset-top) / 2);transform:translate(-50%,-50%);text-align:center;margin:0;white-space:nowrap;}
     nav{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;}
     nav button{flex:0 0 auto;padding:7px 9px;font-size:12.5px;}
     #mainNav button svg{width:15px;height:15px;}
@@ -7362,6 +7369,14 @@ const GUITAR_STRINGS = [
 let tunerStream = null, tunerAudioCtx = null, tunerAnalyser = null, tunerRafId = null, tunerBuf = null;
 let tunerListening = false;
 let tunerError = null;
+// "String tuned" confirmation (like GuitarTuna): a string counts as tuned
+// once it's held within ±5 cents of its target for TUNER_LOCK_MS. It then
+// turns green with a check, a short ding plays, and the status pill names
+// the next string to tune. Cleared each time the tuner is started.
+const TUNER_LOCK_MS = 600;
+let tunerTuned = new Set();
+let tunerHold = null;   // { idx, since } - string currently being held in tune
+let tunerFlash = null;  // { text, until } - temporary success message in the pill
 
 // String-peg layout mirrors a standard 3+3 headstock viewed from the
 // front: D/A/(low E) down the left side, G/B/(high E) down the right -
@@ -7392,7 +7407,7 @@ function renderTuner() {
       <svg class="tuner-headstock-svg" viewBox="0 0 220 260" preserveAspectRatio="xMidYMin meet">
         <path d="M55,20 Q30,20 30,45 L30,120 Q30,150 55,165 L95,230 L125,230 L165,165 Q190,150 190,120 L190,45 Q190,20 165,20 Z" fill="#f2f4f5" stroke="#d5dadd" stroke-width="2"/>
       </svg>
-      ${TUNER_PEG_LAYOUT.map(p => `<div id="tunerString${p.i}" class="tuner-peg" style="left:${p.left};top:${p.top};" title="${escapeHtml(GUITAR_STRINGS[p.i].label)}">${GUITAR_STRINGS[p.i].name}</div>`).join('')}
+      ${TUNER_PEG_LAYOUT.map(p => `<div id="tunerString${p.i}" class="tuner-peg${tunerTuned.has(p.i) ? ' tuned' : ''}" style="left:${p.left};top:${p.top};" title="${escapeHtml(GUITAR_STRINGS[p.i].label)}">${GUITAR_STRINGS[p.i].name}</div>`).join('')}
     </div>
     ${listening ? `<button class="btn secondary" style="margin-top:16px;font-size:12.5px;padding:6px 12px;" onclick="stopTuner()">Stop Tuning</button>` : ''}
   </div>`;
@@ -7401,6 +7416,7 @@ function renderTuner() {
 
 async function startTuner() {
   tunerError = null;
+  tunerTuned = new Set(); tunerHold = null; tunerFlash = null;
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     tunerError = "This browser can't access the microphone here.";
     renderTuner();
@@ -7503,6 +7519,8 @@ function updateTunerReadout_(freq) {
     if (needleEl) needleEl.style.transform = 'rotate(0deg)';
     if (dialEl) dialEl.className = 'tuner-dial';
     highlightClosestString_(null);
+    tunerHold = null;
+    applyTunerFlash_(centsEl);
     return;
   }
   const noteNum = noteNumberFromFrequency_(freq);
@@ -7512,16 +7530,69 @@ function updateTunerReadout_(freq) {
   const inTune = Math.abs(cents) <= 5;
   if (centsEl) centsEl.textContent = (cents > 0 ? '+' : '') + cents + ' cents';
   if (needleEl) needleEl.style.transform = `rotate(${Math.max(-45, Math.min(45, cents * 0.9))}deg)`;
-  if (dialEl) dialEl.className = 'tuner-dial' + (inTune ? ' in-tune' : (cents < 0 ? ' flat' : ' sharp'));
-  highlightClosestString_(freq);
+  const idx = highlightClosestString_(freq);
+  const locked = checkStringTuned_(freq, idx);
+  if (dialEl) dialEl.className = 'tuner-dial' + (inTune ? ' in-tune' : (cents < 0 ? ' flat' : ' sharp')) + (locked ? ' locked' : '');
+  if (locked) noteEl.textContent = '✓';
+  applyTunerFlash_(centsEl);
+}
+function applyTunerFlash_(centsEl) {
+  if (!centsEl) return;
+  const on = tunerFlash && Date.now() < tunerFlash.until;
+  centsEl.classList.toggle('success', !!on);
+  if (on) centsEl.textContent = tunerFlash.text;
+}
+// True while the closest string is being held within ±5 cents of its own
+// target pitch; the first time that lasts TUNER_LOCK_MS, marks it tuned.
+function checkStringTuned_(freq, idx) {
+  if (idx == null) { tunerHold = null; return false; }
+  const s = GUITAR_STRINGS[idx];
+  const centsToString = 1200 * Math.log2(freq / s.freq);
+  if (Math.abs(centsToString) > 5) { tunerHold = null; return false; }
+  const now = Date.now();
+  if (!tunerHold || tunerHold.idx !== idx) tunerHold = { idx, since: now };
+  if (now - tunerHold.since >= TUNER_LOCK_MS && !tunerTuned.has(idx)) markStringTuned_(idx);
+  return now - tunerHold.since >= TUNER_LOCK_MS;
+}
+function markStringTuned_(idx) {
+  tunerTuned.add(idx);
+  const el = document.getElementById('tunerString' + idx);
+  if (el) { el.classList.add('tuned', 'just-tuned'); setTimeout(() => el.classList.remove('just-tuned'), 500); }
+  playTunerDing_();
+  try { if (navigator.vibrate) navigator.vibrate(60); } catch (e) {}
+  const next = GUITAR_STRINGS.findIndex((s, i) => !tunerTuned.has(i));
+  tunerFlash = {
+    text: next < 0 ? '✓ All strings tuned!' : `✓ ${GUITAR_STRINGS[idx].label.replace(/ \(.*\)/, '')} tuned — next: ${GUITAR_STRINGS[next].label.replace(/ \(.*\)/, '')}`,
+    until: Date.now() + (next < 0 ? 4000 : 1800),
+  };
+}
+// A short, soft two-note chime made with the Web Audio API (no sound file
+// to download). Pitched well above the guitar range the detector listens
+// to, so the tuner doesn't mistake its own ding for a string.
+function playTunerDing_() {
+  const ctx = tunerAudioCtx;
+  if (!ctx) return;
+  try {
+    const t0 = ctx.currentTime;
+    [[1318.5, 0], [1760, 0.09]].forEach(([f, d]) => {
+      const osc = ctx.createOscillator(), g = ctx.createGain();
+      osc.type = 'sine'; osc.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t0 + d);
+      g.gain.exponentialRampToValueAtTime(0.25, t0 + d + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + d + 0.45);
+      osc.connect(g); g.connect(ctx.destination);
+      osc.start(t0 + d); osc.stop(t0 + d + 0.5);
+    });
+  } catch (e) {}
 }
 function highlightClosestString_(freq) {
   GUITAR_STRINGS.forEach((s, i) => { const el = document.getElementById('tunerString' + i); if (el) el.classList.remove('closest'); });
-  if (!freq) return;
+  if (!freq) return null;
   let best = 0, bestDiff = Infinity;
   GUITAR_STRINGS.forEach((s, i) => { const diff = Math.abs(Math.log2(freq / s.freq)); if (diff < bestDiff) { bestDiff = diff; best = i; } });
   const el = document.getElementById('tunerString' + best);
   if (el) el.classList.add('closest');
+  return best;
 }
 
 /* ============================================================
