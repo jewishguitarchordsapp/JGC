@@ -132,8 +132,12 @@
   /* Admin > Stats > Overview's daily-visitors chart - a plain CSS bar
      chart (no library) matching the single hue already used for every
      other accent in this app, since there's only ever one series here. */
-  .stat-chart{display:flex;align-items:flex-end;gap:3px;height:90px;}
-  .stat-bar{flex:1 1 0;min-width:2px;background:var(--teal);border-radius:3px 3px 0 0;}
+  .stat-chart{display:flex;align-items:flex-end;gap:3px;}
+  .stat-chart-col{display:flex;flex-direction:column;align-items:center;flex:1 1 0;min-width:0;}
+  .stat-chart-value{font-size:9.5px;color:var(--muted);line-height:1.3;margin-bottom:2px;white-space:nowrap;}
+  .stat-chart-barwrap{width:100%;height:90px;display:flex;align-items:flex-end;}
+  .stat-bar{width:100%;background:var(--teal);border-radius:3px 3px 0 0;}
+  .stat-chart-label{font-size:9px;color:var(--muted);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;}
   .chords-used-row{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin:10px 0;}
   .chords-used-row .set-known-link{font-size:12.5px;color:var(--accent);white-space:nowrap;cursor:pointer;margin-top:3px;}
   .playback-row{background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin:10px 0;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
@@ -446,6 +450,8 @@
     #mainNav button svg{width:15px;height:15px;}
     .subtabs button{padding:8px 9px;font-size:12px;gap:4px;}
     .subtabs button svg{width:13px;height:13px;}
+    .stat-chart-value{font-size:8px;}
+    .stat-chart-label{font-size:7.5px;}
     .subtabs.song-tabs button{padding:7px 2px;font-size:10.5px;gap:3px;}
     .subtabs.song-tabs button svg{width:17px;height:17px;}
     main{padding:12px;padding-bottom:78px;}
@@ -1061,7 +1067,8 @@ let contactChatOpen = false; // Contact page's "Message Admin" card starts colla
 let adminRequestsPage = 0;
 let adminErrorsPage = 0;
 let adminMessagesPage = 0; // paginates the admin Messages tab's conversation list, 10/page
-let adminTopSongsPage = 0; // paginates the admin Top Songs tab
+let adminTopSongsPage = 0; // paginates the admin Top Songs tab's "Top Opens" column
+let adminTopSongsPage2 = 0; // paginates its "Top Opens by Unique Users" column
 let requestsFilter = [];  // multi-select subset of 'pending'/'added'/'declined'/'archived' — empty means all non-archived
 let errorsFilter = [];    // multi-select subset of 'open'/'resolved'/'archived' — empty means all non-archived
 let messagesFilter = 'all';  // 'all' | 'unread' | 'archived'
@@ -1661,7 +1668,7 @@ async function supaApi(action, fields) {
     // lyrics search is actually used (listContent).
     const data = await supaCached_(() => _supaListCache, c => _supaListCache = c, async () => {
       const { data, error } = await supaSelectAll_((from, to) => getSupa_().from('songs')
-        .select('id,title,title_hebrew,artist,artist_hebrew,categories,capo,youtube_url,date_added,updated_at,chords_used,view_count')
+        .select('id,title,title_hebrew,artist,artist_hebrew,categories,capo,youtube_url,date_added,updated_at,chords_used,view_count,unique_view_count')
         .order('id').range(from, to));
       throwIfErr_(error);
       return data;
@@ -1672,6 +1679,7 @@ async function supaApi(action, fields) {
       date_added: s.date_added, updated_at: s.updated_at,
       chords_used: s.chords_used || [],
       view_count: s.view_count || 0,
+      unique_view_count: s.unique_view_count || 0,
     })) };
   }
 
@@ -1836,10 +1844,15 @@ async function supaApi(action, fields) {
   }
 
   // Fire-and-forget counter bump for the admin "Top Songs" tab - see
-  // increment_song_view() in schema.sql (security definer, only touches
-  // view_count, gated on auth.uid() is not null the same way songs' own
-  // select policy is) and recordSongView_() in the frontend, which calls
-  // this exactly once per real navigation into a song's detail page.
+  // increment_song_view() in schema.sql (security definer, resolves the
+  // real caller's own profiles.id from auth.uid() itself - a signed-out
+  // caller silently no-ops, same effective gating as the old auth.uid()
+  // is not null check) and recordSongView_() in the frontend, which calls
+  // this exactly once per real navigation into a song's detail page. Also
+  // upserts into song_views (one row per user+song) so view_count (total
+  // opens, every viewing counts) and unique_view_count (distinct viewers,
+  // each person counts once no matter how often they reopen it) can both
+  // be shown - see Admin > Stats > Top Songs' two columns.
   if (action === 'incrementSongView') {
     await supaRequireUser_();
     if (!fields.id) return { success: false, error: 'Missing id' };
@@ -2143,6 +2156,19 @@ async function supaApi(action, fields) {
     throwIfErr_(error);
     return { success: true };
   }
+  if (action === 'updateMessage') {
+    await supaRequireAdmin_();
+    if (!fields.id) return { success: false, error: 'Missing id' };
+    const { data: msg, error: getErr } = await getSupa_().from('messages').select('sender').eq('id', fields.id).maybeSingle();
+    throwIfErr_(getErr);
+    if (!msg) throw new Error('Message not found');
+    if (msg.sender !== 'admin') throw new Error('Only the admin\'s own messages can be edited');
+    const newText = String(fields.text || '').trim();
+    if (!newText) return { success: false, error: 'Message text cannot be empty' };
+    const { error } = await getSupa_().from('messages').update({ text: newText, edited_at: new Date().toISOString() }).eq('id', fields.id);
+    throwIfErr_(error);
+    return { success: true };
+  }
   if (action === 'archiveThread') {
     await supaRequireAdmin_();
     const targetEmail = String(fields.user_email || '').toLowerCase();
@@ -2208,6 +2234,7 @@ function supaMessageToOld_(m, emailMap) {
     id: m.id, user_email: who.email || '', user_name: who.name || who.email || '',
     sender: m.sender, text: m.text, created_at: m.created_at,
     archived: supaBool_(m.archived), read_by_admin: supaBool_(m.read_by_admin),
+    edited_at: m.edited_at || null,
   };
 }
 function supaErrorToOld_(e, emailMap) {
@@ -3431,7 +3458,10 @@ function recordSongView_(id) {
   if (!id) return;
   api('incrementSongView', { id }).catch(() => {}); // best-effort - never blocks navigation or surfaces an error to the user
   const song = songs.find(s => s.id === id);
-  if (song) song.view_count = (song.view_count || 0) + 1; // optimistic local bump so Admin > Top Songs feels live without waiting on the next periodic refresh
+  if (song) {
+    song.view_count = (song.view_count || 0) + 1; // optimistic local bump so Admin > Top Songs feels live without waiting on the next periodic refresh
+    song.unique_view_count = (song.unique_view_count || 0) + 1; // same optimism applied to the distinct-viewer count - see incrementSongView above
+  }
 }
 function goTo(name, extra) {
   // Leaving the Tuner page: always release the microphone rather than
@@ -4194,7 +4224,10 @@ function renderDetail() {
     ? (chordsUsedIn(song.chords_lyrics, transpose).map(c=>`<span class="chip chord-tap" data-chord="${escapeHtml(c)}">${escapeHtml(formatChordSymbol(c))}</span>`).join(' ') || '<span class="muted">none tagged</span>')
     : '<span class="muted">Loading chords…</span>';
 
-  let html = `<span class="backlink" onclick="goTo('list')">‹ Back to Songs</span>
+  const backLink = view.backTo === 'errorReport'
+    ? `<span class="backlink" onclick="goTo('admin')">‹ Back to Error Report</span>`
+    : `<span class="backlink" onclick="goTo('list')">‹ Back to Songs</span>`;
+  let html = `${backLink}
     <div class="song-header">
       <div><h2 style="margin-bottom:2px" dir="auto">${escapeHtml(songDisplayTitle_(song))}</h2><div class="meta" dir="auto">${artistLinksHtml(song.artist, song.artist_hebrew)}</div></div>
       ${(view.fromShuffle || effectiveIsAdmin()) ? `<div style="display:flex;gap:8px">
@@ -5239,9 +5272,16 @@ function renderContactBody() {
 }
 function changeContactRequestsPage(p) { contactRequestsPage = p; renderContactBody(); }
 function toggleContactChat() { contactChatOpen = !contactChatOpen; renderContactBody(); }
-function renderChatMessages(list) {
+function renderChatMessages(list, opts) {
+  const editable = !!(opts && opts.editable);
   return list.slice().sort((a,b)=> new Date(a.created_at)-new Date(b.created_at))
-    .map(m => `<div class="msg ${m.sender}">${escapeHtml(m.text)}<div class="meta">${new Date(m.created_at).toLocaleString()}</div></div>`).join('') || '<div class="muted">No messages yet — say hi!</div>';
+    .map(m => {
+      const editedTag = m.edited_at ? ' <span class="muted">(edited)</span>' : '';
+      const editLink = (editable && m.sender === 'admin')
+        ? ` · <span class="adv-link" onclick='startEditAdminMessage_(${escapeHtml(JSON.stringify(m.id))},${escapeHtml(JSON.stringify(m.text))})'>Edit</span>`
+        : '';
+      return `<div class="msg ${m.sender}">${escapeHtml(m.text)}<div class="meta">${new Date(m.created_at).toLocaleString()}${editedTag}${editLink}</div></div>`;
+    }).join('') || '<div class="muted">No messages yet — say hi!</div>';
 }
 // Mirrors Code.gs's YOUTUBE_URL_RE — a shape check only (youtu.be/<id>,
 // youtube.com/watch?v=<id>, /shorts/<id>, or an m.youtube.com variant), no
@@ -5702,8 +5742,9 @@ function threadModalHtml() {
   chatTarget.prefill = ''; // one-shot - see the comment above this function
   return `<h2 style="margin-top:0">${escapeHtml(chatTarget.name)}</h2>
     <div class="muted" style="margin-top:-10px;margin-bottom:12px;font-size:12.5px;">${escapeHtml(chatTarget.email)}</div>
-    <div class="chat-thread" id="adminChatThread">${renderChatMessages(active ? active.msgs : [])}</div>
-    <div style="display:flex;gap:8px;margin-bottom:14px;align-items:flex-end;"><textarea id="adminChatInput" placeholder="Reply…" style="flex:1;min-height:64px;max-height:200px;font-family:inherit;font-size:14px;resize:vertical;" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAdminReply();}">${escapeHtml(prefillVal)}</textarea><button class="btn" onclick="sendAdminReply()">Send</button></div>
+    <div class="chat-thread" id="adminChatThread">${renderChatMessages(active ? active.msgs : [], { editable: true })}</div>
+    ${editingMessageId ? `<div class="muted" style="font-size:12px;margin-bottom:6px;">Editing your message below — <span class="adv-link" onclick="cancelEditAdminMessage_()">Cancel</span></div>` : ''}
+    <div style="display:flex;gap:8px;margin-bottom:14px;align-items:flex-end;"><textarea id="adminChatInput" placeholder="Reply…" style="flex:1;min-height:64px;max-height:200px;font-family:inherit;font-size:14px;resize:vertical;" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAdminReply();}">${escapeHtml(prefillVal)}</textarea><button class="btn" onclick="sendAdminReply()">${editingMessageId ? 'Save' : 'Send'}</button></div>
     <div class="modal-actions"><button class="btn secondary" onclick='setThreadArchived(${escapeHtml(JSON.stringify(chatTarget.email))},${active && active.archived ? 'false' : 'true'})'>${active && active.archived ? 'Unarchive' : 'Archive'} conversation</button><button class="btn secondary" onclick="closeModal()">Close</button></div>`;
 }
 // prefill (optional) - opening text for the reply box, e.g. "Re: Song
@@ -5711,7 +5752,9 @@ function threadModalHtml() {
 // request/error row rather than from the plain Messages tab list, so the
 // admin doesn't have to retype which request/error this reply is about -
 // consumed once by threadModalHtml() above, not re-shown after that.
+let editingMessageId = null; // id of the admin's OWN message currently being edited, if any - see startEditAdminMessage_()/cancelEditAdminMessage_()/sendAdminReply()
 function openThreadModal(email, name, prefill) {
+  editingMessageId = null;
   chatTarget = { email, name, prefill: prefill || '' };
   const afterMessagesReady_ = () => {
     openModal(threadModalHtml());
@@ -5738,6 +5781,18 @@ function openThreadModal(email, name, prefill) {
     afterMessagesReady_();
   }).catch(() => { afterMessagesReady_(); });
 }
+function startEditAdminMessage_(id, text) {
+  editingMessageId = id;
+  chatTarget.prefill = text;
+  refreshThreadModalIfOpen();
+  const input = document.getElementById('adminChatInput');
+  if (input) { input.focus(); input.select(); }
+}
+function cancelEditAdminMessage_() {
+  editingMessageId = null;
+  chatTarget.prefill = '';
+  refreshThreadModalIfOpen();
+}
 function refreshThreadModalIfOpen() {
   const card = document.querySelector('#modalBackdrop .modal-card');
   if (!card || !chatTarget) return;
@@ -5754,6 +5809,16 @@ function sendAdminReply() {
   const input = document.getElementById('adminChatInput');
   const text = input.value.trim(); if (!text || !chatTarget) return;
   input.value = '';
+  if (editingMessageId) {
+    const id = editingMessageId;
+    editingMessageId = null;
+    api('updateMessage', { id, text }).then(() => api('getMessages', {})).then(data => {
+      messagesCache = data.messages || [];
+      messagesLoaded = true;
+      refreshThreadModalIfOpen();
+    }).catch(err => alert(err.message));
+    return;
+  }
   api('sendMessage', { text, target_email: chatTarget.email, target_name: chatTarget.name }).then(() => api('getMessages', {})).then(data => {
     messagesCache = data.messages || [];
     messagesLoaded = true;
@@ -5860,7 +5925,7 @@ function renderAdminErrorsList_() {
     (pageRows.map(e => `<tr>
       <td><input type="checkbox" ${errorsSelected.has(e.id)?'checked':''} onchange="toggleErrorRowSelected('${e.id}')"></td>
       <td><button class="status-icon-btn ${e.status}" onclick="setErrorStatus('${e.id}','${e.status==='open'?'resolved':'open'}')" title="${e.status==='open'?'Mark resolved':'Mark open'}" aria-label="${e.status==='open'?'Mark resolved':'Mark open'}">${e.status==='open'?SVG_ICONS.statusOpen:SVG_ICONS.statusResolved}</button></td>
-      <td>${escapeHtml(e.song_title)}<br><span class="muted">${escapeHtml(e.artist)}</span>${e.song_id && songs.some(s=>s.id===e.song_id) ? `<br><span class="adv-link" onclick="goTo('detail',{id:'${e.song_id}'})">Go to song</span>` : ''}</td>
+      <td>${escapeHtml(e.song_title)}<br><span class="muted">${escapeHtml(e.artist)}</span>${e.song_id && songs.some(s=>s.id===e.song_id) ? `<br><span class="adv-link" onclick="goTo('detail',{id:'${e.song_id}',backTo:'errorReport'})">Go to song</span>` : ''}</td>
       <td>${escapeHtml(e.user_name)}<br><span class="muted">${escapeHtml(e.user_email)}</span><br><span class="adv-link" onclick='openThreadModal(${escapeHtml(JSON.stringify(e.user_email))},${escapeHtml(JSON.stringify(e.user_name))},${escapeHtml(JSON.stringify('Re: Error Report - ' + (e.description||'').slice(0,60)))})'>Message</span></td>
       <td>${escapeHtml(e.description)}</td>
       <td class="muted" style="white-space:nowrap;">${e.created_at ? new Date(e.created_at).toLocaleString() : ''}</td>
@@ -5874,27 +5939,41 @@ function setErrorArchived(id, archived) { api('archiveError', { id, archived }).
 
 /* ============================================================
    TOP SONGS (admin) — how often each song has actually been opened, per the
-   view_count column bumped by recordSongView_()/incrementSongView (see the
-   CHORD DIAGRAMS section and goTo() below). Reads straight from the `songs`
-   global that's already loaded for the rest of the app (no separate admin-
-   only fetch/tab-load needed) so opening this tab is just a client-side
-   sort - it never adds another network round trip.
+   view_count/unique_view_count columns bumped by recordSongView_()/
+   incrementSongView (see the CHORD DIAGRAMS section and goTo() below).
+   Reads straight from the `songs` global that's already loaded for the
+   rest of the app (no separate admin-only fetch/tab-load needed) so
+   opening this tab is just a client-side sort - it never adds another
+   network round trip. Two independent leaderboards, side by side: total
+   opens (every viewing counts, so one very repeat-happy user can push a
+   song up) vs. distinct viewers (each person counts once no matter how
+   often they reopen it) - each with its own sort and its own page.
    ============================================================ */
+function topSongsTableHtml_(metricKey, label, page, changeFn) {
+  const sorted = songs.slice().sort((a, b) => (b[metricKey] || 0) - (a[metricKey] || 0));
+  const rows = pageSlice(sorted, page).map((s, i) => `<tr>
+      <td class="muted">${page * PAGE_SIZE + i + 1}</td>
+      <td><span class="adv-link" onclick="goTo('detail',{id:'${s.id}'})">${escapeHtml(s.title)}</span></td>
+      <td>${escapeHtml(s.artist || '')}</td>
+      <td>${s[metricKey] || 0}</td>
+    </tr>`).join('') || `<tr><td colspan="4" class="muted">No songs yet.</td></tr>`;
+  return `<div style="flex:1 1 320px;min-width:280px;">
+      <div class="muted" style="margin-bottom:6px;font-weight:600;">${escapeHtml(label)}</div>
+      <div class="table-wrap"><table><tr><th>#</th><th>Song</th><th>Artist</th><th>Opens</th></tr>${rows}</table></div>
+      ${pagerHtml(sorted.length, page, changeFn)}
+    </div>`;
+}
 function renderAdminTopSongs() {
   const body = document.getElementById('adminBody');
   if (!body) return;
   if (!songs.length) { body.innerHTML = '<div class="muted">Loading songs…</div>'; return; }
-  const sorted = songs.slice().sort((a, b) => (b.view_count || 0) - (a.view_count || 0));
-  body.innerHTML = `<div class="table-wrap"><table><tr><th>#</th><th>Song</th><th>Artist</th><th>Opens</th></tr>` +
-    (pageSlice(sorted, adminTopSongsPage).map((s, i) => `<tr>
-      <td class="muted">${adminTopSongsPage * PAGE_SIZE + i + 1}</td>
-      <td><span class="adv-link" onclick="goTo('detail',{id:'${s.id}'})">${escapeHtml(s.title)}</span></td>
-      <td>${escapeHtml(s.artist || '')}</td>
-      <td>${s.view_count || 0}</td>
-    </tr>`).join('') || `<tr><td colspan="4" class="muted">No songs yet.</td></tr>`) + `</table></div>` +
-    pagerHtml(sorted.length, adminTopSongsPage, 'changeAdminTopSongsPage');
+  body.innerHTML = `<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start;">` +
+    topSongsTableHtml_('view_count', 'Top Opens', adminTopSongsPage, 'changeAdminTopSongsPage') +
+    topSongsTableHtml_('unique_view_count', 'Top Opens by Unique Users', adminTopSongsPage2, 'changeAdminTopSongsPage2') +
+    `</div>`;
 }
 function changeAdminTopSongsPage(p) { adminTopSongsPage = p; renderAdminTopSongs(); }
+function changeAdminTopSongsPage2(p) { adminTopSongsPage2 = p; renderAdminTopSongs(); }
 
 /* ============================================================
    STATS > OVERVIEW (admin) — total users plus a Daily/Weekly/Monthly/
@@ -5909,18 +5988,34 @@ function changeAdminTopSongsPage(p) { adminTopSongsPage = p; renderAdminTopSongs
 let statsOverviewCache = null;
 let statsPeriod = 'daily'; // 'daily' | 'weekly' | 'monthly' | 'yearly' - which Stats > Overview chart tab is showing
 function changeStatsPeriod(p) { statsPeriod = p; renderAdminStatsOverview(); }
-// 0 -> "12:00 AM", 13 -> "1:00 PM", etc. - used only by the Daily tab's
-// per-hour tooltips below.
+// 0 -> "12:00 AM", 13 -> "1:00 PM", etc. - the fuller form, used in each
+// bar's native-tooltip title.
 function hourLabel_(hour) {
   const h12 = hour % 12 === 0 ? 12 : hour % 12;
   return `${h12}:00 ${hour < 12 ? 'AM' : 'PM'}`;
 }
+// 0 -> "12a", 13 -> "1p", etc. - the compact form that fits under 24
+// narrow columns as this view's x-axis label.
+function hourLabelShort_(hour) {
+  const h12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${h12}${hour < 12 ? 'a' : 'p'}`;
+}
 // Shared bar-sizing: bars are sized relative to the busiest bucket in
 // THIS view, not to total user count - a quiet app with 5 regular users
 // should still show a readable chart, not a row of near-invisible slivers.
-function statsBarsHtml_(values, titleFn) {
-  const max = Math.max(1, ...values);
-  return values.map((v, i) => `<div class="stat-bar" style="height:${v > 0 ? Math.max(Math.round(v / max * 100), 4) : 0}%;" title="${escapeHtml(titleFn(v, i))}"></div>`).join('');
+// Each item is {value, label, title?} - label is the short x-axis caption
+// shown under every bar, title (falls back to label) is the native-
+// tooltip text on long hover.
+function statsBarsHtml_(items) {
+  const max = Math.max(1, ...items.map(x => x.value));
+  return items.map(x => {
+    const pct = x.value > 0 ? Math.max(Math.round(x.value / max * 100), 4) : 0;
+    return `<div class="stat-chart-col">
+      <div class="stat-chart-value">${x.value}</div>
+      <div class="stat-chart-barwrap"><div class="stat-bar" style="height:${pct}%;" title="${escapeHtml(x.title || x.label)}"></div></div>
+      <div class="stat-chart-label">${escapeHtml(x.label)}</div>
+    </div>`;
+  }).join('');
 }
 function loadAdminStatsOverview() {
   if (statsOverviewCache && usersLoaded) { renderAdminStatsOverview(); return; }
@@ -5956,22 +6051,32 @@ function renderAdminStatsOverview() {
   if (statsPeriod === 'daily') {
     const hourCounts = new Array(24).fill(0);
     (d.todayVisits || []).forEach(ts => { hourCounts[new Date(ts).getHours()]++; });
-    barsHtml = statsBarsHtml_(hourCounts, (v, h) => `${hourLabel_(h)}: ${v} visitor${v === 1 ? '' : 's'}`);
+    const items = hourCounts.map((v, h) => ({ value: v, label: hourLabelShort_(h), title: `${hourLabel_(h)}: ${v} visitor${v === 1 ? '' : 's'}` }));
+    barsHtml = statsBarsHtml_(items);
     const todayCount = (d.todayVisits || []).length;
     caption = `Today's visits by hour, in your local time (first app-open per visitor — ${todayCount} visitor${todayCount === 1 ? '' : 's'} so far today)`;
   } else if (statsPeriod === 'weekly' || statsPeriod === 'monthly') {
     const list = statsPeriod === 'weekly' ? d.days.slice(-7) : d.days;
-    barsHtml = statsBarsHtml_(list.map(x => x.visitors), (v, i) => {
-      const dateLabel = new Date(list[i].date + 'T00:00:00Z').toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
-      return `${dateLabel}: ${v} visitor${v === 1 ? '' : 's'}`;
+    const items = list.map(day => {
+      const dateObj = new Date(day.date + 'T00:00:00Z');
+      const fullLabel = dateObj.toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
+      // Weekly has room for "Oct 2"; Monthly's 30 columns only have room
+      // for the bare day number - the month is already named in the
+      // caption below, and the full date is still in the hover title.
+      const label = statsPeriod === 'weekly' ? fullLabel : String(dateObj.getUTCDate());
+      return { value: day.visitors, label, title: `${fullLabel}: ${day.visitors} visitor${day.visitors === 1 ? '' : 's'}` };
     });
-    caption = statsPeriod === 'weekly' ? 'Visitors per day — last 7 days (hover a bar for its date)' : 'Visitors per day — last 30 days (hover a bar for its date)';
+    barsHtml = statsBarsHtml_(items);
+    caption = statsPeriod === 'weekly' ? 'Visitors per day — last 7 days' : 'Visitors per day — last 30 days';
   } else {
-    barsHtml = statsBarsHtml_(d.months.map(x => x.visitors), (v, i) => {
-      const monthLabel = new Date(d.months[i].month + '-01T00:00:00Z').toLocaleDateString(undefined, { month: 'short', year: 'numeric', timeZone: 'UTC' });
-      return `${monthLabel}: ${v} visitor${v === 1 ? '' : 's'}`;
+    const items = d.months.map(mo => {
+      const dateObj = new Date(mo.month + '-01T00:00:00Z');
+      const label = dateObj.toLocaleDateString(undefined, { month: 'short', timeZone: 'UTC' });
+      const fullLabel = dateObj.toLocaleDateString(undefined, { month: 'short', year: 'numeric', timeZone: 'UTC' });
+      return { value: mo.visitors, label, title: `${fullLabel}: ${mo.visitors} visitor${mo.visitors === 1 ? '' : 's'}` };
     });
-    caption = 'Visitors per month — last 12 months (hover a bar for its month)';
+    barsHtml = statsBarsHtml_(items);
+    caption = 'Visitors per month — last 12 months';
   }
 
   body.innerHTML = `
