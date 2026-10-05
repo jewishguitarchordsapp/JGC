@@ -1212,7 +1212,7 @@ const MYDATA_CACHE_KEY = 'jgc_mydata_cache_v1';
 function saveMyDataCache() {
   try {
     if (!currentUser) return;
-    localStorage.setItem(MYDATA_CACHE_KEY, JSON.stringify({ email: currentUser.email, favorites, knownChords }));
+    localStorage.setItem(MYDATA_CACHE_KEY, JSON.stringify({ email: currentUser.email, favorites, knownChords, myCapos }));
   } catch (e) {}
 }
 function loadMyDataCache(email) {
@@ -1435,6 +1435,8 @@ async function loadMyData() {
     // while the visibly-rendered one silently went stale underneath it.
     favorites.length = 0; favorites.push(...(data.favorites || []));
     knownChords.length = 0; knownChords.push(...(data.knownChords || []));
+    myCapos = data.myCapos || {};
+    if (view.name === 'detail' && playerState.songId && myCapos[playerState.songId] !== undefined && playerState.myCapo == null) playerState.myCapo = myCapos[playerState.songId];
     currentUser.isAdmin = !!(data.user && data.user.isAdmin);
     myDataReady = true;
     saveMyDataCache();
@@ -1954,6 +1956,7 @@ async function supaApi(action, fields) {
       success: true,
       favorites: (favRes.data || []).map(f => f.song_id),
       knownChords: (kcRes.data && kcRes.data.chords) || [],
+      myCapos: await supaLoadMyCapos_(me.id),
       user: { email: me.email, name: me.name, isAdmin: !!me.is_admin },
     };
   }
@@ -2147,7 +2150,7 @@ async function supaApi(action, fields) {
     {
       const { data, error } = await getSupa_().rpc('admin_visit_stats');
       if (!error && data && Array.isArray(data.days)) {
-        return { success: true, totalUsers: data.totalUsers || 0, days: data.days, months: data.months || [], todayVisits: data.todayVisits || [], countries30: data.countries30 || null };
+        return { success: true, totalUsers: data.totalUsers || 0, days: data.days, months: data.months || [], todayVisits: data.todayVisits || [], countries7: data.countries7 || null, countries30: data.countries30 || null, countries12m: data.countries12m || null };
       }
     }
     const YEAR_DAYS = 371; // comfortably covers 12 full calendar months back from today
@@ -2227,6 +2230,7 @@ async function supaApi(action, fields) {
       playlists: await supaHydratePlaylists_(plRes.data || []),
       requests: (reqRes.data || []).map(r => supaRequestToOld_(r, emailMap)),
       messages: (msgRes.data || []).map(m => supaMessageToOld_(m, emailMap)),
+      myCapos: await supaLoadMyCapos_(target.id),
     };
   }
 
@@ -2367,6 +2371,16 @@ async function supaApi(action, fields) {
     await Promise.all(orderedIds.map((song_id, idx) =>
       getSupa_().from('favorites').update({ position: idx }).eq('user_id', eff.id).eq('song_id', song_id)
     ));
+    return { success: true };
+  }
+  if (action === 'setMyCapo') {
+    const me = await supaRequireUser_();
+    const eff = await supaEffectiveProfile_(me, fields);
+    const q = (fields.capo === null || fields.capo === undefined)
+      ? getSupa_().from('user_song_capos').delete().eq('user_id', eff.id).eq('song_id', fields.song_id)
+      : getSupa_().from('user_song_capos').upsert({ user_id: eff.id, song_id: fields.song_id, capo: Number(fields.capo), updated_at: new Date().toISOString() });
+    const { error } = await q;
+    throwIfErr_(error);
     return { success: true };
   }
   if (action === 'setKnownChords') {
@@ -2534,6 +2548,15 @@ function supaRequestToOld_(r, emailMap) {
     youtube_url: r.youtube_url || '', categories: r.categories || [], lyrics: r.lyrics || '',
     decline_reason: r.decline_reason || '',
   };
+}
+// A user's saved "My Capo" per song, as { songId: capo }. Returns {} if
+// add_my_capo.sql hasn't been run yet, so nothing else breaks.
+async function supaLoadMyCapos_(userId) {
+  const { data, error } = await getSupa_().from('user_song_capos').select('song_id,capo').eq('user_id', userId);
+  if (error) return {};
+  const out = {};
+  (data || []).forEach(r => { out[r.song_id] = r.capo; });
+  return out;
 }
 function supaMessageToOld_(m, emailMap) {
   const who = emailMap[m.user_id] || {};
@@ -4460,6 +4483,8 @@ function renderHome() {
 // set is "in effect" right now. Writes made while viewAsUser is set (see
 // viewAsFields()/refreshAfterWrite() above) mutate this same data in place.
 function effectiveFavorites() { return viewAsUser ? (viewAsData.favorites || []) : favorites; }
+let myCapos = {}; // { songId: capo } - this user's saved "My Capo" choices
+function effectiveMyCapos() { return viewAsUser ? (viewAsData.myCapos || (viewAsData.myCapos = {})) : myCapos; }
 function effectiveKnownChords() { return viewAsUser ? (viewAsData.knownChords || []) : knownChords; }
 function effectiveRequests() { return viewAsUser ? (viewAsData.requests || []) : contactRequestsCache; }
 function effectiveMessages() { return viewAsUser ? (viewAsData.messages || []) : contactMessagesCache; }
@@ -4491,7 +4516,7 @@ function viewAsFields() { return viewAsUser ? { target_email: viewAsUser.email, 
 function refreshAfterWrite() {
   if (!viewAsUser) return Promise.resolve();
   return api('getUserSnapshot', { target_email: viewAsUser.email }).then(data => {
-    viewAsData = { favorites: data.favorites || [], knownChords: data.knownChords || [], playlists: data.playlists || [], requests: data.requests || [], messages: data.messages || [] };
+    viewAsData = { favorites: data.favorites || [], knownChords: data.knownChords || [], playlists: data.playlists || [], requests: data.requests || [], messages: data.messages || [], myCapos: data.myCapos || {} };
   });
 }
 
@@ -4502,7 +4527,7 @@ function refreshAfterWrite() {
 function refreshPlaylistsOnly() {
   if (viewAsUser) {
     return api('getUserSnapshot', { target_email: viewAsUser.email }).then(data => {
-      viewAsData = { favorites: data.favorites || [], knownChords: data.knownChords || [], playlists: data.playlists || [], requests: data.requests || [], messages: data.messages || [] };
+      viewAsData = { favorites: data.favorites || [], knownChords: data.knownChords || [], playlists: data.playlists || [], requests: data.requests || [], messages: data.messages || [], myCapos: data.myCapos || {} };
     });
   }
   return api('getPlaylists', {}).then(pl => { playlists = pl.playlists || []; });
@@ -5016,7 +5041,7 @@ function renderDetail() {
   if (!contentReady && !song._contentPending) { song._contentPending = true; loadSongContentFor(song.id); }
   const isSameSongAsBefore = playerState.songId === song.id;
   playerState.capo = isSameSongAsBefore ? playerState.capo : song.capo;
-  playerState.myCapo = isSameSongAsBefore ? playerState.myCapo : null;
+  if (!isSameSongAsBefore) { const saved = effectiveMyCapos()[song.id]; playerState.myCapo = (saved === undefined || saved === null) ? null : Number(saved); }
   if (!isSameSongAsBefore) {
     playerState.fontSize = displayPrefs.fontSize;
     playerState.bold = displayPrefs.bold;
@@ -5200,13 +5225,27 @@ function openMyCapoPicker() {
 }
 function setMyCapo(n) {
   playerState.myCapo = n;
+  saveMyCapo_(playerState.songId, n);
   closeModal();
   renderDetail();
 }
 function clearMyCapo() {
   playerState.myCapo = null;
+  saveMyCapo_(playerState.songId, null);
   closeModal();
   renderDetail();
+}
+// Remembers "My Capo" for this song (on the account, so it follows the user
+// to any device). Updates locally right away; saves in the background.
+function saveMyCapo_(songId, capo) {
+  if (!songId || !currentUser) return;
+  const map = effectiveMyCapos();
+  if (capo === null) delete map[songId]; else map[songId] = capo;
+  if (!viewAsUser) saveMyDataCache();
+  api('setMyCapo', Object.assign({ song_id: songId, capo }, viewAsFields())).catch(err => {
+    console.warn('Could not save My Capo', err && err.message);
+    if (/user_song_capos/.test((err && err.message) || '')) showToast('Saving "My Capo" needs add_my_capo.sql to be run first.');
+  });
 }
 function changeSpeed(delta) {
   playerState.speed = Math.max(0.2, Math.min(3, +(playerState.speed + delta).toFixed(1)));
@@ -7455,7 +7494,22 @@ function renderAdminStatsOverview() {
       <div class="stat-chart">${barsHtml}</div>
       <div id="statDetail" class="stat-detail muted">Tap or hover over a bar to see which countries those visitors came from.</div>
     </div>
-    ${d.countries30 ? `<div class="card"><div class="muted" style="margin-bottom:8px;">Visitors by country — last 30 days</div>${countryBreakdownHtml_(d.countries30)}<div class="muted" style="font-size:11.5px;margin-top:8px;">Based on each device's time-zone setting.</div></div>` : ''}`;
+    ${(() => {
+      // Summary follows the selected view: today / last 7 days / last 30 days / last 12 months.
+      // Counts are distinct people per country for the whole period (someone
+      // who visited on 3 days counts once).
+      let obj = null, title = '';
+      if (statsPeriod === 'daily') {
+        obj = {};
+        (d.todayVisits || []).forEach(v => { if (v && typeof v === 'object') { const cc = v.c || '??'; obj[cc] = (obj[cc] || 0) + 1; } });
+        if (!Object.keys(obj).length) obj = null;
+        title = 'Visitors by country — today';
+      } else if (statsPeriod === 'weekly') { obj = d.countries7; title = 'Visitors by country — last 7 days'; }
+      else if (statsPeriod === 'monthly') { obj = d.countries30; title = 'Visitors by country — last 30 days'; }
+      else { obj = d.countries12m; title = 'Visitors by country — last 12 months'; }
+      if (!obj) return '';
+      return `<div class="card"><div class="muted" style="margin-bottom:8px;">${title}</div>${countryBreakdownHtml_(obj)}<div class="muted" style="font-size:11.5px;margin-top:8px;">Based on each device's time-zone setting.</div></div>`;
+    })()}`;
 }
 
 /* ============================================================
@@ -7567,7 +7621,7 @@ function changeUsersPage(p) { usersPage = p; renderUsersList(); }
 function enterViewAs(email, name) {
   api('getUserSnapshot', { target_email: email }).then(data => {
     viewAsUser = { email: data.email, name: name || data.email };
-    viewAsData = { favorites: data.favorites || [], knownChords: data.knownChords || [], playlists: data.playlists || [], requests: data.requests || [], messages: data.messages || [] };
+    viewAsData = { favorites: data.favorites || [], knownChords: data.knownChords || [], playlists: data.playlists || [], requests: data.requests || [], messages: data.messages || [], myCapos: data.myCapos || {} };
     songTab = 'all';
     contactChatOpen = true; // starts open on entering View As (see isOpen in renderContactBody) - but, unlike before, can now be collapsed
     goTo('list');
@@ -8085,7 +8139,7 @@ if (cachedAuth && cachedAuth.idToken) currentUser = cachedAuth;
 // had gone missing.
 if (currentUser) {
   const cachedMyData = loadMyDataCache(currentUser.email);
-  if (cachedMyData) { favorites = cachedMyData.favorites || []; knownChords = cachedMyData.knownChords || []; }
+  if (cachedMyData) { favorites = cachedMyData.favorites || []; knownChords = cachedMyData.knownChords || []; myCapos = cachedMyData.myCapos || {}; }
 }
 // Reopen whatever page was open before the reload (see saveViewCache above)
 // instead of always resetting to Home/Welcome — this is what makes a mobile
