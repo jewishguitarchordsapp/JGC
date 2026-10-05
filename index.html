@@ -367,6 +367,10 @@
   .line-editor:focus{border-color:var(--teal);box-shadow:0 0 0 2px rgba(74,155,155,.2);}
   .line-editor > div{min-height:1.45em;}
   .line-editor > div.le-chord{color:var(--chord);font-weight:700;}
+  .line-editor > div.le-long{background:#fdecea;box-shadow:inset 3px 0 0 #e57373, inset -3px 0 0 #e57373;}
+  .line-len-bar{display:flex;justify-content:space-between;align-items:center;gap:8px 14px;flex-wrap:wrap;font-size:12.5px;margin:6px 0 4px;}
+  .line-len-controls{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;}
+  .preview-box.phone-width{max-width:375px;margin-left:auto;margin-right:auto;}
   .line-editor > div.le-override{background:linear-gradient(to right, rgba(74,155,155,.07), rgba(74,155,155,.07));}
   .html-lyric-row{font-family:"CustomCourier",'Courier New',monospace;white-space:pre;line-height:1.35;font-size:calc(14px + var(--chart-step,0px));font-weight:var(--chart-fw,400);margin-bottom:5px;}
   .title-hebrew{color:var(--muted);font-size:13px;direction:rtl;}
@@ -4065,7 +4069,62 @@ function normalizeLineEditor_() {
 function lineEditorLines_() {
   return Array.from(lineEditorEl_().children).map(d => ({ text: (d.textContent || '').replace(/\u00a0/g, ' '), align: d.getAttribute('data-align') || '' }));
 }
+// ---- Line-length guide ----------------------------------------------------
+// Same idea as keeping each line inside ~3.5–4" in Courier 11 in Word: a
+// chart line longer than this many characters runs off an iPhone screen.
+// Hebrew vowel points / combining marks take no width, so they aren't counted.
+let previewPhoneWidth = false;
+function lineLenLimit_() {
+  try { const v = parseInt(localStorage.getItem('jgc_line_limit'), 10); if (v >= 20 && v <= 80) return v; } catch (e) {}
+  return 40;
+}
+function setLineLenLimit_(v) {
+  const n = parseInt(v, 10);
+  if (!(n >= 20 && n <= 80)) return;
+  try { localStorage.setItem('jgc_line_limit', String(n)); } catch (e) {}
+  styleLineEditor_();
+}
+function visibleLen_(t) { return String(t || '').replace(/\s+$/, '').replace(/\p{M}/gu, '').length; }
+function togglePreviewPhoneWidth_(on) {
+  previewPhoneWidth = !!on;
+  const b = document.getElementById('previewBox'); if (b) b.classList.toggle('phone-width', previewPhoneWidth);
+}
+function updateLineLenBar_(longCount, longLyricFree) {
+  const msg = document.getElementById('lineLenMsg'), btn = document.getElementById('breakLongBtn');
+  if (msg) {
+    msg.textContent = longCount
+      ? `${longCount} line${longCount === 1 ? ' is' : 's are'} longer than ${lineLenLimit_()} characters (highlighted) — break ${longCount === 1 ? 'it' : 'them'} so ${longCount === 1 ? 'it fits' : 'they fit'} on a phone.`
+      : `All lines fit on a phone screen (${lineLenLimit_()} characters max).`;
+    msg.style.color = longCount ? '#b3261e' : '';
+  }
+  if (btn) btn.disabled = !longLyricFree;
+}
+// Splits each too-long LYRIC line that has no chord line above it yet, at
+// the last space that keeps it within the limit (same as breaking it by
+// hand in Word before adding chords). Lines with chords above them are
+// left alone - they need to be broken by hand so the chords stay lined up.
+function breakLongLyricLines_() {
+  const limit = lineLenLimit_();
+  const lines = lineEditorLines_();
+  const out = [];
+  lines.forEach((l, i) => {
+    const prev = i > 0 ? lines[i - 1].text : '';
+    const hasChordAbove = prev.trim() !== '' && looksLikeChordLine(prev);
+    if (looksLikeChordLine(l.text) || hasChordAbove || visibleLen_(l.text) <= limit) { out.push(l); return; }
+    const words = l.text.trim().split(/\s+/);
+    let cur = '';
+    words.forEach(w => {
+      const next = cur ? cur + ' ' + w : w;
+      if (cur && visibleLen_(next) > limit) { out.push({ text: cur, align: l.align }); cur = w; }
+      else cur = next;
+    });
+    if (cur) out.push({ text: cur, align: l.align });
+  });
+  lineEditorSetLines_(out);
+}
 function styleLineEditor_() {
+  const limit = lineLenLimit_();
+  let longCount = 0, longLyricFree = 0;
   const divs = Array.from(lineEditorEl_().children);
   const texts = divs.map(d => (d.textContent || '').replace(/\u00a0/g, ' '));
   divs.forEach((d, i) => {
@@ -4079,7 +4138,15 @@ function styleLineEditor_() {
     d.style.textAlign = ov || (rtl ? 'right' : 'left');
     d.classList.toggle('le-chord', isChord);
     d.classList.toggle('le-override', !!ov);
+    const tooLong = visibleLen_(t) > limit;
+    d.classList.toggle('le-long', tooLong);
+    if (tooLong) {
+      longCount++;
+      const prev = i > 0 ? texts[i - 1] : '';
+      if (!isChord && !(prev.trim() !== '' && looksLikeChordLine(prev))) longLyricFree++;
+    }
   });
+  updateLineLenBar_(longCount, longLyricFree);
 }
 function syncLineEditor_() {
   const lines = lineEditorLines_();
@@ -5521,9 +5588,17 @@ function renderEdit() {
       <div id="simpleHint" class="muted" style="margin:4px 0 6px;font-size:13px;" ${editChordMode==='simple'?'':'hidden'}>Type the chord line, then the lyric line right below it — just like on paper. Leave one empty line between sections. Each line sets itself up automatically: Hebrew/Yiddish lines go right-to-left, chord lines stay left-to-right and line up with the lyric line below them. To change how a line lines up, put the cursor on it (or select several lines) and tap <b>Left</b> or <b>Right</b>; <b>Auto</b> puts it back.</div>
       <div id="rawHint" class="muted" style="margin:4px 0 6px;font-size:13px;" ${editChordMode==='raw'?'':'hidden'}>Put each chord in brackets right before the word it plays over, e.g. <code>[D]ארבעים [G]יום</code> — or paste in HTML chord-chart markup directly.</div>
       <div id="f_chords_simple_ed" class="line-editor" contenteditable="true" spellcheck="false" ${editChordMode==='simple'?'':'hidden'}></div>
+      <div id="lineLenBar" class="line-len-bar" ${editChordMode==='simple'?'':'hidden'}>
+        <span id="lineLenMsg" class="muted"></span>
+        <span class="line-len-controls">
+          <label class="muted" style="margin:0;font-size:12px;" title="About 40 fits an iPhone screen - the same as keeping lines inside 3.5–4 inches in Courier 11 in Word">Max characters per line</label>
+          <input type="number" id="lineLenLimit" min="20" max="80" value="${lineLenLimit_()}" oninput="setLineLenLimit_(this.value)" style="width:58px;padding:4px 6px;">
+          <button type="button" class="btn secondary" id="breakLongBtn" style="padding:4px 10px;font-size:12px;" onclick="breakLongLyricLines_()" title="Splits long lyric lines (ones without chords above them yet) at a space, so each fits">Break long lyric lines</button>
+        </span>
+      </div>
       <textarea id="f_chords_simple" style="display:none;">${escapeHtml(simpleText)}</textarea>
       <textarea id="f_chords_raw" style="unicode-bidi:plaintext;" oninput="updatePreview()" ${editChordMode==='raw'?'':'hidden'}>${escapeHtml(rawText)}</textarea>
-      <div class="card preview-box"><div class="muted" style="margin-bottom:6px">Live preview</div><div id="previewChart">${renderChart(stored, 0)}</div></div>
+      <div class="card preview-box${previewPhoneWidth ? ' phone-width' : ''}" id="previewBox"><div class="muted" style="margin-bottom:6px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;"><span>Live preview</span><label style="margin:0;font-size:12px;display:inline-flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" ${previewPhoneWidth ? 'checked' : ''} onchange="togglePreviewPhoneWidth_(this.checked)"> Show at phone width</label></div><div id="previewChart">${renderChart(stored, 0)}</div></div>
       <div style="margin-top:14px;display:flex;gap:10px;align-items:center;">
         ${(!song || isDraft_(song))
           ? `<button class="btn" type="submit" onclick="editPublishChoice='publish'">${song ? 'Publish' : 'Add & publish'}</button>
@@ -5554,6 +5629,7 @@ function setEditChordMode(mode) {
   editChordMode = mode;
   const edEl = document.getElementById('f_chords_simple_ed'); if (edEl) edEl.hidden = mode !== 'simple';
   const laEl = document.getElementById('lineAlignControls'); if (laEl) laEl.hidden = mode !== 'simple';
+  const llEl = document.getElementById('lineLenBar'); if (llEl) llEl.hidden = mode !== 'simple';
   rawEl.hidden = mode !== 'raw';
   document.getElementById('simpleHint').hidden = mode !== 'simple';
   document.getElementById('rawHint').hidden = mode !== 'raw';
