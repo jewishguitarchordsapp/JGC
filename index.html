@@ -242,6 +242,8 @@
   .badge.added{background:#dcf3e3;color:#1a7a3d;}
   .badge.declined{background:#fbe0e0;color:#a33;}
   .badge-explain{cursor:help;}
+  .badge-sym{min-width:30px;text-align:center;font-size:12px;}
+  .add-lyrics-btn{padding:3px 10px;font-size:12px;margin-left:6px;vertical-align:middle;}
   .badge-btn{border:none;cursor:pointer;font-family:inherit;}
   .badge-btn:hover{filter:brightness(.95);box-shadow:0 0 0 2px rgba(0,0,0,.06);}
   .badge-caret{font-size:9px;opacity:.7;}
@@ -6285,7 +6287,7 @@ function renderContactBody() {
   html += `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h2 style="margin:0">${requestsHeading}</h2><button class="btn" onclick="openRequestSongModal()">+ Request a Song</button></div>
       <p class="muted">Up to 2 requests per week.</p>`;
   html += `<div class="table-wrap"><table><tr><th>Status</th><th>Song</th><th>Artist</th></tr>
-      ${pageSlice(myRequests, contactRequestsPage, 10).map(r => `<tr data-req-id="${escapeHtml(r.id)}"><td><span class="badge badge-explain ${r.status}" role="button" tabindex="0" title="${escapeHtml(requestStatusMeaning_(r.status))}" onclick="showToast(this.title)">${requestStatusSymbol(r.status)}</span>${r.status==='declined' && r.decline_reason ? `<br><span class="muted" style="font-size:11.5px;">${escapeHtml(r.decline_reason)}</span>` : ''}${r.status==='needs_lyrics' ? `<div class="needs-lyrics-note">We'd love to add this song but couldn't find the lyrics. If you have them, please send them and we'll add it!<br><button class="btn" style="margin-top:6px;padding:5px 12px;font-size:12.5px;" onclick="openAddRequestLyrics_('${r.id}')">Add lyrics</button></div>` : ''}</td><td dir="auto">${escapeHtml(r.song_title)}</td><td dir="auto">${escapeHtml(r.artist)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No requests yet.</td></tr>'}
+      ${pageSlice(myRequests, contactRequestsPage, 10).map(r => `<tr data-req-id="${escapeHtml(r.id)}"><td><span class="badge badge-explain ${r.status}" role="button" tabindex="0" title="${escapeHtml(requestStatusMeaning_(r.status))}" onclick="showToast(this.title)">${requestStatusSymbol(r.status)}</span>${r.status==='declined' && r.decline_reason ? `<br><span class="muted" style="font-size:11.5px;">${escapeHtml(r.decline_reason)}</span>` : ''}${r.status==='needs_lyrics' ? ` <button class="btn add-lyrics-btn" onclick="openAddRequestLyrics_('${r.id}')">Add lyrics</button>` : ''}</td><td dir="auto">${escapeHtml(r.song_title)}</td><td dir="auto">${escapeHtml(r.artist)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No requests yet.</td></tr>'}
       </table></div>
       ${pagerHtml(myRequests.length, contactRequestsPage, 'changeContactRequestsPage', 10)}`;
   // The chat card is a clickable preview that expands into the full thread —
@@ -6736,8 +6738,7 @@ function renderAdminRequestsList_() {
   // Pending); clicking it opens the Change status menu with the other options.
   const statusCell = r => {
     const st = r.status || 'pending';
-    const label = st === 'needs_lyrics' ? '✎ Looking for lyrics' : requestStatusSymbol(st) + ' ' + escapeHtml(REQUEST_STATUS_LABELS[st] || st);
-    const badge = `<button type="button" class="badge badge-btn ${st}" title="${escapeHtml(REQUEST_STATUS_LABELS[st] || st)} — click to change status" onclick="openRequestStatusMenu_('${r.id}')">${label} <span class="badge-caret">▾</span></button>`;
+    const badge = `<button type="button" class="badge badge-btn badge-sym ${st}" title="${escapeHtml(REQUEST_STATUS_LABELS[st] || st)} — click to change status" aria-label="${escapeHtml(REQUEST_STATUS_LABELS[st] || st)} — change status" onclick="openRequestStatusMenu_('${r.id}')">${requestStatusSymbol(st)}</button>`;
     const reason = st === 'declined' && r.decline_reason ? `<div class="muted" style="font-size:11.5px;margin-top:3px;">${escapeHtml(r.decline_reason)}</div>` : '';
     return badge + reason;
   };
