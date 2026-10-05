@@ -241,6 +241,14 @@
   .badge.pending{background:#fdf3d0;color:#8a6d00;}
   .badge.added{background:#dcf3e3;color:#1a7a3d;}
   .badge.declined{background:#fbe0e0;color:#a33;}
+  .badge-explain{cursor:help;}
+  .badge-btn{border:none;cursor:pointer;font-family:inherit;}
+  .badge-btn:hover{filter:brightness(.95);box-shadow:0 0 0 2px rgba(0,0,0,.06);}
+  .badge-caret{font-size:9px;opacity:.7;}
+  .status-menu{display:flex;flex-direction:column;gap:6px;margin:10px 0;}
+  .status-menu-opt{display:flex;align-items:center;gap:10px;text-align:left;background:#fff;border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:14px;cursor:pointer;font-family:inherit;color:var(--text);}
+  .status-menu-opt:hover:not([disabled]){border-color:var(--teal);background:#f5f9f9;}
+  .status-menu-opt.current{opacity:.65;cursor:default;}
   .badge.needs_lyrics{background:#e3eefc;color:#1f5aa6;white-space:nowrap;}
   .needs-lyrics-note{font-size:12.5px;color:#1f5aa6;background:#f0f6ff;border:1px solid #d3e3fa;border-radius:8px;padding:7px 9px;margin-top:6px;max-width:320px;}
   .status-icon-btn.needs-lyrics{color:#1f5aa6;}
@@ -6224,6 +6232,16 @@ function addSongToPlaylist_(songId) {
 // the badge's existing color classes (.pending/.added/.declined) still carry
 // the color, and a title attribute keeps the word available on hover/for
 // screen readers.
+// What each request status means, for the requester (shown on hover, or
+// as a short pop-up message when the symbol is tapped on a phone).
+function requestStatusMeaning_(status) {
+  return ({
+    pending: 'Waiting — your request has been received and hasn’t been reviewed yet.',
+    needs_lyrics: 'Looking for lyrics — we’d like to add this song but need the lyrics. Tap “Add lyrics” to send them.',
+    added: 'Added — this song is now in the app!',
+    declined: 'Not added — this request was declined. Any note from the admin is shown underneath.',
+  })[status] || String(status || '');
+}
 function requestStatusSymbol(status) {
   return status === 'added' ? '✓' : status === 'declined' ? '✕' : status === 'pending' ? '⏳' : status === 'needs_lyrics' ? '✎' : (status || '');
 }
@@ -6267,7 +6285,7 @@ function renderContactBody() {
   html += `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h2 style="margin:0">${requestsHeading}</h2><button class="btn" onclick="openRequestSongModal()">+ Request a Song</button></div>
       <p class="muted">Up to 2 requests per week.</p>`;
   html += `<div class="table-wrap"><table><tr><th>Status</th><th>Song</th><th>Artist</th></tr>
-      ${pageSlice(myRequests, contactRequestsPage, 10).map(r => `<tr data-req-id="${escapeHtml(r.id)}"><td><span class="badge ${r.status}" title="${escapeHtml(r.status)}">${requestStatusSymbol(r.status)}</span>${r.status==='declined' && r.decline_reason ? `<br><span class="muted" style="font-size:11.5px;">${escapeHtml(r.decline_reason)}</span>` : ''}${r.status==='needs_lyrics' ? `<div class="needs-lyrics-note">We'd love to add this song but couldn't find the lyrics. If you have them, please send them and we'll add it!<br><button class="btn" style="margin-top:6px;padding:5px 12px;font-size:12.5px;" onclick="openAddRequestLyrics_('${r.id}')">Add lyrics</button></div>` : ''}</td><td dir="auto">${escapeHtml(r.song_title)}</td><td dir="auto">${escapeHtml(r.artist)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No requests yet.</td></tr>'}
+      ${pageSlice(myRequests, contactRequestsPage, 10).map(r => `<tr data-req-id="${escapeHtml(r.id)}"><td><span class="badge badge-explain ${r.status}" role="button" tabindex="0" title="${escapeHtml(requestStatusMeaning_(r.status))}" onclick="showToast(this.title)">${requestStatusSymbol(r.status)}</span>${r.status==='declined' && r.decline_reason ? `<br><span class="muted" style="font-size:11.5px;">${escapeHtml(r.decline_reason)}</span>` : ''}${r.status==='needs_lyrics' ? `<div class="needs-lyrics-note">We'd love to add this song but couldn't find the lyrics. If you have them, please send them and we'll add it!<br><button class="btn" style="margin-top:6px;padding:5px 12px;font-size:12.5px;" onclick="openAddRequestLyrics_('${r.id}')">Add lyrics</button></div>` : ''}</td><td dir="auto">${escapeHtml(r.song_title)}</td><td dir="auto">${escapeHtml(r.artist)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No requests yet.</td></tr>'}
       </table></div>
       ${pagerHtml(myRequests.length, contactRequestsPage, 'changeContactRequestsPage', 10)}`;
   // The chat card is a clickable preview that expands into the full thread —
@@ -6721,7 +6739,7 @@ function renderAdminRequestsList_() {
           ${r.status === 'pending' ? `<button class="status-icon-btn needs-lyrics" onclick="setRequestStatus('${r.id}','needs_lyrics')" title="Looking for lyrics — ask the user to send them" aria-label="Looking for lyrics">${ADMIN_FILTER_ICONS.needs_lyrics}</button>` : ''}
           <button class="status-icon-btn declined" onclick="setRequestStatus('${r.id}','declined')" title="Decline" aria-label="Decline">${SVG_ICONS.decline}</button>
         </span>` : '';
-    const badge = r.status === 'pending' ? '' : `<span class="badge ${r.status}" title="${escapeHtml(REQUEST_STATUS_LABELS[r.status] || r.status)}">${r.status === 'needs_lyrics' ? '✎ Looking for lyrics' : requestStatusSymbol(r.status)}</span>`;
+    const badge = r.status === 'pending' ? '' : `<button type="button" class="badge badge-btn ${r.status}" title="${escapeHtml(REQUEST_STATUS_LABELS[r.status] || r.status)} — click to change status" onclick="openRequestStatusMenu_('${r.id}')">${r.status === 'needs_lyrics' ? '✎ Looking for lyrics' : requestStatusSymbol(r.status) + ' ' + escapeHtml(REQUEST_STATUS_LABELS[r.status] || r.status)} <span class="badge-caret">▾</span></button>`;
     const reason = r.status === 'declined' && r.decline_reason ? `<div class="muted" style="font-size:11.5px;">${escapeHtml(r.decline_reason)}</div>` : '';
     return badge + (badge && actions ? '<div style="height:4px"></div>' : '') + actions + reason;
   };
@@ -6781,6 +6799,25 @@ function setRequestStatus(id, status) {
     if (status === 'needs_lyrics' && /invalid input value for enum/i.test(err.message || '')) alert('Run admin_updates_oct2.sql in Supabase first to turn on the "Looking for lyrics" status.');
     else alert(err.message);
   });
+}
+// "Change status" for a request that's already been handled - e.g. it was
+// declined but you changed your mind. Picking Declined asks for the
+// optional reason again, same as the row's ✕ button.
+function openRequestStatusMenu_(id) {
+  const r = requestsCache.find(x => x.id === id);
+  if (!r) return;
+  const opts = ['pending', 'needs_lyrics', 'added', 'declined'];
+  openModal(`
+    <h2 style="margin-top:0">Change status</h2>
+    <p class="muted" dir="auto" style="margin-top:-6px;">${escapeHtml(r.song_title)}${r.artist ? ' — ' + escapeHtml(r.artist) : ''}</p>
+    <div class="status-menu">
+      ${opts.map(s => `<button type="button" class="status-menu-opt${r.status === s ? ' current' : ''}" ${r.status === s ? 'disabled' : ''} onclick="closeModal();setRequestStatus('${r.id}','${s}')">
+        <span class="badge ${s}">${s === 'needs_lyrics' ? '✎' : requestStatusSymbol(s)}</span> ${escapeHtml(REQUEST_STATUS_LABELS[s])}${r.status === s ? ' <span class="muted">(current)</span>' : ''}
+      </button>`).join('')}
+    </div>
+    <p class="muted" style="font-size:12.5px;">The user sees the new status on their Contact page.</p>
+    <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">Cancel</button></div>
+  `);
 }
 function setRequestArchived(id, archived) {
   api('archiveRequest', { id, archived }).then(() => loadAdminRequests(true)).catch(err => alert(err.message));
