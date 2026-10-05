@@ -242,6 +242,7 @@
   .badge.added{background:#dcf3e3;color:#1a7a3d;}
   .badge.declined{background:#fbe0e0;color:#a33;}
   .badge-explain{cursor:help;}
+  .draft-banner{background:#fff8e1;border:1px solid #f0d98a;color:#6b5300;border-radius:8px;padding:7px 10px;font-size:13.5px;margin-bottom:8px;display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px;}
   .badge-sym{min-width:30px;text-align:center;font-size:12px;}
   .add-lyrics-btn{padding:3px 10px;font-size:12px;margin-left:6px;vertical-align:middle;}
   .badge-btn{border:none;cursor:pointer;font-family:inherit;}
@@ -1836,16 +1837,19 @@ async function supaApi(action, fields) {
     // routine refresh is now a few KB instead of the whole ~1 MB catalog -
     // this was a large share of the project's monthly data-transfer quota.
     await supaRequireUser_();
-    const cols = 'id,title,title_hebrew,artist,artist_hebrew,categories,capo,youtube_url,date_added,updated_at,chords_used';
-    const [{ data, error }, { count, error: cErr }] = await Promise.all([
+    const base = 'id,title,title_hebrew,artist,artist_hebrew,categories,capo,youtube_url,date_added,updated_at,chords_used';
+    const run = cols => Promise.all([
       getSupa_().from('songs').select(cols).gte('updated_at', fields.since).order('id').limit(1000),
       getSupa_().from('songs').select('id', { count: 'exact', head: true }),
     ]);
+    let [{ data, error }, { count, error: cErr }] = await run(base + ',published');
+    if (error && /published/.test(error.message || '')) [{ data, error }, { count, error: cErr }] = await run(base); // add_song_drafts.sql not run yet
     throwIfErr_(error); throwIfErr_(cErr);
     return { success: true, delta: true, total: count, songs: (data || []).map(s => ({
       id: s.id, title: s.title, title_hebrew: s.title_hebrew || '', artist: s.artist || '', artist_hebrew: s.artist_hebrew || '',
       categories: s.categories || [], capo: s.capo || 0, youtube_url: s.youtube_url || '',
       date_added: s.date_added, updated_at: s.updated_at, chords_used: s.chords_used || [],
+      published: s.published !== false,
     })) };
   }
   if (action === 'list') {
@@ -1868,7 +1872,8 @@ async function supaApi(action, fields) {
       let cols = ['id','title','title_hebrew','artist','artist_hebrew','categories','capo','youtube_url','date_added','updated_at','chords_used'];
       // (Open counts are no longer part of the song list - only Admin > Top
       // Songs needs them, and it fetches them itself via getTopSongCounts.)
-      const optional = ['artist_hebrew','chords_used'];
+      cols.push('published');
+      const optional = ['artist_hebrew','chords_used','published'];
       for (let attempt = 0; ; attempt++) {
         const { data, error } = await supaSelectAll_((from, to) => getSupa_().from('songs')
           .select(cols.join(',')).order('id').range(from, to));
@@ -1887,6 +1892,7 @@ async function supaApi(action, fields) {
       categories: s.categories || [], capo: s.capo || 0, youtube_url: s.youtube_url || '',
       date_added: s.date_added, updated_at: s.updated_at,
       chords_used: s.chords_used || [],
+      published: s.published !== false,
       view_count: s.view_count || 0,
       unique_view_count: s.unique_view_count || 0,
     })) };
@@ -2247,15 +2253,31 @@ async function supaApi(action, fields) {
       // comment on 'list' for why that matters.
       chords_used: chordsUsedIn(s.chords_lyrics || '', 0),
       updated_at: new Date().toISOString(),
+      published: s.published !== false,
     };
-    if (action === 'createSong') {
-      const { error } = await getSupa_().from('songs').insert(row);
-      throwIfErr_(error);
-    } else {
-      const { error } = await getSupa_().from('songs').update(row).eq('id', s.id);
-      throwIfErr_(error);
+    // Publishing a song that was a draft: treat it as newly added so it
+    // shows under "New Songs" from the day it actually goes live.
+    if (s.publishing_draft) row.date_added = row.updated_at;
+    const write = r => action === 'createSong' ? getSupa_().from('songs').insert(r) : getSupa_().from('songs').update(r).eq('id', s.id);
+    let { error } = await write(row);
+    if (error && /published/.test(error.message || '')) {
+      if (row.published === false) throw new Error('Run add_song_drafts.sql in Supabase first to turn on saving drafts.');
+      const { published, ...rest } = row; // drafts SQL not run yet - save normally
+      ({ error } = await write(rest));
     }
+    throwIfErr_(error);
     _supaListCache = null; // catalog just changed - next 'list' call re-fetches instead of serving stale cache
+    return { success: true };
+  }
+  if (action === 'setSongPublished') {
+    await supaRequireAdmin_();
+    const now = new Date().toISOString();
+    const upd = { published: !!fields.published, updated_at: now };
+    if (fields.published) upd.date_added = now;
+    const { error } = await getSupa_().from('songs').update(upd).eq('id', fields.id);
+    if (error && /published/.test(error.message || '')) throw new Error('Run add_song_drafts.sql in Supabase first to turn on drafts.');
+    throwIfErr_(error);
+    _supaListCache = null;
     return { success: true };
   }
   if (action === 'deleteSong') {
@@ -4528,8 +4550,14 @@ function songDaysAgoLabel(s) {
   return `${days} days ago`;
 }
 
+// Drafts (published === false) are only ever loaded for an admin (database
+// rules hide them from everyone else). They're kept out of every normal
+// list and only shown on the admin's own "Drafts" tab.
+function isDraft_(s) { return !!s && s.published === false; }
+function visibleSongs_() { return songs.filter(s => !isDraft_(s)); }
 function filteredSongs() {
   let list = songs.filter(s => {
+    if (songTab === 'drafts' ? !isDraft_(s) : isDraft_(s)) return false;
     const { languages, tags } = splitCategories(s.categories);
     if (filters.artist && !splitArtists(s.artist).includes(filters.artist)) return false;
     if (filters.language && !languages.includes(filters.language)) return false;
@@ -4784,7 +4812,7 @@ function renderSongListBody() {
 function changeSongPage(p) { songListPage = p; renderSongListBody(); document.getElementById('songListBody').scrollIntoView({ behavior: 'smooth', block: 'start' }); }
 
 function goRandomSong() {
-  const list = filteredSongs().length ? filteredSongs() : songs;
+  const list = filteredSongs().length ? filteredSongs() : visibleSongs_();
   if (list.length === 0) { alert('No songs to pick from yet.'); return; }
   const pick = list[Math.floor(Math.random() * list.length)];
   goTo('detail', { id: pick.id, fromShuffle: true });
@@ -4935,7 +4963,7 @@ function renderArtistsGrid_() {
   const wrap = document.getElementById('artistsGridWrap');
   if (!wrap) return;
   const counts = {};
-  songs.forEach(s => { splitArtists(s.artist).forEach(a => { counts[a] = (counts[a]||0)+1; }); });
+  visibleSongs_().forEach(s => { splitArtists(s.artist).forEach(a => { counts[a] = (counts[a]||0)+1; }); });
   let artists = Object.keys(counts).sort((a,b)=>a.localeCompare(b));
   if (artistsSearch.trim()) {
     const q = artistsSearch.trim().toLowerCase();
@@ -4946,7 +4974,7 @@ function renderArtistsGrid_() {
 }
 function renderCategories() {
   const langCounts = {}, tagCounts = {};
-  songs.forEach(s => {
+  visibleSongs_().forEach(s => {
     const { languages, tags } = splitCategories(s.categories);
     languages.forEach(l => langCounts[l] = (langCounts[l]||0)+1);
     tags.forEach(t => tagCounts[t] = (tagCounts[t]||0)+1);
@@ -5027,7 +5055,7 @@ function renderDetail() {
     : `<span class="backlink" onclick="goTo('list')">‹ Back to Songs</span>`;
   let html = `${backLink}
     <div class="song-header">
-      <div><h2 style="margin-bottom:2px" dir="auto">${escapeHtml(songDisplayTitle_(song))}</h2><div class="meta" dir="auto">${artistLinksHtml(song.artist, song.artist_hebrew)}</div></div>
+      <div>${isDraft_(song) ? `<div class="draft-banner">✎ <b>Draft</b> — only admins can see this song. <button class="btn" style="padding:4px 12px;font-size:12.5px;margin-left:6px;" onclick="publishSongNow_('${song.id}')">Publish</button></div>` : ''}<h2 style="margin-bottom:2px" dir="auto">${escapeHtml(songDisplayTitle_(song))}</h2><div class="meta" dir="auto">${artistLinksHtml(song.artist, song.artist_hebrew)}</div></div>
       ${(view.fromShuffle || effectiveIsAdmin()) ? `<div style="display:flex;gap:8px">
         ${view.fromShuffle ? `<button class="btn secondary icon-btn-round" onclick="goRandomSong()" title="Shuffle again" aria-label="Shuffle again" style="border-radius:50%;width:38px;height:38px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex:none;">${SVG_ICONS.shuffle}</button>` : ''}
         ${effectiveIsAdmin() ? `<button class="btn secondary" onclick="goTo('edit',{id:'${song.id}'})">&#9998; Edit</button>
@@ -5453,7 +5481,11 @@ function renderEdit() {
       <textarea id="f_chords_raw" style="unicode-bidi:plaintext;" oninput="updatePreview()" ${editChordMode==='raw'?'':'hidden'}>${escapeHtml(rawText)}</textarea>
       <div class="card preview-box"><div class="muted" style="margin-bottom:6px">Live preview</div><div id="previewChart">${renderChart(stored, 0)}</div></div>
       <div style="margin-top:14px;display:flex;gap:10px;align-items:center;">
-        <button class="btn" type="submit">${song ? 'Save Changes' : 'Add Song'}</button>
+        ${(!song || isDraft_(song))
+          ? `<button class="btn" type="submit" onclick="editPublishChoice='publish'">${song ? 'Publish' : 'Add & publish'}</button>
+             <button class="btn secondary" type="submit" onclick="editPublishChoice='draft'" title="Only admins will see it until you publish">Save as draft</button>`
+          : `<button class="btn" type="submit" onclick="editPublishChoice='keep'">Save Changes</button>
+             <button class="btn secondary" type="submit" onclick="editPublishChoice='draft'" title="Hide it from users until you publish again">Save &amp; move to drafts</button>`}
         <span id="saveStatus" class="status"></span>
       </div>
     </form>`;
@@ -5744,6 +5776,13 @@ function pickedArtistField_(which) {
   return list.map(a => a.he || a.en).join(', ');
 }
 
+function publishSongNow_(id) {
+  api('setSongPublished', { id, published: true })
+    .then(() => { const s = songs.find(x => x.id === id); if (s) s.published = true; return loadSongs(false); })
+    .then(() => { if (typeof showToast === 'function') showToast('Published! Everyone can see this song now.'); render(); })
+    .catch(err => alert(err.message));
+}
+let editPublishChoice = 'keep'; // which save button was pressed: 'publish' | 'draft' | 'keep'
 function saveSong(evt, id) {
   evt.preventDefault();
   const song = {
@@ -5757,6 +5796,10 @@ function saveSong(evt, id) {
     youtube_url: document.getElementById('f_youtube').value.trim(),
     chords_lyrics: currentChordsLyricsValue()
   };
+  const existing = id ? songs.find(x => x.id === id) : null;
+  const wasDraft = existing ? isDraft_(existing) : false;
+  song.published = editPublishChoice === 'draft' ? false : (editPublishChoice === 'publish' ? true : !wasDraft);
+  song.publishing_draft = !!(existing && wasDraft && song.published);
   // lyrics_only (what lyric search and the database's search index read) is
   // derived from the chart on every save - it used to be omitted here, which
   // blanked it whenever a song was edited.
@@ -5790,7 +5833,11 @@ function saveSong(evt, id) {
       if (id) delete songContentById[id];
     })
     .then(() => loadSongs(false))
-    .then(() => goTo(id ? 'detail' : 'list', id ? {id} : {}))
+    .then(() => {
+      if (song.published === false && typeof showToast === 'function') showToast('Saved as a draft — only admins can see it.');
+      if (song.published === false) { adminSection = 'communication'; adminTab = 'requests'; goTo('admin'); return; }
+      goTo(id ? 'detail' : 'list', id ? {id} : {});
+    })
     .catch(err => { statusEl.textContent = 'Error: ' + err.message; statusEl.className = 'error'; });
   return false;
 }
@@ -6209,7 +6256,7 @@ function renderAddSongsResultsOnly_() {
   // (which already exists for browsing); title/artist only (no lyrics
   // search here, to keep it fast and not depend on the full-lyrics catalog
   // being loaded yet).
-  const results = songs.filter(s => (s.title||'').toLowerCase().includes(q) || (s.artist||'').toLowerCase().includes(q)).slice(0, 40);
+  const results = visibleSongs_().filter(s => (s.title||'').toLowerCase().includes(q) || (s.artist||'').toLowerCase().includes(q)).slice(0, 40);
   resultsEl.innerHTML = results.length ? results.map(s => `
     <div class="song-row" style="display:flex;align-items:center;justify-content:space-between;">
       <div><div class="title" dir="auto">${escapeHtml(songDisplayTitle_(s))}</div><div class="artist" dir="auto">${escapeHtml(songDisplayArtist_(s))}</div></div>
@@ -6766,7 +6813,25 @@ function renderAdminRequestsList_() {
       <td class="c-date muted">${r.created_at ? new Date(r.created_at).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''}</td>
       <td><button class="status-icon-btn archive-action" onclick="setRequestArchived('${r.id}',${r.archived==='true'?'false':'true'})" title="${r.archived==='true'?'Unarchive':'Archive'}" aria-label="${r.archived==='true'?'Unarchive':'Archive'}">${r.archived==='true'?SVG_ICONS.unarchive:SVG_ICONS.archive}</button></td>
     </tr>`).join('') || `<tr><td colspan="9" class="muted">No requests${requestsFilter.length===0 && !requestsSearch?' yet':' match'}.</td></tr>`) + `</table></div>` +
-    pagerHtml(filtered.length, adminRequestsPage, 'changeAdminRequestsPage');
+    pagerHtml(filtered.length, adminRequestsPage, 'changeAdminRequestsPage') + adminDraftsSectionHtml_();
+}
+// "Unpublished songs" - saved with "Save as draft" (only admins can see
+// them). Listed under the requests so a request can be worked on, saved,
+// and published once it's ready.
+function adminDraftsSectionHtml_() {
+  const drafts = songs.filter(isDraft_).sort((a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0));
+  const rows = drafts.map(s => `<tr>
+      <td dir="auto"><span class="adv-link" style="font-weight:600;" onclick="goTo('detail',{id:'${s.id}'})">${escapeHtml(s.title || '(untitled)')}</span></td>
+      <td dir="auto">${escapeHtml(s.artist || '')}</td>
+      <td class="muted" style="white-space:nowrap;font-size:12.5px;">${s.updated_at ? new Date(s.updated_at).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''}</td>
+      <td style="white-space:nowrap;"><button class="btn secondary" style="padding:4px 12px;font-size:12.5px;" onclick="goTo('edit',{id:'${s.id}'})">Edit</button>
+        <button class="btn" style="padding:4px 12px;font-size:12.5px;margin-left:4px;" onclick="publishSongNow_('${s.id}')">Publish</button></td>
+    </tr>`).join('');
+  return `<div class="drafts-section">
+    <h3 style="margin:26px 0 4px;">✎ Unpublished songs${drafts.length ? ` (${drafts.length})` : ''}</h3>
+    <p class="muted" style="margin:0 0 8px;font-size:12.5px;">Saved with “Save as draft”. Only admins can see these until they're published.</p>
+    ${drafts.length ? `<div class="table-wrap"><table class="admin-table"><tr><th>Song</th><th>Artist</th><th>Last saved</th><th></th></tr>${rows}</table></div>` : `<div class="muted" style="font-size:13px;">No unpublished songs.</div>`}
+  </div>`;
 }
 // "Details" link on a request row — shown only when there's a categories
 // list and/or lyrics paste to see, since those don't fit in the table.
