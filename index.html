@@ -6732,16 +6732,14 @@ function renderAdminRequestsList_() {
     const on = requestsSort.key === key;
     return `<th class="sortable-th ${cls || ''}${on ? ' sorted' : ''}" onclick="setRequestsSort('${key}')" title="Sort by ${label.toLowerCase()}">${label}${on ? (requestsSort.dir > 0 ? ' ▴' : ' ▾') : ''}</th>`;
   };
+  // Every row shows just its current status (new requests come in as
+  // Pending); clicking it opens the Change status menu with the other options.
   const statusCell = r => {
-    const actions = (r.status === 'pending' || r.status === 'needs_lyrics')
-      ? `<span class="admin-grid-icons">
-          <button class="status-icon-btn added" onclick="setRequestStatus('${r.id}','added')" title="Mark added" aria-label="Mark added">${SVG_ICONS.statusResolved}</button>
-          ${r.status === 'pending' ? `<button class="status-icon-btn needs-lyrics" onclick="setRequestStatus('${r.id}','needs_lyrics')" title="Looking for lyrics — ask the user to send them" aria-label="Looking for lyrics">${ADMIN_FILTER_ICONS.needs_lyrics}</button>` : ''}
-          <button class="status-icon-btn declined" onclick="setRequestStatus('${r.id}','declined')" title="Decline" aria-label="Decline">${SVG_ICONS.decline}</button>
-        </span>` : '';
-    const badge = r.status === 'pending' ? '' : `<button type="button" class="badge badge-btn ${r.status}" title="${escapeHtml(REQUEST_STATUS_LABELS[r.status] || r.status)} — click to change status" onclick="openRequestStatusMenu_('${r.id}')">${r.status === 'needs_lyrics' ? '✎ Looking for lyrics' : requestStatusSymbol(r.status) + ' ' + escapeHtml(REQUEST_STATUS_LABELS[r.status] || r.status)} <span class="badge-caret">▾</span></button>`;
-    const reason = r.status === 'declined' && r.decline_reason ? `<div class="muted" style="font-size:11.5px;">${escapeHtml(r.decline_reason)}</div>` : '';
-    return badge + (badge && actions ? '<div style="height:4px"></div>' : '') + actions + reason;
+    const st = r.status || 'pending';
+    const label = st === 'needs_lyrics' ? '✎ Looking for lyrics' : requestStatusSymbol(st) + ' ' + escapeHtml(REQUEST_STATUS_LABELS[st] || st);
+    const badge = `<button type="button" class="badge badge-btn ${st}" title="${escapeHtml(REQUEST_STATUS_LABELS[st] || st)} — click to change status" onclick="openRequestStatusMenu_('${r.id}')">${label} <span class="badge-caret">▾</span></button>`;
+    const reason = st === 'declined' && r.decline_reason ? `<div class="muted" style="font-size:11.5px;margin-top:3px;">${escapeHtml(r.decline_reason)}</div>` : '';
+    return badge + reason;
   };
   const songCell = r => {
     const title = r.youtube_url
