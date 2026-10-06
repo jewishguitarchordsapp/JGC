@@ -465,7 +465,10 @@
   .print-body.two-col .print-col + .print-col{border-left:1px solid #ddd;padding-left:14px;margin-left:-14px;}
   .print-body.two-col[dir="rtl"] .print-col + .print-col{border-left:none;border-right:1px solid #ddd;padding-left:0;margin-left:0;padding-right:14px;margin-right:-14px;}
   .print-col{flex:none;}
-  .print-page-num{position:absolute;bottom:10px;left:0;right:0;text-align:center;font-size:11px;color:#999;}
+  .print-sheet{display:flex;flex-direction:column;}
+  .print-sheet-main{flex:1 1 auto;min-height:0;overflow:hidden;}
+  .print-footer{flex:none;display:flex;justify-content:space-between;align-items:flex-end;gap:12px;font-size:10.5px;color:#888;border-top:1px solid #e3e3e3;padding-top:4px;box-sizing:border-box;}
+  .print-footer-site{font-weight:600;letter-spacing:.02em;}
   html[data-theme="dark"] .print-sheet{--text:#222;--muted:#666;--border:#ddd;--chord:#c0392b;color:#222;color-scheme:light;}
   /* Fixes the printed page size/margins, which otherwise fall back to
      whatever the browser/OS print dialog defaults to (varies by browser,
@@ -485,7 +488,7 @@
     .print-page-wrap{padding:0 !important;display:block !important;}
     .print-page{box-shadow:none !important;border:none !important;max-width:none !important;width:auto !important;padding:0 !important;border-radius:0 !important;}
     .print-pages{transform:none !important;margin:0 !important;display:block !important;}
-    .print-sheet{box-shadow:none !important;border-radius:0 !important;width:auto !important;height:auto !important;padding:0 !important;overflow:visible !important;break-after:page;page-break-after:always;}
+    .print-sheet{box-shadow:none !important;border-radius:0 !important;width:auto !important;height:var(--sheet-print-h) !important;padding:0 !important;overflow:hidden !important;break-after:page;page-break-after:always;}
     .print-sheet:last-child{break-after:auto;page-break-after:auto;}
   }
   /* Mobile-only chrome: a hamburger (opens sign-in info in a drawer) and a
@@ -4083,7 +4086,7 @@ function setPrintPaper_(paper) {
   try { localStorage.setItem('jgc_print_paper', paper); } catch (e) {}
   updatePrintPreview({ paper });
 }
-function paginatePrint_(headerHtml, chartHtml, st) {
+function paginatePrint_(headerHtml, chartHtml, st, songTitle) {
   const pagesEl = document.getElementById('printPages');
   if (!pagesEl) return;
   const paper = PRINT_PAPERS[st.paper] || PRINT_PAPERS.letter;
@@ -4092,7 +4095,8 @@ function paginatePrint_(headerHtml, chartHtml, st) {
   if (!ps) { ps = document.createElement('style'); ps.id = 'printPageSizeStyle'; document.head.appendChild(ps); }
   ps.textContent = `@page { size: ${paper.css}; margin: ${PRINT_MARGIN_IN}in; }`;
   const PX = 96; // CSS pixels per inch
-  const contentW = (paper.w - 2 * PRINT_MARGIN_IN) * PX, contentH = (paper.h - 2 * PRINT_MARGIN_IN) * PX;
+  const FOOTER_IN = 0.3; // room kept at the bottom of every page for the jgcapp.org / page-number line
+  const contentW = (paper.w - 2 * PRINT_MARGIN_IN) * PX, contentH = (paper.h - 2 * PRINT_MARGIN_IN - FOOTER_IN) * PX;
   const twoCol = st.columns === 2, gap = 28;
   const colW = twoCol ? (contentW - gap) / 2 : contentW;
   const styleVars = `--chart-step:${st.fontSize}px;--chart-fw:${st.bold ? 700 : 400};`;
@@ -4123,13 +4127,21 @@ function paginatePrint_(headerHtml, chartHtml, st) {
     used += g.h;
   });
   const dir = twoCol && st.rtl ? 'rtl' : 'ltr';
+  // Footer on every printed page: jgcapp.org, plus "<Song> Page 2 of 5"
+  // when the song runs to more than one page.
+  const multi = pages.length > 1;
   pagesEl.innerHTML = pages.map((pg, i) => `
-    <div class="print-sheet" style="width:${paper.w}in;height:${paper.h}in;padding:${PRINT_MARGIN_IN}in;">
-      ${pg.first ? headerHtml : ''}
-      <div class="print-body${twoCol ? ' two-col' : ''}" dir="${dir}" style="${styleVars}${twoCol ? `gap:${gap}px;` : ''}">
-        ${pg.cols.map(colHtml => `<div class="print-col" style="width:${colW}px;">${(colHtml || []).join('')}</div>`).join('')}
+    <div class="print-sheet" style="width:${paper.w}in;height:${paper.h}in;padding:${PRINT_MARGIN_IN}in;--sheet-print-h:${(paper.h - 2 * PRINT_MARGIN_IN - 0.03).toFixed(2)}in;">
+      <div class="print-sheet-main">
+        ${pg.first ? headerHtml : ''}
+        <div class="print-body${twoCol ? ' two-col' : ''}" dir="${dir}" style="${styleVars}${twoCol ? `gap:${gap}px;` : ''}">
+          ${pg.cols.map(colHtml => `<div class="print-col" style="width:${colW}px;">${(colHtml || []).join('')}</div>`).join('')}
+        </div>
       </div>
-      <div class="print-page-num no-print">Page ${i + 1} of ${pages.length}</div>
+      <div class="print-footer" style="height:${FOOTER_IN}in;">
+        <span class="print-footer-site">jgcapp.org</span>
+        ${multi ? `<span class="print-footer-page" dir="auto">${escapeHtml(songTitle)} &nbsp;Page ${i + 1} of ${pages.length}</span>` : ''}
+      </div>
     </div>`).join('');
   const cnt = document.getElementById('printPageCount');
   if (cnt) cnt.textContent = pages.length === 1 ? '1 page' : `${pages.length} pages`;
@@ -4202,10 +4214,10 @@ function renderPrintPreview() {
   `;
   document.body.appendChild(el);
   const headerHtml = `<div class="print-header">
-          <div class="print-title">${escapeHtml(song.title)}${song.title_hebrew ? ` <span class="print-title-hebrew" dir="rtl">${escapeHtml(song.title_hebrew)}</span>` : ''}</div>
-          <div class="print-meta">${escapeHtml(song.artist||'')}${song.artist_hebrew ? ` <span dir="rtl">(${escapeHtml(song.artist_hebrew)})</span>` : ''}${st.capo ? ` &middot; Capo ${st.capo}` : ''}</div>
+          <div class="print-title">${escapeHtml(song.title)}</div>
+          <div class="print-meta">${escapeHtml(song.artist||'')}${st.capo ? ` &middot; Capo ${st.capo}` : ''}</div>
         </div>`;
-  paginatePrint_(headerHtml, chartHtml, st);
+  paginatePrint_(headerHtml, chartHtml, st, song.title || '');
   document.body.appendChild(el);
 }
 
