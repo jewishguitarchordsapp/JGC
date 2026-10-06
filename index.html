@@ -458,7 +458,15 @@
   .print-title-hebrew{font-size:17px;color:#444;font-weight:600;}
   .print-meta{font-size:14px;color:#444;margin-top:3px;}
   .print-columns.cols-2{column-count:2;column-gap:28px;column-rule:1px solid #ddd;}
-  .print-line-group{break-inside:avoid-column;}
+  .print-line-group{break-inside:avoid-column;display:flow-root;}
+  .print-pages{display:flex;flex-direction:column;align-items:center;gap:22px;}
+  .print-sheet{background:#fff;color:#222;box-shadow:0 6px 24px rgba(0,0,0,0.3);border-radius:4px;overflow:hidden;position:relative;flex:none;box-sizing:border-box;}
+  .print-body.two-col{display:flex;align-items:flex-start;}
+  .print-body.two-col .print-col + .print-col{border-left:1px solid #ddd;padding-left:14px;margin-left:-14px;}
+  .print-body.two-col[dir="rtl"] .print-col + .print-col{border-left:none;border-right:1px solid #ddd;padding-left:0;margin-left:0;padding-right:14px;margin-right:-14px;}
+  .print-col{flex:none;}
+  .print-page-num{position:absolute;bottom:10px;left:0;right:0;text-align:center;font-size:11px;color:#999;}
+  html[data-theme="dark"] .print-sheet{--text:#222;--muted:#666;--border:#ddd;--chord:#c0392b;color:#222;color-scheme:light;}
   /* Fixes the printed page size/margins, which otherwise fall back to
      whatever the browser/OS print dialog defaults to (varies by browser,
      often not plain 8.5x11 with even margins) - pins it to US Letter with
@@ -476,6 +484,9 @@
     .no-print{display:none !important;}
     .print-page-wrap{padding:0 !important;display:block !important;}
     .print-page{box-shadow:none !important;border:none !important;max-width:none !important;width:auto !important;padding:0 !important;border-radius:0 !important;}
+    .print-pages{transform:none !important;margin:0 !important;display:block !important;}
+    .print-sheet{box-shadow:none !important;border-radius:0 !important;width:auto !important;height:auto !important;padding:0 !important;overflow:visible !important;break-after:page;page-break-after:always;}
+    .print-sheet:last-child{break-after:auto;page-break-after:auto;}
   }
   /* Mobile-only chrome: a hamburger (opens sign-in info in a drawer) and a
      fixed bottom tab bar, replacing the desktop top nav + inline user box on
@@ -609,6 +620,103 @@
     header{padding-top:calc(10px + env(safe-area-inset-top));padding-left:calc(12px + env(safe-area-inset-left));padding-right:calc(12px + env(safe-area-inset-right));}
     .offline-banner + header{padding-top:10px;}
   }
+
+  /* ===== DARK MODE (menu → Display → Theme). Tokens first; the block of
+     html[data-theme="dark"] rules after it is generated from the light
+     stylesheet's own hard-coded colors (light surfaces -> dark surfaces,
+     dark text -> light text), so it stays in step with the light theme. */
+  html[data-theme="dark"]{color-scheme:dark;
+    --bg:#121618; --card:#1c2225; --border:#323a3e; --text:#e4e8e9; --muted:#9ba5a9;
+    --chord:#ff7b6b; --accent:#6cc9c4; --teal:#3f8e8e; --teal-dark:#357a7a;}
+  html[data-theme="dark"] body{background:var(--bg);color:var(--text);}
+  html[data-theme="dark"] input[type=text],html[data-theme="dark"] input[type=number],html[data-theme="dark"] input[type=password],html[data-theme="dark"] input[type=email],html[data-theme="dark"] select,html[data-theme="dark"] textarea{background:#161b1d;color:var(--text);border-color:var(--border);}
+  html[data-theme="dark"] a{color:#7fd3cf;}
+  html[data-theme="dark"] .btn.secondary{background:transparent;color:#8fd6d2;border-color:var(--teal);}
+  /* header buttons sit on the teal bar - keep them light in both themes */
+  html[data-theme="dark"] header .btn.secondary{background:#fff;border-color:#fff;color:var(--teal-dark);}
+  /* chord pictures and the print preview stay light, like paper */
+  html[data-theme="dark"] .chord-diagram-popover,html[data-theme="dark"] .print-page{--text:#222;--muted:#666;--border:#ddd;--chord:#c0392b;color:#222;color-scheme:light;}
+  :where(html[data-theme="dark"]) input[type=text],:where(html[data-theme="dark"]) input[type=number],:where(html[data-theme="dark"]) input[type=password],:where(html[data-theme="dark"]) input[type=email],:where(html[data-theme="dark"]) select,:where(html[data-theme="dark"]) textarea{background:#3b3f42}
+  :where(html[data-theme="dark"]) .bulk-action-bar{background:var(--teal-light,#454b4d)}
+  :where(html[data-theme="dark"]) .btn.secondary{background:#3b3f42}
+  :where(html[data-theme="dark"]) .btn.danger{background:#3b3f42;color:#dd9999}
+  :where(html[data-theme="dark"]) .song-row:hover{background:#3a3e41}
+  :where(html[data-theme="dark"]) .song-row.dragging{background:#464a4f}
+  :where(html[data-theme="dark"]) .song-row .star.on{color:#ec9897}
+  :where(html[data-theme="dark"]) .new-badge{background:#444b4b;color:#96be98}
+  :where(html[data-theme="dark"]) .offline-banner{background:#494a45;color:#bcad80;border-bottom:1px solid #575440}
+  :where(html[data-theme="dark"]) .chip{background:#454a4d;border:1px solid #50575a}
+  :where(html[data-theme="dark"]) .group{background:#393d40}
+  :where(html[data-theme="dark"]) .group button.icon{background:#3b3f42;border:1px solid #505557}
+  :where(html[data-theme="dark"]) .group button.icon:hover{background:#454a4d}
+  :where(html[data-theme="dark"]) .detail-tile{background:#393e40}
+  :where(html[data-theme="dark"]) .detail-tile.action .tile-label{color:#e4e8e9}
+  :where(html[data-theme="dark"]) .detail-tile.action.active{background:#48494b;border-color:#574f51}
+  :where(html[data-theme="dark"]) .detail-tile.action.active svg{color:#ec9897}
+  :where(html[data-theme="dark"]) .playback-row{background:#3b3f42}
+  :where(html[data-theme="dark"]) .advanced-panel{background:#3b3f42}
+  :where(html[data-theme="dark"]) .adv-row{border-bottom:1px solid #565a5d}
+  :where(html[data-theme="dark"]) .stepper-btn{border:1px solid #505557;background:#3b3f42}
+  :where(html[data-theme="dark"]) .stepper-btn:hover{background:#454a4d}
+  :where(html[data-theme="dark"]) .switch-toggle .knob{background:#3b3f42}
+  :where(html[data-theme="dark"]) #chartScroll{background:#3b3f42}
+  :where(html[data-theme="dark"]) .play-float-bar{background:#3b3f42}
+  :where(html[data-theme="dark"]) .play-float-bar .speed-group{background:#393d40}
+  :where(html[data-theme="dark"]) .play-float-bar .speed-group button{background:#3b3f42}
+  :where(html[data-theme="dark"]) .chords-used .chip{background:#3b3f42}
+  :where(html[data-theme="dark"]) .error{color:#dd9999}
+  :where(html[data-theme="dark"]) .picker-artist-row{background:#454a4d;border:1px solid #50575a}
+  :where(html[data-theme="dark"]) .picker-mini{background:#3b3f42}
+  :where(html[data-theme="dark"]) .picker-list{background:#3b3f42}
+  :where(html[data-theme="dark"]) .picker-opt{border-bottom:1px solid #575b5d}
+  :where(html[data-theme="dark"]) .picker-opt:hover{background:#474b4e}
+  :where(html[data-theme="dark"]) .chip.chip-add{background:#3b3f42}
+  :where(html[data-theme="dark"]) .viewas-banner{background:#494a45;color:#bcae80;border-bottom:1px solid #57543f}
+  :where(html[data-theme="dark"]) .badge.pending{background:#484a46;color:#c4b680}
+  :where(html[data-theme="dark"]) .badge.added{background:#424a49;color:#8cbc9e}
+  :where(html[data-theme="dark"]) .badge.declined{background:#484649;color:#d49999}
+  :where(html[data-theme="dark"]) .country-pill{background:#464b4d}
+  :where(html[data-theme="dark"]) .draft-banner{background:#494b49;border:1px solid #575440;color:#b5a980}
+  :where(html[data-theme="dark"]) .status-menu-opt{background:#3b3f42}
+  :where(html[data-theme="dark"]) .status-menu-opt:hover:not([disabled]){background:#474b4e}
+  :where(html[data-theme="dark"]) .badge.needs_lyrics{background:#43494e;color:#8facd2}
+  :where(html[data-theme="dark"]) .needs-lyrics-note{color:#8facd2;background:#464b4f;border:1px solid #4f575f}
+  :where(html[data-theme="dark"]) .status-icon-btn.needs-lyrics{color:#8facd2}
+  :where(html[data-theme="dark"]) .badge.open{background:#484649;color:#d49999}
+  :where(html[data-theme="dark"]) .badge.resolved{background:#424a49;color:#8cbc9e}
+  :where(html[data-theme="dark"]) .badge.archived{background:#383d40;color:#e4e8e9}
+  :where(html[data-theme="dark"]) .status-icon-btn:hover{background:#383d40}
+  :where(html[data-theme="dark"]) .status-icon-btn.open{color:#d49999}
+  :where(html[data-theme="dark"]) .status-icon-btn.resolved,:where(html[data-theme="dark"]) .status-icon-btn.added{color:#8cbc9e}
+  :where(html[data-theme="dark"]) .status-icon-btn.declined{color:#d49999}
+  :where(html[data-theme="dark"]) .status-icon-btn.archive-action{color:#e4e8e9}
+  :where(html[data-theme="dark"]) .admin-filter-row select{background:#3b3f42}
+  :where(html[data-theme="dark"]) .chat-card{background:#393e40}
+  :where(html[data-theme="dark"]) .chat-card:hover{background:#383d3f}
+  :where(html[data-theme="dark"]) .chat-card-title{color:#e4e8e9}
+  :where(html[data-theme="dark"]) .msg.user{background:#393d40}
+  :where(html[data-theme="dark"]) .reply-ref{background:#3b3f42}
+  :where(html[data-theme="dark"]) .msg.admin .reply-ref{border-left-color:#5b5e61}
+  :where(html[data-theme="dark"]) .focus-banner{background:#494b49;border:1px solid #575440}
+  :where(html[data-theme="dark"]) tr.row-flash td{background:#494a43}
+  :where(html[data-theme="dark"]) .thread-list-item.active{background:#454a4d}
+  :where(html[data-theme="dark"]) .line-editor{background:#3b3f42}
+  :where(html[data-theme="dark"]) .line-editor > div.le-long{background:#48494b}
+  :where(html[data-theme="dark"]) .home-tile{background:#393e40}
+  :where(html[data-theme="dark"]) .home-tile:hover{background:#383d3f}
+  :where(html[data-theme="dark"]) .home-tile:active{background:#373c3e}
+  :where(html[data-theme="dark"]) .home-tile-title{color:#e4e8e9}
+  :where(html[data-theme="dark"]) .onboarding-card{background:#3b3f42}
+  :where(html[data-theme="dark"]) .onboarding-card p{color:#e4e8e9}
+  :where(html[data-theme="dark"]) .onboarding-dot{background:#363a3d}
+  :where(html[data-theme="dark"]) .onboarding-arrow{background:#3b3f42}
+  :where(html[data-theme="dark"]) .ppt-val{color:#e4e8e9}
+  :where(html[data-theme="dark"]) .mobile-drawer-panel{background:#3b3f42}
+  :where(html[data-theme="dark"]) .mobile-drawer-nav button:active{background:#393e40}
+  :where(html[data-theme="dark"]) .switch-toggle{background:#34393c}
+  :where(html[data-theme="dark"]) .install-banner.show{background:#454a4d;border-bottom:1px solid #50575a}
+  :where(html[data-theme="dark"]) .tuner-dial.in-tune .tuner-note-circle{color:#96be98}
+  :where(html[data-theme="dark"]) .tuner-dial.flat .tuner-note-circle,:where(html[data-theme="dark"]) .tuner-dial.sharp .tuner-note-circle{color:#e09c95}
 </style>
 </head>
 <body>
@@ -652,6 +760,14 @@
       <div class="adv-row">
         <span class="adv-label">Show chords</span>
         <span class="adv-controls"><div class="switch-toggle" id="prefShowChordsToggle" onclick="toggleDisplayShowChords()" role="button" aria-pressed="true"><span class="knob"></span></div></span>
+      </div>
+      <div class="adv-row instr-row">
+        <span class="adv-label">Theme</span>
+        <span class="adv-controls instr-pills">
+          <button type="button" class="chip" id="prefTheme_light" onclick="setThemePref('light')">☀ Light</button>
+          <button type="button" class="chip" id="prefTheme_dark" onclick="setThemePref('dark')">☾ Dark</button>
+          <button type="button" class="chip" id="prefTheme_auto" onclick="setThemePref('auto')" title="Follow your phone or computer's setting">Auto</button>
+        </span>
       </div>
       <div class="adv-row instr-row">
         <span class="adv-label">Chord pictures</span>
@@ -854,9 +970,27 @@ try {
     displayPrefs.fontSize = Math.max(-4, Math.min(8, Number(v.fontSize) || 0));
     displayPrefs.bold = !!v.bold;
     if (['guitar', 'ukulele', 'piano'].includes(v.instrument)) displayPrefs.instrument = v.instrument;
+    if (['light', 'dark', 'auto'].includes(v.theme)) displayPrefs.theme = v.theme;
     displayPrefs.showChords = v.showChords !== false;
   }
 } catch (e) {}
+// Dark mode: 'light' | 'dark' | 'auto' (follow the phone/computer setting).
+function applyTheme_() {
+  const pref = displayPrefs.theme || 'light';
+  let dark = pref === 'dark';
+  if (pref === 'auto') { try { dark = window.matchMedia('(prefers-color-scheme: dark)').matches; } catch (e) {} }
+  document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', dark ? '#1c2225' : '#4a9b9b');
+}
+applyTheme_();
+try { window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (displayPrefs.theme === 'auto') applyTheme_(); }); } catch (e) {}
+function setThemePref(t) {
+  displayPrefs.theme = t;
+  saveDisplayPrefs_();
+  applyTheme_();
+  renderMenuDrawerSettings_();
+}
 function saveDisplayPrefs_() {
   try { localStorage.setItem(DISPLAY_PREFS_KEY, JSON.stringify(displayPrefs)); } catch (e) {}
 }
@@ -970,6 +1104,10 @@ function renderMenuDrawerSettings_() {
   if (fontEl) fontEl.textContent = String(17 + displayPrefs.fontSize);
   const boldEl = document.getElementById('prefBoldToggle');
   if (boldEl) { boldEl.classList.toggle('on', displayPrefs.bold); boldEl.setAttribute('aria-pressed', String(displayPrefs.bold)); }
+  ['light', 'dark', 'auto'].forEach(k => {
+    const b = document.getElementById('prefTheme_' + k);
+    if (b) { const on = (displayPrefs.theme || 'light') === k; b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on)); }
+  });
   ['guitar', 'ukulele', 'piano'].forEach(k => {
     const b = document.getElementById('prefInstr_' + k);
     if (b) { const on = (displayPrefs.instrument || 'guitar') === k; b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on)); }
@@ -1771,7 +1909,11 @@ async function supaSelectAllByIdChunks_(buildQuery, ids, chunkSize) {
 async function supaHydratePlaylists_(rows) {
   if (!rows.length) return [];
   const ids = rows.map(r => r.id);
-  const ownerIds = Array.from(new Set(rows.map(r => r.owner_id)));
+  // Anonymous public playlists: the owner's name is never even fetched for
+  // anyone except the owner and admins.
+  const meP = supaProfileCache || {};
+  const showOwner = r => !r.anonymous || r.owner_id === meP.id || meP.is_admin;
+  const ownerIds = Array.from(new Set(rows.filter(showOwner).map(r => r.owner_id)));
   const [songsRes, sharesRes, ownersRes] = await Promise.all([
     supaSelectAllByIdChunks_((chunk, from, to) => getSupa_().from('playlist_songs').select('playlist_id,song_id,position').in('playlist_id', chunk).order('playlist_id').order('position').order('song_id').range(from, to), ids),
     supaSelectAllByIdChunks_((chunk, from, to) => getSupa_().from('playlist_shares').select('playlist_id,email,can_edit').in('playlist_id', chunk).order('playlist_id').range(from, to), ids),
@@ -1786,9 +1928,10 @@ async function supaHydratePlaylists_(rows) {
   (sharesRes.data || []).forEach(r => { (sharesByPl[r.playlist_id] = sharesByPl[r.playlist_id] || []).push({ email: r.email, canEdit: !!r.can_edit }); });
   (ownersRes.data || []).forEach(o => { ownerById[o.id] = o; });
   return rows.map(p => {
-    const owner = ownerById[p.owner_id] || {};
+    const owner = showOwner(p) ? (ownerById[p.owner_id] || {}) : {};
     return {
-      id: p.id, owner_email: owner.email || '', owner_name: owner.name || owner.email || '',
+      anonymous: !!p.anonymous,
+      id: p.id, owner_email: owner.email || '', owner_name: showOwner(p) ? (owner.name || owner.email || '') : 'Anonymous',
       title: p.title, song_ids: songsByPl[p.id] || [], visibility: p.visibility,
       shared_with: sharesByPl[p.id] || [], updated_at: p.updated_at, icon: p.icon || '',
     };
@@ -2307,7 +2450,9 @@ async function supaApi(action, fields) {
     const { data, error } = await getSupa_().from('playlists').insert({
       owner_id: eff.id, title: fields.title || 'Untitled', visibility: fields.visibility || 'private',
       icon: fields.icon || 'note', updated_at: new Date().toISOString(),
+      ...(fields.anonymous ? { anonymous: true } : {}),
     }).select().single();
+    if (error && /anonymous/.test(error.message || '')) throw new Error('Run add_anonymous_playlists.sql in Supabase first to turn on anonymous playlists.');
     throwIfErr_(error);
     await supaSetPlaylistSongs_(data.id, fields.song_ids || []);
     await supaSetPlaylistShares_(data.id, fields.shared_with || []);
@@ -2325,7 +2470,13 @@ async function supaApi(action, fields) {
     if (fields.title !== undefined) patch.title = fields.title;
     if (fields.visibility !== undefined) patch.visibility = fields.visibility;
     if (fields.icon !== undefined) patch.icon = fields.icon;
-    const { error: upErr } = await getSupa_().from('playlists').update(patch).eq('id', fields.id);
+    if (fields.anonymous !== undefined) patch.anonymous = !!fields.anonymous;
+    let { error: upErr } = await getSupa_().from('playlists').update(patch).eq('id', fields.id);
+    if (upErr && /anonymous/.test(upErr.message || '')) {
+      if (patch.anonymous) throw new Error('Run add_anonymous_playlists.sql in Supabase first to turn on anonymous playlists.');
+      delete patch.anonymous;
+      ({ error: upErr } = await getSupa_().from('playlists').update(patch).eq('id', fields.id));
+    }
     throwIfErr_(upErr);
     if (fields.song_ids !== undefined) await supaSetPlaylistSongs_(fields.id, fields.song_ids);
     if (fields.shared_with !== undefined) await supaSetPlaylistShares_(fields.id, fields.shared_with);
@@ -2719,7 +2870,7 @@ async function loadSongsInner_(showSpinner) {
     // seeing as "always loading" / "jumps to a different tab".
     // Same for an Add/Edit Song form that's already on screen: re-rendering
     // it would throw away everything typed or picked since it opened.
-    if (view.name !== 'admin' && !(view.name === 'edit' && document.getElementById('f_title'))) render();
+    if (view.name !== 'admin' && !(view.name === 'edit' && document.getElementById('f_title')) && !(view.name === 'detail' && playerState.playing)) render();
     saveCatalogCache();
   } catch (err) {
     if (isOffline && songs.length === 0) {
@@ -3876,7 +4027,8 @@ function openPrintPreview(songId) {
     // every print start from the same LTR default regardless of language.
     rtl: containsHebrew(song.chords_lyrics) || containsHebrew(song.title_hebrew),
     capo: sameSong ? playerState.capo : (song.capo||0),
-    transpose: sameSong ? (playerState.transpose||0) : 0
+    transpose: sameSong ? (playerState.transpose||0) : 0,
+    paper: defaultPrintPaper_()
   };
   renderPrintPreview();
 }
@@ -3914,6 +4066,85 @@ function wrapChartForPrint(chartHtml) {
     }
   }
   return out;
+}
+// ---- Print pages -------------------------------------------------------
+// The preview is split into real pages (US Letter 8.5x11 or A4) instead of
+// one endless sheet: each chord+lyric pair is measured and placed on the
+// next page when it would run past the bottom margin (pairs never split).
+// What's shown is exactly what prints - each page prints on its own sheet.
+const PRINT_PAPERS = { letter: { w: 8.5, h: 11, css: '8.5in 11in' }, a4: { w: 8.27, h: 11.69, css: 'A4' } };
+const PRINT_MARGIN_IN = 0.75;
+function defaultPrintPaper_() {
+  try { const v = localStorage.getItem('jgc_print_paper'); if (v === 'letter' || v === 'a4') return v; } catch (e) {}
+  const region = (String(navigator.language || '').split('-')[1] || '').toUpperCase();
+  return (region === 'US' || region === 'CA' || region === 'MX' || region === 'PH') ? 'letter' : 'a4';
+}
+function setPrintPaper_(paper) {
+  try { localStorage.setItem('jgc_print_paper', paper); } catch (e) {}
+  updatePrintPreview({ paper });
+}
+function paginatePrint_(headerHtml, chartHtml, st) {
+  const pagesEl = document.getElementById('printPages');
+  if (!pagesEl) return;
+  const paper = PRINT_PAPERS[st.paper] || PRINT_PAPERS.letter;
+  // @page size follows the chosen paper so the printer gets the same pages.
+  let ps = document.getElementById('printPageSizeStyle');
+  if (!ps) { ps = document.createElement('style'); ps.id = 'printPageSizeStyle'; document.head.appendChild(ps); }
+  ps.textContent = `@page { size: ${paper.css}; margin: ${PRINT_MARGIN_IN}in; }`;
+  const PX = 96; // CSS pixels per inch
+  const contentW = (paper.w - 2 * PRINT_MARGIN_IN) * PX, contentH = (paper.h - 2 * PRINT_MARGIN_IN) * PX;
+  const twoCol = st.columns === 2, gap = 28;
+  const colW = twoCol ? (contentW - gap) / 2 : contentW;
+  const styleVars = `--chart-step:${st.fontSize}px;--chart-fw:${st.bold ? 700 : 400};`;
+  // measure every line group at its real printed width
+  const meas = document.createElement('div');
+  meas.className = 'print-measure';
+  meas.style.cssText = `position:absolute;left:-10000px;top:0;visibility:hidden;width:${colW}px;${styleVars}`;
+  meas.innerHTML = `<div class="print-col">${chartHtml}</div>`;
+  const hdr = document.createElement('div');
+  hdr.style.cssText = `position:absolute;left:-10000px;top:0;visibility:hidden;width:${contentW}px;`;
+  hdr.innerHTML = headerHtml;
+  pagesEl.appendChild(meas); pagesEl.appendChild(hdr);
+  const headerH = hdr.firstElementChild ? hdr.firstElementChild.getBoundingClientRect().height + 14 : 0;
+  const groups = Array.from(meas.querySelectorAll('.print-line-group')).map(g => ({ html: g.outerHTML, h: g.getBoundingClientRect().height }));
+  meas.remove(); hdr.remove();
+  // fill pages (and both columns per page in 2-column mode)
+  const pages = [];
+  let page = null, col = 0, used = 0;
+  const newPage = () => { page = { cols: [[]], first: pages.length === 0 }; pages.push(page); col = 0; used = 0; };
+  const capFor = () => contentH - (page.first ? headerH : 0);
+  newPage();
+  groups.forEach(g => {
+    if (used + g.h > capFor() && used > 0) {
+      if (twoCol && col === 0) { col = 1; page.cols[1] = []; used = 0; }
+      else newPage();
+    }
+    page.cols[col].push(g.html);
+    used += g.h;
+  });
+  const dir = twoCol && st.rtl ? 'rtl' : 'ltr';
+  pagesEl.innerHTML = pages.map((pg, i) => `
+    <div class="print-sheet" style="width:${paper.w}in;height:${paper.h}in;padding:${PRINT_MARGIN_IN}in;">
+      ${pg.first ? headerHtml : ''}
+      <div class="print-body${twoCol ? ' two-col' : ''}" dir="${dir}" style="${styleVars}${twoCol ? `gap:${gap}px;` : ''}">
+        ${pg.cols.map(colHtml => `<div class="print-col" style="width:${colW}px;">${(colHtml || []).join('')}</div>`).join('')}
+      </div>
+      <div class="print-page-num no-print">Page ${i + 1} of ${pages.length}</div>
+    </div>`).join('');
+  const cnt = document.getElementById('printPageCount');
+  if (cnt) cnt.textContent = pages.length === 1 ? '1 page' : `${pages.length} pages`;
+  fitPrintPagesToScreen_(paper);
+}
+// On a phone the 8.5in-wide sheets are scaled down to fit the screen (the
+// layout itself is never changed, so the preview still matches the print).
+function fitPrintPagesToScreen_(paper) {
+  const pagesEl = document.getElementById('printPages');
+  if (!pagesEl) return;
+  const avail = Math.max(200, window.innerWidth - 28);
+  const scale = Math.min(1, avail / (paper.w * 96));
+  pagesEl.style.transform = scale < 1 ? `scale(${scale})` : '';
+  pagesEl.style.transformOrigin = 'top center';
+  pagesEl.style.marginBottom = scale < 1 ? `${-(1 - scale) * pagesEl.scrollHeight}px` : '';
 }
 function renderPrintPreview() {
   const st = printPreviewState;
@@ -3956,23 +4187,25 @@ function renderPrintPreview() {
         <span class="ppt-val">${st.transpose>0?'+':''}${st.transpose}</span>
         <button class="stepper-btn" onclick="updatePrintPreview({transpose:printPreviewState.transpose+1})">+</button>
       </div>
+      <div class="ppt-row">
+        <span class="ppt-label">Paper</span>
+        <button class="btn secondary${st.paper==='letter'?' active':''}" onclick="setPrintPaper_('letter')">8.5 × 11</button>
+        <button class="btn secondary${st.paper==='a4'?' active':''}" onclick="setPrintPaper_('a4')">A4</button>
+      </div>
       <div class="ppt-row" style="margin-left:auto;">
+        <span class="muted" id="printPageCount" style="font-size:12.5px;"></span>
         <button class="btn secondary" onclick="closePrintPreview()">Cancel</button>
         <button class="btn" onclick="window.print()">Print</button>
       </div>
     </div>
-    <div class="print-page-wrap">
-      <div class="print-page">
-        <div class="print-header">
+    <div class="print-page-wrap"><div class="print-pages" id="printPages"></div></div>
+  `;
+  document.body.appendChild(el);
+  const headerHtml = `<div class="print-header">
           <div class="print-title">${escapeHtml(song.title)}${song.title_hebrew ? ` <span class="print-title-hebrew" dir="rtl">${escapeHtml(song.title_hebrew)}</span>` : ''}</div>
           <div class="print-meta">${escapeHtml(song.artist||'')}${song.artist_hebrew ? ` <span dir="rtl">(${escapeHtml(song.artist_hebrew)})</span>` : ''}${st.capo ? ` &middot; Capo ${st.capo}` : ''}</div>
-        </div>
-        <div class="print-columns${st.columns===2?' cols-2':''}" dir="${st.columns===2 && st.rtl ? 'rtl' : 'ltr'}" style="--chart-step:${st.fontSize}px;--chart-fw:${st.bold?700:400};">
-          ${chartHtml}
-        </div>
-      </div>
-    </div>
-  `;
+        </div>`;
+  paginatePrint_(headerHtml, chartHtml, st);
   document.body.appendChild(el);
 }
 
@@ -4731,11 +4964,12 @@ function toggleFavoritesSortAlpha() {
 // full ordered list of song ids the row came from — a playlist, or the
 // Favorites tab), the resulting view carries that queue + this song's index
 // in it, so the detail page can offer Prev/Next Song within that same list.
-function detailGoTo(songId, queueIds) {
-  if (!queueIds) return `goTo('detail',{id:'${songId}'})`;
+function detailGoTo(songId, queueIds, fromPlaylist) {
+  const pl = fromPlaylist ? `,fromPlaylist:'${fromPlaylist}'` : '';
+  if (!queueIds) return `goTo('detail',{id:'${songId}'${pl}})`;
   const idx = queueIds.indexOf(songId);
   const arr = '[' + queueIds.map(id => `'${id}'`).join(',') + ']';
-  return `goTo('detail',{id:'${songId}',queue:${arr},queueIdx:${idx}})`;
+  return `goTo('detail',{id:'${songId}',queue:${arr},queueIdx:${idx}${pl}})`;
 }
 function songRowHtml(s, queueIds, reorderable) {
   const newBadge = isNewSong(s) ? `<div class="new-badge">NEW <span class="new-badge-age">· ${songDaysAgoLabel(s)}</span></div>` : '';
@@ -5147,9 +5381,12 @@ function renderDetail() {
     ? (chordsUsedIn(song.chords_lyrics, transpose).map(c=>`<span class="chip chord-tap" data-chord="${escapeHtml(c)}">${escapeHtml(formatChordSymbol(c))}</span>`).join(' ') || '<span class="muted">none tagged</span>')
     : '<span class="muted">Loading chords…</span>';
 
+  const backPl = view.fromPlaylist ? (playlists.find(pl => pl.id === view.fromPlaylist) || (viewAsUser && (viewAsData.playlists || []).find(pl => pl.id === view.fromPlaylist))) : null;
   const backLink = view.backTo === 'errorReport'
     ? `<span class="backlink" onclick="goTo('admin')">‹ Back to Error Report</span>`
-    : `<span class="backlink" onclick="goTo('list')">‹ Back to Songs</span>`;
+    : backPl
+      ? `<span class="backlink" onclick="goTo('playlistDetail',{id:'${backPl.id}'})" dir="auto">‹ Back to ${escapeHtml(backPl.title || 'Playlist')}</span>`
+      : `<span class="backlink" onclick="goTo('list')">‹ Back to Songs</span>`;
   let html = `${backLink}
     <div class="song-header">
       <div>${isDraft_(song) ? `<div class="draft-banner">✎ <b>Draft</b> — only admins can see this song. <button class="btn" style="padding:4px 12px;font-size:12.5px;margin-left:6px;" onclick="publishSongNow_('${song.id}')">Publish</button></div>` : ''}<h2 style="margin-bottom:2px" dir="auto">${escapeHtml(songDisplayTitle_(song))}</h2><div class="meta" dir="auto">${artistLinksHtml(song.artist, song.artist_hebrew)}</div></div>
@@ -5222,7 +5459,19 @@ function renderDetail() {
     <div class="grid-cats" style="margin-top:10px">${tags.map(t=>`<span class="chip">${escapeHtml(t)}</span>`).join('')}${languages.map(l=>`<span class="chip">${escapeHtml(l)}</span>`).join('')}</div>`}
     ${playerState.playing ? playFloatBarHtml() : ''}`;
 
+  // Re-rendering the same song (background sync, favoriting, capo, font
+  // size...) used to rebuild the chart from scratch, which jumped it back
+  // to the top and - mid-autoscroll - stopped playback. That was the
+  // "randomly jumps in the middle of a song" report. Keep the exact reading
+  // position, and keep autoscroll going on the new chart element.
+  const oldChart = document.getElementById('chartScroll');
+  const keepChartTop = (isSameSongAsBefore && oldChart) ? oldChart.scrollTop : null;
+  const keepPageY = isSameSongAsBefore ? window.scrollY : null;
+  const wasScrolling = !!(playerState.playing && !playerState.paused && playerState.timer);
   document.getElementById('app').innerHTML = html;
+  if (keepChartTop !== null) { const nc = document.getElementById('chartScroll'); if (nc) nc.scrollTop = keepChartTop; }
+  if (keepPageY !== null) window.scrollTo(0, keepPageY);
+  if (wasScrolling) startScroll(true);
   if (playerState.playing) initPlayFloatBar();
   if (contentReady) fitChordsUsedChips();
 }
@@ -5342,13 +5591,15 @@ function togglePlay() {
   if (playerState.playing) return;
   playerState.playing = true;
   playerState.paused = false;
+  acquireWakeLock_(); // must be requested from the tap itself on some phones
   renderDetail();
   if (playerState.delay) { setTimeout(startScroll, 5000); } else { startScroll(); }
 }
-function startScroll() {
+function startScroll(keepRemainder) {
   const el = document.getElementById('chartScroll'); if (!el) return;
   clearInterval(playerState.timer);
-  playerState.scrollRemainder = 0;
+  if (!keepRemainder) playerState.scrollRemainder = 0;
+  acquireWakeLock_();
   playerState.timer = setInterval(() => {
     if (!el.isConnected) { stopPlayMode(); return; }
     // At slow speeds (e.g. 0.2x = 0.14px per tick) the per-tick amount is
@@ -5409,7 +5660,28 @@ function updatePlayFloatBarPauseBtn() {
 }
 // Stop: fully exits Play Mode (chart back to normal size, floating bar
 // gone) - what the single combined button used to do on a second tap.
+// Phones dim and lock after their Auto-Lock time even while a song is
+// scrolling (the screen "closes"). The Screen Wake Lock API asks the phone
+// to stay on while Play Mode is active; it's released on Stop. Browsers
+// drop the lock whenever the app goes to the background, so it's taken
+// again when the app comes back while still playing.
+let screenWakeLock = null;
+async function acquireWakeLock_() {
+  try {
+    if (!('wakeLock' in navigator) || screenWakeLock) return;
+    screenWakeLock = await navigator.wakeLock.request('screen');
+    screenWakeLock.addEventListener('release', () => { screenWakeLock = null; });
+  } catch (e) { screenWakeLock = null; }
+}
+function releaseWakeLock_() {
+  try { if (screenWakeLock) screenWakeLock.release(); } catch (e) {}
+  screenWakeLock = null;
+}
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && playerState.playing) acquireWakeLock_();
+});
 function stopPlayMode() {
+  releaseWakeLock_();
   clearInterval(playerState.timer);
   playerState.timer = null;
   playerState.playing = false;
@@ -5486,7 +5758,7 @@ function goToQueueSong(delta) {
   if (!Array.isArray(view.queue)) return;
   const newIdx = view.queueIdx + delta;
   if (newIdx < 0 || newIdx >= view.queue.length) return;
-  goTo('detail', { id: view.queue[newIdx], queue: view.queue, queueIdx: newIdx });
+  goTo('detail', { id: view.queue[newIdx], queue: view.queue, queueIdx: newIdx, fromPlaylist: view.fromPlaylist });
 }
 
 // Bound once to the persistent #app container at startup (its DOM node is
@@ -6078,7 +6350,7 @@ function renderPlaylistCards(list, size) {
   return `<div class="playlist-grid size-${size || 'lg'}">` + list.map(p => `<div class="playlist-card" onclick="goTo('playlistDetail',{id:'${p.id}'})">
     ${playlistIconHtml(p.icon, badgeSize)}
     <div class="title">${escapeHtml(p.title)}</div>
-    <div class="muted">${(p.song_ids||[]).length} songs · ${p.visibility === 'public' ? 'Public' : p.visibility === 'shared' ? 'Shared' : 'Private'} · by ${escapeHtml(p.owner_name||p.owner_email)}</div>
+    <div class="muted">${(p.song_ids||[]).length} songs · ${p.visibility === 'public' ? 'Public' : p.visibility === 'shared' ? 'Shared' : 'Private'} · by ${escapeHtml(playlistByLabel_(p))}</div>
   </div>`).join('') + `</div>`;
 }
 async function createPlaylistPrompt() {
@@ -6106,7 +6378,7 @@ function renderPlaylistDetail() {
   const queueIds = list.map(s => s.id);
   let html = `<span class="backlink" onclick="goTo('playlists')">‹ Back to Playlists</span>
     <div class="song-header">
-      <div style="display:flex;align-items:center;gap:10px;">${playlistIconHtml(p.icon, 36)}<div><h2 style="margin-bottom:2px">${escapeHtml(p.title)}</h2><div class="meta">by ${escapeHtml(p.owner_name||p.owner_email)} · ${p.visibility}</div></div></div>
+      <div style="display:flex;align-items:center;gap:10px;">${playlistIconHtml(p.icon, 36)}<div><h2 style="margin-bottom:2px">${escapeHtml(p.title)}</h2><div class="meta">by ${escapeHtml(playlistByLabel_(p))} · ${p.visibility}</div></div></div>
       ${canEdit ? `<div><button class="btn" onclick="openAddSongsToPlaylist('${p.id}')">+ Add Songs</button> <button class="btn secondary" onclick="editPlaylistSettings('${p.id}')">Settings</button> <button class="btn danger" onclick="deletePlaylistConfirm('${p.id}')">Delete</button></div>` : ''}
     </div>`;
   // Offline availability is a personal, on-this-device thing — not tied to
@@ -6118,7 +6390,7 @@ function renderPlaylistDetail() {
   html += list.length ? `<div id="playlistSongList">` + list.map(s => `
     <div class="song-row" data-reorder-id="${s.id}">
       ${canEdit ? `<span class="drag-handle" title="Drag to reorder">${SVG_ICONS.dragHandle}</span>` : ''}
-      <div style="cursor:pointer;flex:1" onclick="${detailGoTo(s.id, queueIds)}"><div class="title" dir="auto">${escapeHtml(songDisplayTitle_(s))}</div><div class="artist" dir="auto">${escapeHtml(songDisplayArtist_(s))}</div></div>
+      <div style="cursor:pointer;flex:1" onclick="${detailGoTo(s.id, queueIds, p.id)}"><div class="title" dir="auto">${escapeHtml(songDisplayTitle_(s))}</div><div class="artist" dir="auto">${escapeHtml(songDisplayArtist_(s))}</div></div>
       ${canEdit ? `<button class="btn secondary icon-btn-round" onclick="removeFromPlaylist('${p.id}','${s.id}')" title="Remove from playlist" aria-label="Remove from playlist" style="border-radius:50%;width:34px;height:34px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex:none;">${SVG_ICONS.trash}</button>` : ''}
     </div>`).join('') + `</div>` : '<div class="empty">No songs in this playlist yet.</div>';
   document.getElementById('app').innerHTML = html;
@@ -6178,7 +6450,7 @@ function editPlaylistSettings(id) {
   // plain string is still handled) so every consumer below can assume the
   // object shape.
   const sharedWith = (p.shared_with||[]).map(s => typeof s === 'string' ? { email: s, canEdit: false } : { email: s.email, canEdit: !!s.canEdit });
-  playlistSettingsState = { id, title: p.title, visibility: p.visibility || 'private', sharedWith, icon: p.icon || 'note' };
+  playlistSettingsState = { id, title: p.title, visibility: p.visibility || 'private', sharedWith, icon: p.icon || 'note', anonymous: !!p.anonymous };
   renderPlaylistSettingsModal();
 }
 function setPlaylistSettingsIcon(icon) {
@@ -6247,8 +6519,22 @@ function renderPlaylistSettingsModal() {
         <button class="btn secondary" onclick="addPlaylistSettingsEmail()">Add</button>
       </div>
     ` : ''}
+    ${st.visibility === 'public' ? `
+      <label style="display:flex;align-items:center;gap:8px;margin:8px 0 2px;font-size:14px;color:var(--text);cursor:pointer;">
+        <input type="checkbox" ${st.anonymous ? 'checked' : ''} onchange="syncPlaylistSettingsTitle_();playlistSettingsState.anonymous=this.checked;">
+        Share anonymously (don't show my name)
+      </label>
+      <div class="muted" style="font-size:12px;margin-bottom:6px;">Everyone can find and open this playlist; it will say "by Anonymous".</div>
+    ` : ''}
     <div class="modal-actions"><button class="btn secondary" onclick="playlistSettingsState=null;closeModal()">Cancel</button><button class="btn" onclick="savePlaylistSettings()">Save</button></div>
   `);
+}
+// "by ..." text: anonymous public playlists say "Anonymous" to everyone
+// else; the owner (and admins) see their name plus a reminder.
+function playlistByLabel_(p) {
+  const name = p.owner_name || p.owner_email || '';
+  if (p.anonymous && p.owner_email) return name + ' (shown as Anonymous)';
+  return name || 'Anonymous';
 }
 function savePlaylistSettings() {
   syncPlaylistSettingsTitle_();
@@ -6256,7 +6542,7 @@ function savePlaylistSettings() {
   if (!st) return;
   const title = (st.title || '').trim();
   if (!title) { alert('Enter a playlist name.'); return; }
-  api('updatePlaylist', Object.assign({ id: st.id, title, visibility: st.visibility, shared_with: st.visibility === 'shared' ? st.sharedWith : [], icon: st.icon }, viewAsFields()))
+  api('updatePlaylist', Object.assign({ id: st.id, title, visibility: st.visibility, shared_with: st.visibility === 'shared' ? st.sharedWith : [], icon: st.icon, anonymous: st.visibility === 'public' && !!st.anonymous }, viewAsFields()))
     .then(r => { applyPlaylistPatch_(r.playlist); playlistSettingsState = null; closeModal(); render(); })
     .catch(err => alert(err.message));
 }
@@ -8025,7 +8311,8 @@ async function startTuner() {
   tunerAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
   const source = tunerAudioCtx.createMediaStreamSource(tunerStream);
   tunerAnalyser = tunerAudioCtx.createAnalyser();
-  tunerAnalyser.fftSize = 2048;
+  tunerAnalyser.fftSize = 4096; // ~85 ms of sound: enough cycles of the low E (82 Hz) for a steady reading
+  tunerHist = [];
   source.connect(tunerAnalyser);
   tunerListening = true;
   renderTuner();
@@ -8050,7 +8337,10 @@ function tunerLoop() {
   if (!tunerListening || !tunerAnalyser) return;
   if (!tunerBuf || tunerBuf.length !== tunerAnalyser.fftSize) tunerBuf = new Float32Array(tunerAnalyser.fftSize);
   tunerAnalyser.getFloatTimeDomainData(tunerBuf);
-  const freq = autoCorrelatePitch_(tunerBuf, tunerAudioCtx.sampleRate);
+  // YIN + a short median: steady to a fraction of a cent on every string
+  // (the old autocorrelation wobbled by ~8 cents on the low strings, so
+  // they could never hold still long enough to count as tuned).
+  const freq = smoothPitch_(detectPitchYin_(tunerBuf, tunerAudioCtx.sampleRate));
   updateTunerReadout_(freq);
   tunerRafId = requestAnimationFrame(tunerLoop);
 }
@@ -8095,6 +8385,63 @@ function autoCorrelatePitch_(buf, sampleRate) {
   const frequency = sampleRate / refinedLag;
   return (isFinite(frequency) && frequency > 0) ? frequency : null;
 }
+// YIN pitch detector (de Cheveigné & Kawahara 2002), tuned for guitar.
+// Downsamples by 2 first (guitar fundamentals are all < 1 kHz), which makes
+// it cheap enough to run every animation frame on a phone.
+let _yinBuf = null, _yinD = null;
+function detectPitchYin_(buf, sampleRate) {
+  let rms = 0;
+  for (let i = 0; i < buf.length; i++) rms += buf[i] * buf[i];
+  rms = Math.sqrt(rms / buf.length);
+  if (rms < 0.006) return null; // silence / too quiet
+  const n = buf.length >> 1, sr = sampleRate / 2;
+  if (!_yinBuf || _yinBuf.length !== n) _yinBuf = new Float32Array(n);
+  for (let i = 0; i < n; i++) _yinBuf[i] = (buf[2 * i] + buf[2 * i + 1]) * 0.5;
+  const x = _yinBuf;
+  const tauMin = Math.max(2, Math.floor(sr / 1000)), tauMax = Math.min(Math.floor(sr / 60), n >> 1);
+  const W = n - tauMax;
+  if (W < tauMax) return null;
+  if (!_yinD || _yinD.length !== tauMax + 1) _yinD = new Float32Array(tauMax + 1);
+  const d = _yinD;
+  d[0] = 1;
+  let running = 0;
+  for (let tau = 1; tau <= tauMax; tau++) {
+    let s = 0;
+    for (let j = 0; j < W; j++) { const diff = x[j] - x[j + tau]; s += diff * diff; }
+    running += s;
+    d[tau] = running > 0 ? s * tau / running : 1;
+  }
+  const THRESH = 0.15;
+  let tau = -1;
+  for (let t = tauMin; t <= tauMax; t++) {
+    if (d[t] < THRESH) { while (t + 1 <= tauMax && d[t + 1] < d[t]) t++; tau = t; break; }
+  }
+  if (tau < 0) { // no clear dip: accept the best one only if it's reasonably periodic
+    let best = tauMin;
+    for (let t = tauMin; t <= tauMax; t++) if (d[t] < d[best]) best = t;
+    if (d[best] > 0.3) return null;
+    tau = best;
+  }
+  let better = tau;
+  if (tau > 1 && tau < tauMax) {
+    const a = d[tau - 1], b = d[tau], c = d[tau + 1], den = a + c - 2 * b;
+    if (den !== 0) better = tau + (a - c) / (2 * den);
+  }
+  const f = sr / better;
+  return (f >= 60 && f <= 1000) ? f : null;
+}
+// Median of the last few readings - steadies the needle and stops one bad
+// frame (a pick scrape, a harmonic) from knocking a string out of "tuned".
+let tunerHist = [];
+function smoothPitch_(f) {
+  if (!f) { tunerHist = []; return null; }
+  if (tunerHist.length && Math.abs(1200 * Math.log2(f / tunerHist[tunerHist.length - 1])) > 80) tunerHist = []; // new note
+  tunerHist.push(f);
+  if (tunerHist.length > 7) tunerHist.shift();
+  const s = tunerHist.slice().sort((a, b) => a - b);
+  return s[s.length >> 1];
+}
+
 function noteNumberFromFrequency_(freq) { return 12 * (Math.log(freq / 440) / Math.log(2)) + 69; }
 function frequencyFromNoteNumber_(note) { return 440 * Math.pow(2, (note - 69) / 12); }
 function centsOffFromPitch_(freq, note) { return Math.round(1200 * Math.log(freq / frequencyFromNoteNumber_(note)) / Math.log(2)); }
