@@ -349,6 +349,20 @@
   .reply-ref-label{margin:1px 0 2px;overflow-wrap:anywhere;}
   .reply-ref-link{font-size:12.5px;font-weight:600;cursor:pointer;color:var(--accent);text-decoration:underline;}
   .msg.admin .reply-ref-link{color:#fff;}
+  .msg{position:relative;transition:transform .15s ease;}
+  .msg.swiping{transition:none;}
+  .msg-quote{border-left:3px solid var(--teal);background:rgba(0,0,0,.05);border-radius:6px;padding:4px 8px;margin-bottom:5px;font-size:12.5px;cursor:pointer;}
+  .msg.admin .msg-quote{background:rgba(255,255,255,.18);border-left-color:#fff;}
+  .msg-quote-who{font-weight:700;font-size:11.5px;color:var(--teal-dark);}
+  .msg.admin .msg-quote-who{color:#fff;}
+  .msg-quote-text{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere;opacity:.85;}
+  .msg-reply{cursor:pointer;text-decoration:underline;white-space:nowrap;}
+  .msg.admin .meta .adv-link{color:#fff;text-decoration:underline;}
+  .quote-draft{display:flex;gap:8px;align-items:flex-start;border-left:3px solid var(--teal);background:#f2f6f6;border-radius:8px;padding:6px 10px;margin-bottom:6px;font-size:13px;}
+  .quote-draft .msg-quote-text{flex:1;min-width:0;}
+  .quote-draft-x{border:none;background:none;font-size:18px;line-height:1;cursor:pointer;color:var(--muted);padding:0 2px;}
+  @keyframes msgFlash{0%,60%{box-shadow:0 0 0 3px #f5c542;}100%{box-shadow:0 0 0 0 transparent;}}
+  .msg.msg-flash{animation:msgFlash 1.8s ease-out;}
   .reply-ref-draft{display:flex;flex-direction:column;align-items:flex-start;gap:4px;margin-bottom:8px;}
   .reply-ref-draft .reply-ref{max-width:100%;margin-bottom:0;}
   .focus-banner{background:#fff8e1;border:1px solid #f0d98a;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:13.5px;}
@@ -706,6 +720,10 @@
   :where(html[data-theme="dark"]) .chat-card:hover{background:#383d3f}
   :where(html[data-theme="dark"]) .chat-card-title{color:#e4e8e9}
   :where(html[data-theme="dark"]) .msg.user{background:#393d40}
+  html[data-theme="dark"] .quote-draft{background:#33393b;}
+  html[data-theme="dark"] .msg-quote{background:rgba(255,255,255,.08);}
+  html[data-theme="dark"] .msg-quote-who{color:#7fd6c8;}
+  html[data-theme="dark"] .msg.admin .msg-quote-who{color:#fff;}
   :where(html[data-theme="dark"]) .reply-ref{background:#3b3f42}
   :where(html[data-theme="dark"]) .msg.admin .reply-ref{border-left-color:#5b5e61}
   :where(html[data-theme="dark"]) .focus-banner{background:#494b49;border:1px solid #575440}
@@ -2640,7 +2658,23 @@ async function supaApi(action, fields) {
       row.reply_to_label = String(ref.label || '').slice(0, 200);
       row.reply_to_song_id = ref.song_id || null;
     }
+    // WhatsApp-style reply to one specific earlier message: keeps a short
+    // copy of that message's text so the quote still shows if it's edited.
+    const q = fields.quote;
+    if (q && q.id) {
+      row.quoted_message_id = q.id;
+      row.quoted_text = String(q.text || '').slice(0, 300);
+      row.quoted_sender = q.sender === 'admin' ? 'admin' : 'user';
+    }
     let { error } = await getSupa_().from('messages').insert(row);
+    if (error && row.quoted_message_id && /quoted_/.test(error.message || '')) {
+      // add_message_quotes.sql hasn't been run yet - still send it, with the
+      // quoted text written into the message itself.
+      const snippet = row.quoted_text.length > 80 ? row.quoted_text.slice(0, 80) + '…' : row.quoted_text;
+      row.text = '↩ "' + snippet + '"\n\n' + row.text;
+      delete row.quoted_message_id; delete row.quoted_text; delete row.quoted_sender;
+      ({ error } = await getSupa_().from('messages').insert(row));
+    }
     if (error && row.reply_to_type && /reply_to_/.test(error.message || '')) {
       // add_message_reply_to.sql hasn't been run yet - don't lose the
       // message: send it with the old-style "Re:" line in the text instead.
@@ -2741,6 +2775,7 @@ function supaMessageToOld_(m, emailMap) {
     edited_at: m.edited_at || null,
     reply_to_type: m.reply_to_type || null, reply_to_id: m.reply_to_id || null,
     reply_to_label: m.reply_to_label || '', reply_to_song_id: m.reply_to_song_id || null,
+    quoted_message_id: m.quoted_message_id || null, quoted_text: m.quoted_text || '', quoted_sender: m.quoted_sender || '',
   };
 }
 function supaErrorToOld_(e, emailMap) {
@@ -6923,6 +6958,7 @@ function renderContactBody() {
       </div>`;
     if (isOpen) {
       html += `<div class="chat-thread" id="chatThread">${renderChatMessages(myMessages)}</div>
+        <div id="quoteDraft-user">${quoteDraftHtml_('user')}</div>
         <div style="display:flex;gap:8px;align-items:flex-end;"><textarea id="chatInput" placeholder="Type a message…" style="flex:1;min-height:64px;max-height:200px;font-family:inherit;font-size:14px;resize:vertical;" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage();}"></textarea><button class="btn" onclick="sendChatMessage()">Send</button></div>`;
     }
   }
@@ -6996,15 +7032,84 @@ function focusContactRequest_(id) {
   const row = document.querySelector('tr[data-req-id="' + id + '"]');
   if (row) { row.classList.add('row-flash'); row.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => row.classList.remove('row-flash'), 2500); }
 }
+// ---- Reply to a specific message (like WhatsApp) -------------------------
+// ctx 'admin' = the admin's conversation window, 'user' = Contact page.
+let msgQuote = { admin: null, user: null };
+const _chatMsgIndex = {};
+function quoteWho_(sender, ctx) {
+  if (ctx === 'admin') return sender === 'admin' ? 'You' : ((chatTarget && chatTarget.name) || 'User');
+  return sender === 'admin' ? 'JGC App' : (viewAsUser ? viewAsUser.name : 'You');
+}
+function msgQuoteBoxHtml_(m, ctx) {
+  if (!m.quoted_text) return '';
+  return `<div class="msg-quote" onclick="event.stopPropagation();jumpToQuotedMsg_('${escapeHtml(m.quoted_message_id || '')}')">
+      <div class="msg-quote-who">${escapeHtml(quoteWho_(m.quoted_sender, ctx))}</div>
+      <div class="msg-quote-text" dir="auto">${escapeHtml(m.quoted_text)}</div></div>`;
+}
+function quoteDraftHtml_(ctx) {
+  const q = msgQuote[ctx];
+  if (!q) return '';
+  return `<div class="quote-draft"><div style="flex:1;min-width:0;"><div class="msg-quote-who">Replying to ${escapeHtml(quoteWho_(q.sender, ctx))}</div><div class="msg-quote-text" dir="auto">${escapeHtml(q.text)}</div></div><button class="quote-draft-x" title="Cancel reply" aria-label="Cancel reply" onclick="clearMsgQuote_('${ctx}')">✕</button></div>`;
+}
+function startMsgQuote_(ctx, id) {
+  const m = _chatMsgIndex[id];
+  if (!m) return;
+  if (ctx === 'admin' && editingMessageId) return;
+  msgQuote[ctx] = { id: m.id, text: m.text, sender: m.sender };
+  const box = document.getElementById('quoteDraft-' + ctx);
+  if (box) box.innerHTML = quoteDraftHtml_(ctx);
+  const input = document.getElementById(ctx === 'admin' ? 'adminChatInput' : 'chatInput');
+  if (input) input.focus();
+}
+function clearMsgQuote_(ctx) {
+  msgQuote[ctx] = null;
+  const box = document.getElementById('quoteDraft-' + ctx);
+  if (box) box.innerHTML = '';
+}
+function jumpToQuotedMsg_(id) {
+  if (!id) return;
+  const el = document.querySelector('.msg[data-msg-id="' + id + '"]');
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.classList.remove('msg-flash'); void el.offsetWidth; el.classList.add('msg-flash');
+}
+// Swipe a message to the right (phones) to reply to it.
+(function attachMsgSwipeReply_() {
+  let st = null;
+  document.addEventListener('touchstart', e => {
+    const el = e.target.closest && e.target.closest('.msg[data-msg-id]');
+    if (!el || e.touches.length !== 1) { st = null; return; }
+    st = { el, x: e.touches[0].clientX, y: e.touches[0].clientY, dx: 0, locked: null };
+  }, { passive: true });
+  document.addEventListener('touchmove', e => {
+    if (!st) return;
+    const dx = e.touches[0].clientX - st.x, dy = e.touches[0].clientY - st.y;
+    if (st.locked === null && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) st.locked = Math.abs(dx) > Math.abs(dy) * 1.5 && dx > 0;
+    if (!st.locked) return;
+    st.dx = Math.max(0, Math.min(80, dx));
+    st.el.classList.add('swiping');
+    st.el.style.transform = `translateX(${st.dx}px)`;
+  }, { passive: true });
+  document.addEventListener('touchend', () => {
+    if (!st) return;
+    const s0 = st; st = null;
+    s0.el.classList.remove('swiping');
+    s0.el.style.transform = '';
+    if (s0.locked && s0.dx > 55) startMsgQuote_(s0.el.dataset.ctx, s0.el.dataset.msgId);
+  });
+})();
 function renderChatMessages(list, opts) {
   const editable = !!(opts && opts.editable);
+  const ctx = editable ? 'admin' : 'user';
+  list.forEach(m => { if (m && m.id) _chatMsgIndex[m.id] = m; });
   return list.slice().sort((a,b)=> new Date(a.created_at)-new Date(b.created_at))
     .map(m => {
       const editedTag = m.edited_at ? ' <span class="muted">(edited)</span>' : '';
       const editLink = (editable && m.sender === 'admin')
         ? ` · <span class="adv-link" onclick='startEditAdminMessage_(${escapeHtml(JSON.stringify(m.id))},${escapeHtml(JSON.stringify(m.text))})'>Edit</span>`
         : '';
-      return `<div class="msg ${m.sender}">${m.reply_to_type ? replyRefBoxHtml_(m, editable ? 'admin' : 'user') : ''}${escapeHtml(m.text)}<div class="meta">${new Date(m.created_at).toLocaleString()}${editedTag}${editLink}</div></div>`;
+      const replyLink = m.id ? ` · <span class="msg-reply" onclick="startMsgQuote_('${ctx}','${escapeHtml(m.id)}')">↩ Reply</span>` : '';
+      return `<div class="msg ${m.sender}" data-msg-id="${escapeHtml(m.id || '')}" data-ctx="${ctx}">${m.reply_to_type ? replyRefBoxHtml_(m, ctx) : ''}${msgQuoteBoxHtml_(m, ctx)}${escapeHtml(m.text)}<div class="meta">${new Date(m.created_at).toLocaleString()}${editedTag}${replyLink}${editLink}</div></div>`;
     }).join('') || '<div class="muted">No messages yet — say hi!</div>';
 }
 // Mirrors Code.gs's YOUTUBE_URL_RE — a shape check only (youtu.be/<id>,
@@ -7045,7 +7150,8 @@ function sendChatMessage() {
   const input = document.getElementById('chatInput');
   const text = input.value.trim(); if (!text) return;
   input.value = '';
-  api('sendMessage', Object.assign({ text }, viewAsFields())).then(() => refreshAfterWrite()).then(() => renderContact()).catch(err => alert(err.message));
+  const quote = msgQuote.user; msgQuote.user = null;
+  api('sendMessage', Object.assign({ text, quote }, viewAsFields())).then(() => refreshAfterWrite()).then(() => renderContact()).catch(err => alert(err.message));
 }
 
 /* ============================================================
@@ -7586,6 +7692,7 @@ function threadModalHtml() {
     <div class="chat-thread" id="adminChatThread">${renderChatMessages(active ? active.msgs : [], { editable: true })}</div>
     ${editingMessageId ? `<div class="muted" style="font-size:12px;margin-bottom:6px;">Editing your message below — <span class="adv-link" onclick="cancelEditAdminMessage_()">Cancel</span></div>` : ''}
     ${!editingMessageId && chatTarget.replyTo ? `<div class="reply-ref-draft"><span class="muted" style="font-size:12px;">Replying about:</span>${replyRefBoxHtml_({ reply_to_type: chatTarget.replyTo.type, reply_to_id: chatTarget.replyTo.id, reply_to_label: chatTarget.replyTo.label, reply_to_song_id: chatTarget.replyTo.song_id }, 'admin')}<span class="adv-link" style="font-size:12px;" onclick="clearReplyTo_()">Remove</span></div>` : ''}
+    <div id="quoteDraft-admin">${editingMessageId ? '' : quoteDraftHtml_('admin')}</div>
     <div style="display:flex;gap:8px;margin-bottom:14px;align-items:flex-end;"><textarea id="adminChatInput" placeholder="Reply…" style="flex:1;min-height:64px;max-height:200px;font-family:inherit;font-size:14px;resize:vertical;" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAdminReply();}">${escapeHtml(prefillVal)}</textarea><button class="btn" onclick="sendAdminReply()">${editingMessageId ? 'Save' : 'Send'}</button></div>
     <div class="modal-actions"><button class="btn secondary" onclick='setThreadArchived(${escapeHtml(JSON.stringify(chatTarget.email))},${active && active.archived ? 'false' : 'true'})'>${active && active.archived ? 'Unarchive' : 'Archive'} conversation</button><button class="btn secondary" onclick="closeModal()">Close</button></div>`;
 }
@@ -7602,6 +7709,7 @@ function openThreadModal(email, name, prefill) {
   // and shown as its own box (see replyRefBoxHtml_), not pasted into it.
   const replyTo = (prefill && typeof prefill === 'object') ? prefill : null;
   chatTarget = { email, name, prefill: replyTo ? '' : (prefill || ''), replyTo };
+  msgQuote.admin = null;
   const afterMessagesReady_ = () => {
     openModal(threadModalHtml());
     const t = document.getElementById('adminChatThread'); if (t) t.scrollTop = t.scrollHeight;
@@ -7629,6 +7737,7 @@ function openThreadModal(email, name, prefill) {
 }
 function startEditAdminMessage_(id, text) {
   editingMessageId = id;
+  msgQuote.admin = null;
   chatTarget.prefill = text;
   refreshThreadModalIfOpen();
   const input = document.getElementById('adminChatInput');
@@ -7667,7 +7776,8 @@ function sendAdminReply() {
   }
   const replyTo = chatTarget.replyTo || null;
   chatTarget.replyTo = null;
-  api('sendMessage', { text, target_email: chatTarget.email, target_name: chatTarget.name, reply_to: replyTo }).then(() => api('getMessages', {})).then(data => {
+  const quote = msgQuote.admin; msgQuote.admin = null;
+  api('sendMessage', { text, target_email: chatTarget.email, target_name: chatTarget.name, reply_to: replyTo, quote }).then(() => api('getMessages', {})).then(data => {
     messagesCache = data.messages || [];
     messagesLoaded = true;
     refreshThreadModalIfOpen();
