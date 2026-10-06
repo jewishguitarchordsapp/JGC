@@ -2073,6 +2073,14 @@ async function supaApi(action, fields) {
     return { success: true, content: data.map(s => ({ id: s.id, chords_lyrics: s.chords_lyrics || '', lyrics_only: s.lyrics_only || '' })) };
   }
 
+  if (action === 'songContentMany') {
+    await supaRequireUser_();
+    const ids = (fields.ids || []).slice(0, 50);
+    if (!ids.length) return { success: true, content: [] };
+    const { data, error } = await getSupa_().from('songs').select('id,updated_at,chords_lyrics,lyrics_only').in('id', ids);
+    throwIfErr_(error);
+    return { success: true, content: (data || []).map(r => ({ id: r.id, updated_at: r.updated_at, chords_lyrics: r.chords_lyrics || '', lyrics_only: r.lyrics_only || '' })) };
+  }
   if (action === 'songContent') {
     await supaRequireUser_();
     const { data, error } = await getSupa_().from('songs').select('id,chords_lyrics,lyrics_only').eq('id', fields.id).maybeSingle();
@@ -2788,7 +2796,9 @@ function songsSyncSince_() {
 // Merges a delta 'list' response into `songs`. Returns false (caller then
 // does a full reload) if the merged count doesn't match the server's total,
 // e.g. because a song was deleted.
+let _lastDeltaChangedIds = [];
 function applySongsDelta_(d) {
+  _lastDeltaChangedIds = [];
   if (!d || !d.delta) return false;
   if ((d.songs || []).length >= 1000) return false; // hit the delta cap - just reload everything
   const byId = {};
@@ -2799,10 +2809,12 @@ function applySongsDelta_(d) {
     if (cur) {
       if (cur.updated_at === row.updated_at) return; // unchanged (gte boundary)
       // Chart text may have changed - drop the cached copy so it re-fetches.
-      delete cur.chords_lyrics; delete cur.lyrics_only; delete songContentById[row.id];
+      delete cur.chords_lyrics; delete cur.lyrics_only; delete songContentById[row.id]; delete cur._contentError;
       Object.assign(cur, row);
+      _lastDeltaChangedIds.push(row.id);
     } else {
       merged.push(row); byId[row.id] = row;
+      _lastDeltaChangedIds.push(row.id);
     }
   });
   if (typeof d.total === 'number' && d.total !== merged.length) return false;
@@ -2842,8 +2854,10 @@ async function loadSongsInner_(showSpinner) {
       const since = songsSyncSince_();
       if (since) delta = await api('list', { since });
     }
+    let prefetchIds = [];
     if (delta && applySongsDelta_(delta)) {
       // merged in place
+      prefetchIds = _lastDeltaChangedIds.slice();
     } else {
       songs = await apiList();
     }
@@ -2875,6 +2889,7 @@ async function loadSongsInner_(showSpinner) {
     // it would throw away everything typed or picked since it opened.
     if (view.name !== 'admin' && !(view.name === 'edit' && document.getElementById('f_title')) && !(view.name === 'detail' && playerState.playing)) render();
     saveCatalogCache();
+    if (prefetchIds.length) setTimeout(() => prefetchSongTexts_(prefetchIds), 1500);
   } catch (err) {
     if (isOffline && songs.length === 0) {
       // Cold boot with no network at all and nothing loaded yet this
@@ -2992,31 +3007,83 @@ function saveSongText_(id, updatedAt, cl, lo) {
     }
   }
 }
-async function loadSongContentFor(id) {
+// One in-flight request per song (shared by the detail page, the edit form
+// and offline saving), with a time limit: a request that hangs (a slow or
+// briefly unreachable database) is abandoned after SONG_TEXT_TIMEOUT_MS and
+// tried once more, instead of leaving the song stuck on "Loading chart…"
+// until it's closed and reopened.
+const SONG_TEXT_TIMEOUT_MS = 12000;
+const _songTextInflight = {};
+function withTimeout_(promise, ms) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('timeout')), ms);
+    promise.then(v => { clearTimeout(t); resolve(v); }, e => { clearTimeout(t); reject(e); });
+  });
+}
+function applySongText_(id, updatedAt, cl, lo) {
+  const song = songs.find(s => s.id === id);
+  // The song was edited again while this text was on its way - it's the
+  // old version, so don't show or cache it; the next open fetches the new one.
+  if (song && updatedAt && song.updated_at && song.updated_at !== updatedAt) return false;
+  songContentById[id] = { chords_lyrics: cl, lyrics_only: lo };
+  if (song) { song.chords_lyrics = cl; song.lyrics_only = lo; delete song._contentError; }
+  saveSongText_(id, updatedAt || (song && song.updated_at), cl, lo);
+  return true;
+}
+function loadSongContentFor(id) {
   const cachedSong = songs.find(s => s.id === id);
   const hit = cachedSong && cachedSong.updated_at && songTextCache_()[id];
   if (hit && hit.u === cachedSong.updated_at) {
     hit.t = Date.now();
     songContentById[id] = { chords_lyrics: hit.cl, lyrics_only: hit.lo };
     cachedSong.chords_lyrics = hit.cl; cachedSong.lyrics_only = hit.lo;
-    delete cachedSong._contentPending;
+    delete cachedSong._contentError;
     if (view.name === 'detail' && view.id === id) renderDetail();
-    return;
+    return Promise.resolve();
   }
-  if (isOffline) return;
+  if (_songTextInflight[id]) return _songTextInflight[id];
+  if (isOffline) return Promise.resolve();
+  const askedAt = cachedSong && cachedSong.updated_at;
+  const run = (async () => {
+    let lastErr = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const data = await withTimeout_(api('songContent', { id }), SONG_TEXT_TIMEOUT_MS);
+        // false = edited meanwhile; the re-render below then fetches the new version.
+        applySongText_(id, askedAt, data.chords_lyrics, data.lyrics_only);
+        lastErr = null;
+        break;
+      } catch (err) { lastErr = err; console.warn('Song text load failed (try ' + (attempt + 1) + ')', err && err.message); }
+    }
+    if (lastErr) { const sg = songs.find(s => s.id === id); if (sg && sg.chords_lyrics === undefined) sg._contentError = true; }
+  })().finally(() => {
+    delete _songTextInflight[id];
+    if (view.name === 'detail' && view.id === id) renderDetail();
+  });
+  _songTextInflight[id] = run;
+  return run;
+}
+function retrySongText_(id) {
+  const sg = songs.find(s => s.id === id);
+  if (sg) delete sg._contentError;
+  renderDetail();
+}
+// Songs added or edited since this device last synced (a few a day) get
+// their chart text fetched quietly in the background, in one small request,
+// so opening a brand-new song is as instant as opening an old one.
+async function prefetchSongTexts_(ids) {
+  if (isOffline || !CONFIG.USE_SUPABASE) return;
+  const cache = songTextCache_();
+  const want = ids.filter(id => {
+    const sg = songs.find(s => s.id === id);
+    return sg && sg.chords_lyrics === undefined && !_songTextInflight[id] && !(cache[id] && cache[id].u === sg.updated_at);
+  }).slice(0, 15);
+  if (!want.length) return;
   try {
-    // 'songContent' now requires sign-in too, and takes the id in the POST
-    // body rather than a GET query string (see doPost in Code.gs — query
-    // strings are also just the wrong place for anything identity-related,
-    // since they end up in logs/history). Same api() helper as above.
-    const data = await api('songContent', { id });
-    songContentById[id] = { chords_lyrics: data.chords_lyrics, lyrics_only: data.lyrics_only };
-    const song = songs.find(s => s.id === id);
-    if (song) { song.chords_lyrics = data.chords_lyrics; song.lyrics_only = data.lyrics_only; saveSongText_(id, song.updated_at, data.chords_lyrics, data.lyrics_only); }
-  } catch (err) { console.error('Failed to load song text', err); }
-  const song2 = songs.find(s => s.id === id);
-  if (song2) delete song2._contentPending;
-  if (view.name === 'detail' && view.id === id) renderDetail();
+    const data = await withTimeout_(api('songContentMany', { ids: want }), 20000);
+    (data.content || []).forEach(c => applySongText_(c.id, c.updated_at, c.chords_lyrics, c.lyrics_only));
+    if (view.name === 'detail' && want.includes(view.id)) renderDetail();
+  } catch (e) { /* not important - the song still loads normally when opened */ }
 }
 
 function renderFooter() {
@@ -5351,7 +5418,7 @@ function renderDetail() {
   const song = songs.find(s => s.id === view.id);
   if (!song) { document.getElementById('app').innerHTML = '<div class="empty">Song not found.</div>'; return; }
   const contentReady = song.chords_lyrics !== undefined;
-  if (!contentReady && !song._contentPending) { song._contentPending = true; loadSongContentFor(song.id); }
+  if (!contentReady && !song._contentError) loadSongContentFor(song.id);
   const isSameSongAsBefore = playerState.songId === song.id;
   playerState.capo = isSameSongAsBefore ? playerState.capo : song.capo;
   if (!isSameSongAsBefore) { const saved = effectiveMyCapos()[song.id]; playerState.myCapo = (saved === undefined || saved === null) ? null : Number(saved); }
@@ -5466,7 +5533,7 @@ function renderDetail() {
       </div>
     </div>` : ''}`}
 
-    <div id="chartScroll" class="${playerState.showChords ? '' : 'hide-chords'}${playerState.playing ? ' chart-playing' : ''}" style="--chart-step:${playerState.fontSize||0}px;--chart-fw:${playerState.bold?700:400};">${contentReady ? renderChart(song.chords_lyrics, transpose) : '<div class="muted" style="padding:24px 4px">Loading chart…</div>'}</div>
+    <div id="chartScroll" class="${playerState.showChords ? '' : 'hide-chords'}${playerState.playing ? ' chart-playing' : ''}" style="--chart-step:${playerState.fontSize||0}px;--chart-fw:${playerState.bold?700:400};">${contentReady ? renderChart(song.chords_lyrics, transpose) : (song._contentError ? `<div class="muted" style="padding:24px 4px">Couldn’t load this chart — the connection is slow right now. <button class="btn" onclick="retrySongText_('${escapeHtml(song.id)}')">Try again</button></div>` : '<div class="muted" style="padding:24px 4px">Loading chart…</div>')}</div>
     ${playerState.playing ? '' : `${ytId ? `<div class="yt-wrap"><iframe src="https://www.youtube.com/embed/${ytId}" allowfullscreen></iframe></div>` : ''}
     <div class="grid-cats" style="margin-top:10px">${tags.map(t=>`<span class="chip">${escapeHtml(t)}</span>`).join('')}${languages.map(l=>`<span class="chip">${escapeHtml(l)}</span>`).join('')}</div>`}
     ${playerState.playing ? playFloatBarHtml() : ''}`;
@@ -5822,10 +5889,11 @@ function renderEdit() {
   // Save were pressed. Show a brief loading state and re-render once the
   // real text arrives instead.
   if (song && song.chords_lyrics === undefined) {
-    if (!song._contentPending) {
-      song._contentPending = true;
-      loadSongContentFor(song.id).then(() => { if (view.name === 'edit' && view.id === song.id) renderEdit(); });
+    if (song._contentError || isOffline) {
+      document.getElementById('app').innerHTML = `<div class="empty">Couldn’t load this song’s text right now. <button class="btn" onclick="(function(){const x=songs.find(s=>s.id==='${escapeHtml(song.id)}'); if(x) delete x._contentError; renderEdit();})()">Try again</button></div>`;
+      return;
     }
+    loadSongContentFor(song.id).then(() => { if (view.name === 'edit' && view.id === song.id) renderEdit(); });
     document.getElementById('app').innerHTML = '<div class="empty">Loading song text…</div>';
     return;
   }
