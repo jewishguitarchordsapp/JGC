@@ -6930,8 +6930,8 @@ function renderContactBody() {
   // tab (effectiveIsAdmin() is false while viewAsUser is set, so this still
   // shows there too - see its definition above).
   let html = !effectiveIsAdmin() ? `<div class="card" style="font-size:14px;line-height:1.5;">This app is built and kept running by a volunteer, in whatever spare time is available — so song requests, fixes, and new features may take a little while to show up. Thank you for your patience! If something isn't working right, or you just want to say hi, please reach out below — your notes and requests are genuinely appreciated. Messages written with warmth and politeness are always easier (and nicer) to respond to.</div>` : '';
-  html += `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h2 style="margin:0">${requestsHeading}</h2><button class="btn" onclick="openRequestSongModal()">+ Request a Song</button></div>
-      <p class="muted">Up to 2 requests per week.</p>`;
+  html += `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h2 style="margin:0">${requestsHeading}</h2><button class="btn${requestQuota_().left ? '' : ' secondary'}" onclick="openRequestSongModal()">+ Request a Song</button></div>
+      ${requestQuotaHtml_()}`;
   html += `<div class="table-wrap"><table><tr><th>Status</th><th>Song</th><th>Artist</th></tr>
       ${pageSlice(myRequests, contactRequestsPage, 10).map(r => `<tr data-req-id="${escapeHtml(r.id)}"><td><span class="badge badge-explain ${r.status}" role="button" tabindex="0" title="${escapeHtml(requestStatusMeaning_(r.status))}" onclick="showToast(this.title)">${requestStatusSymbol(r.status)}</span>${r.status==='declined' && r.decline_reason ? `<br><span class="muted" style="font-size:11.5px;">${escapeHtml(r.decline_reason)}</span>` : ''}${r.status==='needs_lyrics' ? ` <button class="btn add-lyrics-btn" onclick="openAddRequestLyrics_('${r.id}')">Add lyrics</button>` : ''}</td><td dir="auto">${escapeHtml(r.song_title)}</td><td dir="auto">${escapeHtml(r.artist)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No requests yet.</td></tr>'}
       </table></div>
@@ -7117,10 +7117,42 @@ function renderChatMessages(list, opts) {
 // call to the YouTube Data API to confirm the video exists or has a
 // minimum view count — that check was explicitly decided against.
 const YOUTUBE_URL_RE = /^https?:\/\/(www\.|m\.)?(youtube\.com\/(watch\?v=|shorts\/)[\w-]{6,}|youtu\.be\/[\w-]{6,})/i;
+// Same rule as the database's enforce_request_limit trigger: at most 2
+// requests in any rolling 7 days. Shown up front so nobody fills in the
+// whole form only to be turned away at Submit.
+const REQUEST_LIMIT = 2, REQUEST_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+function requestQuota_() {
+  const now = Date.now();
+  const recent = effectiveRequests().map(r => new Date(r.created_at).getTime())
+    .filter(t => !isNaN(t) && now - t < REQUEST_WINDOW_MS).sort((a, b) => a - b);
+  const left = Math.max(0, REQUEST_LIMIT - recent.length);
+  // When full, a slot frees up 7 days after the oldest of the recent ones.
+  const nextAt = left ? null : new Date(recent[recent.length - REQUEST_LIMIT] + REQUEST_WINDOW_MS + 60000);
+  return { left, nextAt };
+}
+function requestNextLabel_(d) {
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: sameYear ? undefined : 'numeric' })
+    + ' at ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+function requestQuotaHtml_() {
+  const q = requestQuota_();
+  if (q.left) return `<p class="muted">Up to 2 requests per week — you have <b>${q.left}</b> left this week.</p>`;
+  return `<p class="muted">Up to 2 requests per week. You've used both — your next request is available <b>${escapeHtml(requestNextLabel_(q.nextAt))}</b>.</p>`;
+}
 function openRequestSongModal() {
+  const quota = requestQuota_();
+  if (!quota.left) {
+    openModal(`<h2 style="margin-top:0">Request a Song</h2>
+      <p>You've already made 2 song requests this week.</p>
+      <p>Your next request will be available <b>${escapeHtml(requestNextLabel_(quota.nextAt))}</b>.</p>
+      <p class="muted" style="font-size:13px;">Meanwhile, you can check on your requests on this page, or send a message below.</p>
+      <div class="modal-actions"><button class="btn" onclick="closeModal()">OK</button></div>`);
+    return;
+  }
   openModal(`
     <h2>Request a Song</h2>
-    <p class="muted">Up to 2 requests per week.</p>
+    ${requestQuotaHtml_()}
     <div class="row">
       <div><label>Song title *</label><input type="text" id="req_title"></div>
       <div><label>Artist *</label><input type="text" id="req_artist"></div>
