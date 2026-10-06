@@ -209,6 +209,16 @@
   .picker-artist-row{display:flex;align-items:center;gap:8px;background:#eef4f4;border:1px solid #d7e6e6;border-radius:8px;padding:6px 8px;}
   .picker-artist-en{flex:1;min-width:0;font-size:14px;font-weight:600;color:var(--accent);overflow-wrap:anywhere;}
   .picker-artist-row input[type=text]{flex:1;min-width:0;padding:6px 8px;}
+  .picker-artist-he{flex:1;min-width:0;font-size:14px;color:var(--text);overflow-wrap:anywhere;text-align:right;}
+  .picker-artist-he.none{color:var(--muted);font-size:12px;font-style:italic;text-align:left;}
+  .fr-panel{border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin:4px 0 8px;background:#f7fafa;}
+  .fr-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px;}
+  .fr-row input[type=text]{flex:1;min-width:140px;padding:6px 8px;}
+  .fr-opts{display:flex;gap:6px 14px;flex-wrap:wrap;font-size:12.5px;margin-bottom:6px;}
+  .fr-opts label{margin:0;display:inline-flex;align-items:center;gap:5px;cursor:pointer;font-weight:normal;}
+  .fr-quick{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:12.5px;border-top:1px dashed var(--border);padding-top:8px;margin-top:4px;}
+  .fr-quick .btn, .fr-row .btn{padding:4px 10px;font-size:12.5px;}
+  .fr-status{font-size:12.5px;}
   .picker-mini{background:#fff;border:1px solid var(--border);border-radius:6px;width:28px;height:28px;cursor:pointer;font-size:15px;color:var(--muted);flex:none;}
   .picker-mini:hover{color:var(--text);border-color:var(--teal);}
   .picker-mini-spacer{width:28px;flex:none;}
@@ -688,6 +698,7 @@
   :where(html[data-theme="dark"]) .play-float-bar .speed-group button{background:#3b3f42}
   :where(html[data-theme="dark"]) .chords-used .chip{background:#3b3f42}
   :where(html[data-theme="dark"]) .error{color:#dd9999}
+  html[data-theme="dark"] .fr-panel{background:#33393b;}
   :where(html[data-theme="dark"]) .picker-artist-row{background:#454a4d;border:1px solid #50575a}
   :where(html[data-theme="dark"]) .picker-mini{background:#3b3f42}
   :where(html[data-theme="dark"]) .picker-list{background:#3b3f42}
@@ -1031,7 +1042,7 @@ const I18N = {
     signin_title: 'Sign in to continue',
     signin_sub: 'Sign in with Google to browse songs, chords, and playlists.',
     songtab_new: 'New Songs', songtab_all: 'All Songs', songtab_favorites: 'Favorites', songtab_known: 'Known Songs',
-    search_placeholder: 'Search by title, artist, or lyrics…',
+    search_placeholder: 'Search title, artist or lyrics — English or Hebrew…',
     add_song_btn: '+ Add Song',
     random_song: 'Random Song',
     add_to_playlist_title: 'Add to Playlist',
@@ -1078,7 +1089,7 @@ const I18N = {
     signin_title: 'התחברו כדי להמשיך',
     signin_sub: 'התחברו עם Google כדי לעיין בשירים, אקורדים ופלייליסטים.',
     songtab_new: 'שירים חדשים', songtab_all: 'כל השירים', songtab_favorites: 'מועדפים', songtab_known: 'שירים מוכרים',
-    search_placeholder: 'חיפוש לפי שם, אמן או מילות השיר…',
+    search_placeholder: 'חיפוש לפי שם, אמן או מילים — בעברית או באנגלית…',
     add_song_btn: '+ הוספת שיר',
     random_song: 'שיר אקראי',
     add_to_playlist_title: 'הוספה לפלייליסט',
@@ -4325,7 +4336,7 @@ function renderPrintPreview() {
   document.body.appendChild(el);
   const headerHtml = `<div class="print-header">
           <div class="print-title">${escapeHtml(song.title)}</div>
-          <div class="print-meta">${escapeHtml(song.artist||'')}${st.capo ? ` &middot; Capo ${st.capo}` : ''}</div>
+          <div class="print-meta">${escapeHtml(fmtArtists_(song.artist))}${st.capo ? ` &middot; Capo ${st.capo}` : ''}</div>
         </div>`;
   paginatePrint_(headerHtml, chartHtml, st, song.title || '');
   document.body.appendChild(el);
@@ -4647,6 +4658,11 @@ async function loadLanguages_() {
 function splitArtists(artist) {
   return String(artist || '').split(',').map(a => a.trim()).filter(Boolean);
 }
+// "A,B" / "A ,B" -> "A, B" for display (one space after each comma).
+function fmtArtists_(artist) {
+  const str = String(artist || '');
+  return str.includes(',') ? splitArtists(str).join(', ') : str;
+}
 // Display text for a song's title/artist in the current UI language — falls
 // back to the English field whenever a Hebrew value is missing for that
 // song/artist, so nothing ever renders blank just because the Hebrew side
@@ -4660,11 +4676,10 @@ function songDisplayTitle_(s) {
   return s.title || '';
 }
 function songDisplayArtist_(s) {
-  if (uiLang !== 'he') return s.artist || '';
+  if (uiLang !== 'he') return fmtArtists_(s.artist);
   const en = splitArtists(s.artist);
   const he = splitArtists(s.artist_hebrew);
-  if (!he.length) return s.artist || '';
-  return en.map((name, i) => he[i] || name).join(', ');
+  return en.map((name, i) => (he.length === en.length && he[i]) || artistLabel_(name)).join(', ');
 }
 // Renders a song's artist field as clickable name(s) — same "filter the
 // Songs list to this artist" behavior as the Artists tab's chips — so
@@ -4674,7 +4689,7 @@ function artistLinksHtml(artist, artistHebrew) {
   if (!names.length) return '';
   const heNames = uiLang === 'he' ? splitArtists(artistHebrew) : [];
   return names.map((a, i) => {
-    const label = heNames[i] || a;
+    const label = uiLang === 'he' ? ((heNames.length === names.length && heNames[i]) || artistLabel_(a)) : a;
     return `<span class="backlink" onclick="event.stopPropagation();songTab='all';filters.artist='${a.replace(/'/g,"\\'")}';songListPage=0;goTo('list')">${escapeHtml(label)}</span>`;
   }).join(', ');
 }
@@ -5075,7 +5090,30 @@ function songDaysAgoLabel(s) {
 // list and only shown on the admin's own "Drafts" tab.
 function isDraft_(s) { return !!s && s.published === false; }
 function visibleSongs_() { return songs.filter(s => !isDraft_(s)); }
+// Hebrew artist name -> English artist(s), from songs that have both. Lets
+// a Hebrew search find an artist even on songs whose own Hebrew field is
+// empty. Rebuilt only when the song list changes.
+let _artistHeCache = { ref: null, len: -1, map: {} };
+function artistHebrewMapCached_() {
+  if (_artistHeCache.ref !== songs || _artistHeCache.len !== songs.length) {
+    _artistHeCache = { ref: songs, len: songs.length, map: artistHebrewMap_() };
+  }
+  return _artistHeCache.map;
+}
+function englishArtistsMatchingHebrew_(q) {
+  const out = new Set();
+  q = String(q || '').trim();
+  if (!q || !containsHebrew(q)) return out;
+  const m = artistHebrewMapCached_();
+  Object.keys(m).forEach(en => { if (m[en].includes(q)) out.add(en); });
+  return out;
+}
+function artistLabel_(en) {
+  if (uiLang !== 'he') return en;
+  return artistHebrewMapCached_()[en] || en;
+}
 function filteredSongs() {
+  const heArtistHits = englishArtistsMatchingHebrew_(filters.q);
   let list = songs.filter(s => {
     if (songTab === 'drafts' ? !isDraft_(s) : isDraft_(s)) return false;
     const { languages, tags } = splitCategories(s.categories);
@@ -5085,7 +5123,8 @@ function filteredSongs() {
     if (filters.q) {
       const q = filters.q.toLowerCase();
       const inLyrics = (s.lyrics_only || '').toLowerCase().includes(q) || !!(lyricHits && lyricHits.q === filters.q.trim() && lyricHits.ids.has(s.id));
-      if (!(s.title||'').toLowerCase().includes(q) && !(s.title_hebrew||'').includes(filters.q) && !(s.artist||'').toLowerCase().includes(q) && !(s.artist_hebrew||'').includes(filters.q) && !inLyrics) return false;
+      const heArtist = heArtistHits.size && splitArtists(s.artist).some(a => heArtistHits.has(a));
+      if (!(s.title||'').toLowerCase().includes(q) && !(s.title_hebrew||'').includes(filters.q) && !(s.artist||'').toLowerCase().includes(q) && !(s.artist_hebrew||'').includes(filters.q) && !heArtist && !inLyrics) return false;
     }
     return true;
   });
@@ -5471,7 +5510,7 @@ function saveKnownChords() {
 let artistsSearch = '';
 function renderArtists() {
   let html = `<h2>Artists</h2>
-    <div class="searchRow"><input type="text" id="artistsSearchBox" placeholder="Search artists…" value="${escapeHtml(artistsSearch)}"></div>
+    <div class="searchRow"><input type="text" id="artistsSearchBox" placeholder="${uiLang === 'he' ? 'חיפוש אמנים — בעברית או באנגלית…' : 'Search artists — English or Hebrew…'}" value="${escapeHtml(artistsSearch)}"></div>
     <div id="artistsGridWrap"></div>`;
   document.getElementById('app').innerHTML = html;
   document.getElementById('artistsSearchBox').addEventListener('input', e => { artistsSearch = e.target.value; renderArtistsGrid_(); });
@@ -5488,10 +5527,12 @@ function renderArtistsGrid_() {
   let artists = Object.keys(counts).sort((a,b)=>a.localeCompare(b));
   if (artistsSearch.trim()) {
     const q = artistsSearch.trim().toLowerCase();
-    artists = artists.filter(a => a.toLowerCase().includes(q));
+    const heHits = englishArtistsMatchingHebrew_(artistsSearch);
+    artists = artists.filter(a => a.toLowerCase().includes(q) || heHits.has(a));
   }
+  if (uiLang === 'he') artists.sort((a, b) => artistLabel_(a).localeCompare(artistLabel_(b), 'he'));
   wrap.innerHTML = '<div class="grid-cats">' +
-    (artists.map(a => `<span class="chip" onclick="songTab='all';filters.artist='${a.replace(/'/g,"\\'")}';songListPage=0;goTo('list')">${escapeHtml(a)} <span class="count">(${counts[a]})</span></span>`).join('') || '<span class="muted">No artists found.</span>') + '</div>';
+    (artists.map(a => `<span class="chip" dir="auto" onclick="songTab='all';filters.artist='${a.replace(/'/g,"\\'")}';songListPage=0;goTo('list')">${escapeHtml(artistLabel_(a))} <span class="count">(${counts[a]})</span></span>`).join('') || '<span class="muted">No artists found.</span>') + '</div>';
 }
 function renderCategories() {
   const langCounts = {}, tagCounts = {};
@@ -5981,6 +6022,21 @@ function goToQueueSong(delta) {
   }, { passive: true });
 })();
 
+// Deletes an unpublished (draft) song - nobody but admins ever saw it.
+async function deleteDraft_(id) {
+  const s = songs.find(x => x.id === id);
+  const name = s && s.title ? '“' + s.title + '”' : 'this draft';
+  if (!(await customConfirmAsync('Delete ' + name + '? It was never published, so no users will notice. This cannot be undone.', { title: 'Delete draft', confirmLabel: 'Delete', danger: true }))) return;
+  try {
+    await api('deleteSong', { id });
+    songs = songs.filter(x => x.id !== id);
+    delete songContentById[id];
+    try { const c = songTextCache_(); if (c[id]) { delete c[id]; localStorage.setItem(SONG_TEXT_CACHE_KEY, JSON.stringify(c)); } } catch (e) {}
+    saveCatalogCache();
+    if (typeof showToast === 'function') showToast('Draft deleted.');
+    if (view.name === 'admin') render(); else { adminSection = 'communication'; adminTab = 'requests'; goTo('admin'); }
+  } catch (err) { alert('Could not delete: ' + err.message); }
+}
 async function deleteSongConfirm(id) {
   if (!(await customConfirmAsync('Delete this song? This cannot be undone.', { title: 'Delete song', confirmLabel: 'Delete', danger: true }))) return;
   api('deleteSong', { id }).then(() => loadSongs(false)).then(()=>goTo('list')).catch(err => alert('Could not delete: ' + err.message));
@@ -6052,6 +6108,31 @@ function renderEdit() {
       </div>
       <div id="simpleHint" class="muted" style="margin:4px 0 6px;font-size:13px;" ${editChordMode==='simple'?'':'hidden'}>Type the chord line, then the lyric line right below it — just like on paper. Leave one empty line between sections. Each line sets itself up automatically: Hebrew/Yiddish lines go right-to-left, chord lines stay left-to-right and line up with the lyric line below them. To change how a line lines up, put the cursor on it (or select several lines) and tap <b>Left</b> or <b>Right</b>; <b>Auto</b> puts it back.</div>
       <div id="rawHint" class="muted" style="margin:4px 0 6px;font-size:13px;" ${editChordMode==='raw'?'':'hidden'}>Put each chord in brackets right before the word it plays over, e.g. <code>[D]ארבעים [G]יום</code> — or paste in HTML chord-chart markup directly.</div>
+      <div style="margin:2px 0 4px;"><button type="button" class="btn secondary" style="padding:4px 12px;font-size:12.5px;" onclick="toggleFindReplace_()">🔍 Find &amp; replace</button></div>
+      <div id="frPanel" class="fr-panel" hidden>
+        <div class="fr-row">
+          <input type="text" id="frFind" dir="auto" placeholder="Find…" autocomplete="off" oninput="frUpdateCount_()" onkeydown="if(event.key==='Enter'){event.preventDefault();frReplaceAll_();}">
+          <input type="text" id="frReplace" dir="auto" placeholder="Replace with… (leave empty to delete)" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();frReplaceAll_();}">
+        </div>
+        <div class="fr-opts">
+          <label><input type="checkbox" id="frCase" onchange="frUpdateCount_()"> Match case</label>
+          <label><input type="checkbox" id="frWord" onchange="frUpdateCount_()"> Whole words only</label>
+          <label title="Type several characters (like ,.!?) and every one of them is found separately"><input type="checkbox" id="frChars" onchange="frUpdateCount_()"> Each character separately</label>
+          <label title="Deletes every line that contains the text, instead of just the text"><input type="checkbox" id="frLines" onchange="frUpdateCount_()"> Delete the whole line</label>
+        </div>
+        <div class="fr-row">
+          <button type="button" class="btn" onclick="frReplaceAll_()">Replace all</button>
+          <button type="button" class="btn secondary" id="frUndoBtn" onclick="frUndo_()" disabled>Undo</button>
+          <span id="frStatus" class="fr-status muted"></span>
+        </div>
+        <div class="fr-quick">
+          <span class="muted">Quick clean-up:</span>
+          <button type="button" class="btn secondary" onclick="frRemoveSectionLabels_()" title="Deletes lines like “Verse 1”, “[Chorus]”, “Bridge:”, “Chorus x2”, “Intro”, “פזמון”">Remove section titles</button>
+          <button type="button" class="btn secondary" onclick="frQuickChars_(',.;:!?', 'Removed punctuation')" title="Removes , . ; : ! ?">Remove punctuation</button>
+          <button type="button" class="btn secondary" onclick="frQuickChars_('\u201C\u201D\u201E\u0022', 'Removed quote marks')" title="Removes “ ” and &quot; quote marks">Remove quote marks</button>
+          <button type="button" class="btn secondary" onclick="frCollapseBlank_()" title="Leaves just one empty line between sections">Fix extra empty lines</button>
+        </div>
+      </div>
       <div id="f_chords_simple_ed" class="line-editor" contenteditable="true" spellcheck="false" ${editChordMode==='simple'?'':'hidden'}></div>
       <div id="lineLenBar" class="line-len-bar" ${editChordMode==='simple'?'':'hidden'}>
         <span id="lineLenMsg" class="muted"></span>
@@ -6067,7 +6148,8 @@ function renderEdit() {
       <div style="margin-top:14px;display:flex;gap:10px;align-items:center;">
         ${(!song || isDraft_(song))
           ? `<button class="btn" type="submit" onclick="editPublishChoice='publish'">${song ? 'Publish' : 'Add & publish'}</button>
-             <button class="btn secondary" type="submit" onclick="editPublishChoice='draft'" title="Only admins will see it until you publish">Save as draft</button>`
+             <button class="btn secondary" type="submit" onclick="editPublishChoice='draft'" title="Only admins will see it until you publish">Save as draft</button>
+             ${song ? `<button class="btn danger" type="button" style="margin-left:auto;" onclick="deleteDraft_('${song.id}')">Delete draft</button>` : ''}`
           : `<button class="btn" type="submit" onclick="editPublishChoice='keep'">Save Changes</button>
              <button class="btn secondary" type="submit" onclick="editPublishChoice='draft'" title="Hide it from users until you publish again">Save &amp; move to drafts</button>`}
         <span id="saveStatus" class="status"></span>
@@ -6076,6 +6158,137 @@ function renderEdit() {
   document.getElementById('app').innerHTML = html;
   renderPicker_('artists'); renderPicker_('languages'); renderPicker_('tags');
   initLineEditor_(storedIsHtml ? htmlChordFormatToLines_(stored) : String(simpleText || '').split('\n').map(t => ({ text: t, align: '' })));
+}
+// ---- Find & replace (song editor) ---------------------------------------
+// Works line by line on whichever editor is showing (Simple: keeps each
+// line's Left/Right setting; Advanced: the raw text). One step of Undo.
+let frUndoSnap = null;
+function toggleFindReplace_() {
+  const p = document.getElementById('frPanel'); if (!p) return;
+  // Works on the Simple editor (in Advanced, the text can be chart markup
+  // that a bulk replace could break).
+  if (p.hidden && editChordMode !== 'simple') setEditChordMode('simple');
+  p.hidden = !p.hidden;
+  if (!p.hidden) { const f = document.getElementById('frFind'); if (f) f.focus(); frUpdateCount_(); }
+}
+function frGetLines_() {
+  if (editChordMode !== 'simple') setEditChordMode('simple');
+  return lineEditorLines_().map(l => ({ text: l.text, align: l.align }));
+}
+function frSetLines_(lines) { lineEditorSetLines_(lines); }
+function frSnapshot_() {
+  frUndoSnap = { mode: editChordMode, lines: frGetLines_() };
+  const b = document.getElementById('frUndoBtn'); if (b) b.disabled = false;
+}
+function frUndo_() {
+  if (!frUndoSnap || frUndoSnap.mode !== editChordMode) return;
+  frSetLines_(frUndoSnap.lines);
+  frUndoSnap = null;
+  const b = document.getElementById('frUndoBtn'); if (b) b.disabled = true;
+  frStatus_('Undone.');
+  frUpdateCount_(true);
+}
+function frStatus_(msg) { const el = document.getElementById('frStatus'); if (el) el.textContent = msg; }
+function escapeRegExp_(t) { return String(t).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+// Builds the search pattern from the panel's options (null if nothing typed).
+function frRegex_() {
+  const find = (document.getElementById('frFind') || {}).value || '';
+  if (!find) return null;
+  const cs = document.getElementById('frCase').checked;
+  const chars = document.getElementById('frChars').checked;
+  const word = document.getElementById('frWord').checked;
+  let src;
+  if (chars) src = '[' + Array.from(new Set(Array.from(find))).map(escapeRegExp_).join('') + ']';
+  else src = escapeRegExp_(find);
+  // "Whole words": not touching another letter/number on either side
+  // (works for Hebrew too, unlike \b).
+  if (word && !chars) src = '(?<![\\p{L}\\p{N}])' + src + '(?![\\p{L}\\p{N}])';
+  return new RegExp(src, 'gu' + (cs ? '' : 'i'));
+}
+function frUpdateCount_(quiet) {
+  const re = frRegex_();
+  if (!re) { if (!quiet) frStatus_(''); return 0; }
+  const lines = frGetLines_();
+  const wholeLine = document.getElementById('frLines').checked;
+  let n = 0;
+  lines.forEach(l => { const m = l.text.match(re); if (m) n += wholeLine ? 1 : m.length; });
+  frStatus_(n ? `${n} ${wholeLine ? (n === 1 ? 'line' : 'lines') : (n === 1 ? 'match' : 'matches')} found` : 'No matches');
+  return n;
+}
+// Removing lines can leave 2+ empty lines in a row (or empty lines at the
+// top/bottom) - squeeze them back to one empty line between sections.
+function frCollapseBlankLines_(lines) {
+  const out = [];
+  lines.forEach(l => {
+    const blank = l.text.trim() === '';
+    if (blank && (!out.length || out[out.length - 1].text.trim() === '')) return;
+    out.push(blank ? { text: '', align: '' } : l);
+  });
+  while (out.length && out[out.length - 1].text.trim() === '') out.pop();
+  return out;
+}
+function frReplaceAll_() {
+  const re = frRegex_();
+  if (!re) { frStatus_('Type what to find first.'); return; }
+  const rep = document.getElementById('frReplace').value;
+  const wholeLine = document.getElementById('frLines').checked;
+  const lines = frGetLines_();
+  let n = 0;
+  let out;
+  if (wholeLine) {
+    out = lines.filter(l => { re.lastIndex = 0; const hit = re.test(l.text); if (hit) n++; return !hit; });
+    out = frCollapseBlankLines_(out);
+  } else {
+    out = lines.map(l => {
+      const m = l.text.match(re);
+      if (!m) return l;
+      n += m.length;
+      let text = l.text.replace(re, () => rep);
+      // Deleting from a lyric line: tidy the double space it leaves behind.
+      // Chord lines keep their spacing - it's what lines chords up.
+      if (!rep && !looksLikeChordLine(l.text)) text = text.replace(/ {2,}/g, ' ').replace(/\s+$/, '');
+      return { text, align: l.align };
+    });
+  }
+  if (!n) { frStatus_('No matches'); return; }
+  frSnapshot_();
+  frSetLines_(out);
+  frStatus_(wholeLine ? `Deleted ${n} line${n === 1 ? '' : 's'}.` : `${rep ? 'Replaced' : 'Deleted'} ${n} match${n === 1 ? '' : 'es'}.`);
+}
+const FR_SECTION_WORDS = 'verse|chorus|pre[- ]?chorus|post[- ]?chorus|bridge|intro|outro|hook|refrain|interlude|instrumental|coda|ending|break|solo|vamp|tag|chords?|lyrics|פזמון|בית|גשר|מעבר|פתיחה|סיום|קטע|סולו';
+const FR_SECTION_RE = new RegExp('^\\s*[\\[(*#]*\\s*(?:' + FR_SECTION_WORDS + ')(?:\\s*\\d+)?\\s*[\\])*]*\\s*[:.\\-–—]?\\s*(?:\\(?\\s*(?:[x×]\\s*\\d+|\\d+\\s*[x×])\\s*\\)?)?\\s*[\\])]*\\s*:?\\s*$', 'iu');
+function frRemoveSectionLabels_() {
+  const lines = frGetLines_();
+  let n = 0;
+  const kept = lines.filter(l => { const hit = l.text.trim() !== '' && FR_SECTION_RE.test(l.text); if (hit) n++; return !hit; });
+  if (!n) { frStatus_('No section titles found.'); return; }
+  frSnapshot_();
+  frSetLines_(frCollapseBlankLines_(kept));
+  frStatus_(`Removed ${n} section title${n === 1 ? '' : 's'}.`);
+}
+function frQuickChars_(chars, label) {
+  const re = new RegExp('[' + Array.from(chars).map(escapeRegExp_).join('') + ']', 'gu');
+  const lines = frGetLines_();
+  let n = 0;
+  const out = lines.map(l => {
+    // Chord lines are left alone (a chord like "A7/G" shouldn't lose anything).
+    if (l.text.trim() !== '' && looksLikeChordLine(l.text)) return l;
+    const m = l.text.match(re); if (!m) return l;
+    n += m.length;
+    return { text: l.text.replace(re, '').replace(/ {2,}/g, ' ').replace(/\s+$/, ''), align: l.align };
+  });
+  if (!n) { frStatus_('Nothing to remove.'); return; }
+  frSnapshot_();
+  frSetLines_(out);
+  frStatus_(`${label} (${n}).`);
+}
+function frCollapseBlank_() {
+  const lines = frGetLines_();
+  const out = frCollapseBlankLines_(lines);
+  if (out.length === lines.length) { frStatus_('No extra empty lines.'); return; }
+  frSnapshot_();
+  frSetLines_(out);
+  frStatus_(`Removed ${lines.length - out.length} empty line${lines.length - out.length === 1 ? '' : 's'}.`);
 }
 function currentChordsLyricsValue() {
   return editChordMode === 'simple'
@@ -6096,6 +6309,7 @@ function setEditChordMode(mode) {
   const laEl = document.getElementById('lineAlignControls'); if (laEl) laEl.hidden = mode !== 'simple';
   const llEl = document.getElementById('lineLenBar'); if (llEl) llEl.hidden = mode !== 'simple';
   rawEl.hidden = mode !== 'raw';
+  const frEl = document.getElementById('frPanel'); if (frEl && mode === 'raw') frEl.hidden = true;
   document.getElementById('simpleHint').hidden = mode !== 'simple';
   document.getElementById('rawHint').hidden = mode !== 'raw';
   document.getElementById('modeSimpleBtn').classList.toggle('active', mode === 'simple');
@@ -6157,7 +6371,9 @@ function initEditPick_(s) {
   const en = splitArtists(s.artist), he = splitArtists(s.artist_hebrew);
   editPick = {
     artists: en.map((name, i) => {
-      let h = he[i] || hm[name] || '';
+      // The Hebrew name always follows the English artist (the spelling
+      // used on that artist's other songs), so it stays the same everywhere.
+      let h = hm[name] || he[i] || '';
       if (h === name) h = '';
       return { en: name, he: h };
     }),
@@ -6229,8 +6445,7 @@ function renderPickerSelected_(kind) {
     el.innerHTML = editPick.artists.length ? editPick.artists.map((a, i) => `
       <div class="picker-artist-row">
         <span class="picker-artist-en" dir="auto">${escapeHtml(a.en)}</span>
-        <input type="text" dir="rtl" placeholder="Hebrew name" value="${escapeHtml(a.he)}" data-i="${i}"
-          oninput="editPick.artists[+this.dataset.i].he=this.value">
+        ${a.he ? `<span class="picker-artist-he" dir="rtl" title="Hebrew name - set automatically from this artist's other songs">${escapeHtml(a.he)}</span>` : `<span class="picker-artist-he none" title="Add a Hebrew name for a NEW artist with “+ Add new”">no Hebrew name</span>`}
         ${i > 0 ? `<button type="button" class="picker-mini" title="Move up" data-i="${i}" onclick="pickMoveArtistUp_(+this.dataset.i)">↑</button>` : '<span class="picker-mini-spacer"></span>'}
         <button type="button" class="picker-mini" title="Remove" data-v="${escapeHtml(a.en)}" onclick="pickToggle_('artists', this.dataset.v)">×</button>
       </div>`).join('') : '<div class="muted picker-empty">No artist picked yet.</div>';
@@ -6831,7 +7046,7 @@ function renderAddSongsToPlaylistModal() {
   const p = playlists.find(pl => pl.id === st.playlistId) || (viewAsUser && (viewAsData.playlists||[]).find(pl => pl.id === st.playlistId));
   openModal(`
     <h2>Add Songs${p ? ' to "' + escapeHtml(p.title) + '"' : ''}</h2>
-    <input type="text" id="addSongsSearch" placeholder="Search by title or artist…" value="${escapeHtml(st.query)}">
+    <input type="text" id="addSongsSearch" placeholder="Search by title or artist — English or Hebrew…" value="${escapeHtml(st.query)}">
     <div id="addSongsResults" style="max-height:320px;overflow-y:auto;margin-top:8px;"></div>
     <div class="modal-actions"><button class="btn" onclick="closeModal();renderPlaylistDetail();">Done</button></div>
   `);
@@ -6855,7 +7070,9 @@ function renderAddSongsResultsOnly_() {
   // (which already exists for browsing); title/artist only (no lyrics
   // search here, to keep it fast and not depend on the full-lyrics catalog
   // being loaded yet).
-  const results = visibleSongs_().filter(s => (s.title||'').toLowerCase().includes(q) || (s.artist||'').toLowerCase().includes(q)).slice(0, 40);
+  const rawQ = st.query.trim(), heHits = englishArtistsMatchingHebrew_(rawQ);
+  const results = visibleSongs_().filter(s => (s.title||'').toLowerCase().includes(q) || (s.artist||'').toLowerCase().includes(q)
+    || (s.title_hebrew||'').includes(rawQ) || (s.artist_hebrew||'').includes(rawQ) || (heHits.size && splitArtists(s.artist).some(a => heHits.has(a)))).slice(0, 40);
   resultsEl.innerHTML = results.length ? results.map(s => `
     <div class="song-row" style="display:flex;align-items:center;justify-content:space-between;">
       <div><div class="title" dir="auto">${escapeHtml(songDisplayTitle_(s))}</div><div class="artist" dir="auto">${escapeHtml(songDisplayArtist_(s))}</div></div>
@@ -6933,7 +7150,7 @@ function renderContactBody() {
   html += `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h2 style="margin:0">${requestsHeading}</h2><button class="btn${requestQuota_().left ? '' : ' secondary'}" onclick="openRequestSongModal()">+ Request a Song</button></div>
       ${requestQuotaHtml_()}`;
   html += `<div class="table-wrap"><table><tr><th>Status</th><th>Song</th><th>Artist</th></tr>
-      ${pageSlice(myRequests, contactRequestsPage, 10).map(r => `<tr data-req-id="${escapeHtml(r.id)}"><td><span class="badge badge-explain ${r.status}" role="button" tabindex="0" title="${escapeHtml(requestStatusMeaning_(r.status))}" onclick="showToast(this.title)">${requestStatusSymbol(r.status)}</span>${r.status==='declined' && r.decline_reason ? `<br><span class="muted" style="font-size:11.5px;">${escapeHtml(r.decline_reason)}</span>` : ''}${r.status==='needs_lyrics' ? ` <button class="btn add-lyrics-btn" onclick="openAddRequestLyrics_('${r.id}')">Add lyrics</button>` : ''}</td><td dir="auto">${escapeHtml(r.song_title)}</td><td dir="auto">${escapeHtml(r.artist)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No requests yet.</td></tr>'}
+      ${pageSlice(myRequests, contactRequestsPage, 10).map(r => `<tr data-req-id="${escapeHtml(r.id)}"><td><span class="badge badge-explain ${r.status}" role="button" tabindex="0" title="${escapeHtml(requestStatusMeaning_(r.status))}" onclick="showToast(this.title)">${requestStatusSymbol(r.status)}</span>${r.status==='declined' && r.decline_reason ? `<br><span class="muted" style="font-size:11.5px;">${escapeHtml(r.decline_reason)}</span>` : ''}${r.status==='needs_lyrics' ? ` <button class="btn add-lyrics-btn" onclick="openAddRequestLyrics_('${r.id}')">Add lyrics</button>` : ''}</td><td dir="auto">${escapeHtml(r.song_title)}</td><td dir="auto">${escapeHtml(fmtArtists_(r.artist))}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No requests yet.</td></tr>'}
       </table></div>
       ${pagerHtml(myRequests.length, contactRequestsPage, 'changeContactRequestsPage', 10)}`;
   // The chat card is a clickable preview that expands into the full thread —
@@ -6970,7 +7187,7 @@ function openAddRequestLyrics_(id) {
   if (!r) return;
   openModal(`
     <h2 style="margin-top:0">Add lyrics</h2>
-    <p class="muted" dir="auto" style="margin-top:-6px;">${escapeHtml(r.song_title)}${r.artist ? ' — ' + escapeHtml(r.artist) : ''}</p>
+    <p class="muted" dir="auto" style="margin-top:-6px;">${escapeHtml(r.song_title)}${r.artist ? ' — ' + escapeHtml(fmtArtists_(r.artist)) : ''}</p>
     <textarea id="addLyricsText" dir="auto" style="min-height:220px;width:100%;font-family:inherit;" placeholder="Paste or type the lyrics here">${escapeHtml(r.lyrics || '')}</textarea>
     <div class="modal-actions"><span id="addLyricsStatus" class="status"></span><button class="btn secondary" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitRequestLyrics_('${r.id}')">Send lyrics</button></div>
   `);
@@ -7508,7 +7725,7 @@ function renderAdminRequestsList_() {
       <td class="sel-col"><input type="checkbox" ${requestsSelected.has(r.id)?'checked':''} onchange="toggleRequestRowSelected('${r.id}')"></td>
       <td class="c-status">${statusCell(r)}</td>
       <td class="c-song" dir="auto">${songCell(r)}</td>
-      <td class="c-artist" dir="auto">${escapeHtml(r.artist)}</td>
+      <td class="c-artist" dir="auto">${escapeHtml(fmtArtists_(r.artist))}</td>
       <td class="c-user">${escapeHtml(r.user_name)}<br><span class="muted">${escapeHtml(r.user_email)}</span><br><span class="adv-link" onclick='openThreadModal(${escapeHtml(JSON.stringify(r.user_email))},${escapeHtml(JSON.stringify(r.user_name))},${escapeHtml(JSON.stringify({ type: 'request', id: r.id, label: 'Song Request – "' + r.song_title + '"' }))})'>Message</span></td>
       <td class="c-note" dir="auto">${escapeHtml(r.note)}</td>
       <td class="c-lyrics">${lyricsCell(r)}</td>
@@ -7524,10 +7741,11 @@ function adminDraftsSectionHtml_() {
   const drafts = songs.filter(isDraft_).sort((a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0));
   const rows = drafts.map(s => `<tr>
       <td dir="auto"><span class="adv-link" style="font-weight:600;" onclick="goTo('detail',{id:'${s.id}'})">${escapeHtml(s.title || '(untitled)')}</span></td>
-      <td dir="auto">${escapeHtml(s.artist || '')}</td>
+      <td dir="auto">${escapeHtml(fmtArtists_(s.artist))}</td>
       <td class="muted" style="white-space:nowrap;font-size:12.5px;">${s.updated_at ? new Date(s.updated_at).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''}</td>
       <td style="white-space:nowrap;"><button class="btn secondary" style="padding:4px 12px;font-size:12.5px;" onclick="goTo('edit',{id:'${s.id}'})">Edit</button>
-        <button class="btn" style="padding:4px 12px;font-size:12.5px;margin-left:4px;" onclick="publishSongNow_('${s.id}')">Publish</button></td>
+        <button class="btn" style="padding:4px 12px;font-size:12.5px;margin-left:4px;" onclick="publishSongNow_('${s.id}')">Publish</button>
+        <button class="btn danger" style="padding:4px 12px;font-size:12.5px;margin-left:4px;" onclick="deleteDraft_('${s.id}')">Delete</button></td>
     </tr>`).join('');
   return `<div class="drafts-section">
     <h3 style="margin:26px 0 4px;">✎ Unpublished songs${drafts.length ? ` (${drafts.length})` : ''}</h3>
@@ -7542,7 +7760,7 @@ function viewRequestDetails(id) {
   if (!r) return;
   openModal(`
     <h2 style="margin-top:0" dir="auto">${escapeHtml(r.song_title)}</h2>
-    <p class="muted" style="margin-top:-8px;" dir="auto">${escapeHtml(r.artist || '')}${r.youtube_url ? ` · <a href="${escapeHtml(r.youtube_url)}" target="_blank" rel="noopener">YouTube</a>` : ''}</p>
+    <p class="muted" style="margin-top:-8px;" dir="auto">${escapeHtml(fmtArtists_(r.artist))}${r.youtube_url ? ` · <a href="${escapeHtml(r.youtube_url)}" target="_blank" rel="noopener">YouTube</a>` : ''}</p>
     ${(r.categories||[]).length ? `<p><b>Categories:</b> ${escapeHtml((r.categories||[]).join(', '))}</p>` : ''}
     ${r.lyrics ? `<label>Lyrics</label><textarea readonly dir="auto" style="min-height:260px;width:100%;">${escapeHtml(r.lyrics)}</textarea>` : '<p class="muted">No lyrics provided.</p>'}
     <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">Close</button></div>
@@ -7575,7 +7793,7 @@ function openRequestStatusMenu_(id) {
   const opts = ['pending', 'needs_lyrics', 'added', 'declined'];
   openModal(`
     <h2 style="margin-top:0">Change status</h2>
-    <p class="muted" dir="auto" style="margin-top:-6px;">${escapeHtml(r.song_title)}${r.artist ? ' — ' + escapeHtml(r.artist) : ''}</p>
+    <p class="muted" dir="auto" style="margin-top:-6px;">${escapeHtml(r.song_title)}${r.artist ? ' — ' + escapeHtml(fmtArtists_(r.artist)) : ''}</p>
     <div class="status-menu">
       ${opts.map(s => `<button type="button" class="status-menu-opt${r.status === s ? ' current' : ''}" ${r.status === s ? 'disabled' : ''} onclick="closeModal();setRequestStatus('${r.id}','${s}')">
         <span class="badge ${s}">${s === 'needs_lyrics' ? '✎' : requestStatusSymbol(s)}</span> ${escapeHtml(REQUEST_STATUS_LABELS[s])}${r.status === s ? ' <span class="muted">(current)</span>' : ''}
@@ -7917,7 +8135,7 @@ function renderAdminErrorsList_() {
     (pageRows.map(e => `<tr>
       <td class="sel-col"><input type="checkbox" ${errorsSelected.has(e.id)?'checked':''} onchange="toggleErrorRowSelected('${e.id}')"></td>
       <td><button class="status-icon-btn ${e.status}" onclick="setErrorStatus('${e.id}','${e.status==='open'?'resolved':'open'}')" title="${e.status==='open'?'Mark resolved':'Mark open'}" aria-label="${e.status==='open'?'Mark resolved':'Mark open'}">${e.status==='open'?SVG_ICONS.statusOpen:SVG_ICONS.statusResolved}</button></td>
-      <td>${escapeHtml(e.song_title)}<br><span class="muted">${escapeHtml(e.artist)}</span>${e.song_id && songs.some(s=>s.id===e.song_id) ? `<br><span class="adv-link" onclick="goTo('detail',{id:'${e.song_id}',backTo:'errorReport'})">Go to song</span>` : ''}</td>
+      <td>${escapeHtml(e.song_title)}<br><span class="muted">${escapeHtml(fmtArtists_(e.artist))}</span>${e.song_id && songs.some(s=>s.id===e.song_id) ? `<br><span class="adv-link" onclick="goTo('detail',{id:'${e.song_id}',backTo:'errorReport'})">Go to song</span>` : ''}</td>
       <td>${escapeHtml(e.user_name)}<br><span class="muted">${escapeHtml(e.user_email)}</span><br><span class="adv-link" onclick='openThreadModal(${escapeHtml(JSON.stringify(e.user_email))},${escapeHtml(JSON.stringify(e.user_name))},${escapeHtml(JSON.stringify({ type: 'error', id: e.id, song_id: e.song_id || null, label: 'Error Report – ' + (e.song_title ? '"' + e.song_title + '": ' : '') + (e.description||'').slice(0,60) }))})'>Message</span></td>
       <td>${escapeHtml(e.description)}</td>
       <td class="muted" style="white-space:nowrap;">${e.created_at ? new Date(e.created_at).toLocaleString() : ''}</td>
@@ -7975,7 +8193,7 @@ function renderAdminTopSongs() {
   const rows = pageSlice(sorted, page).map((s, i) => `<tr>
       <td class="muted">${page * PAGE_SIZE + i + 1}</td>
       <td><span class="adv-link" onclick="goTo('detail',{id:'${s.id}'})">${escapeHtml(s.title)}</span></td>
-      <td>${escapeHtml(s.artist || '')}</td>
+      <td>${escapeHtml(fmtArtists_(s.artist))}</td>
       <td class="num${key === 'view_count' ? ' sorted' : ''}">${s.view_count || 0}</td>
       <td class="num${key === 'unique_view_count' ? ' sorted' : ''}">${s.unique_view_count || 0}</td>
     </tr>`).join('') || `<tr><td colspan="5" class="muted">No songs yet.</td></tr>`;
