@@ -211,6 +211,7 @@
   .picker-artist-row input[type=text]{flex:1;min-width:0;padding:6px 8px;}
   .picker-artist-he{flex:1;min-width:0;font-size:14px;color:var(--text);overflow-wrap:anywhere;text-align:right;}
   .picker-artist-he.none{color:var(--muted);font-size:12px;font-style:italic;text-align:left;}
+  .blank-flag{outline:2px solid #e8a33d !important;outline-offset:3px;border-radius:8px;}
   .fr-panel{border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin:4px 0 8px;background:#f7fafa;}
   .fr-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px;}
   .fr-row input[type=text]{flex:1;min-width:140px;padding:6px 8px;}
@@ -285,14 +286,20 @@
   .admin-table.select-on .sel-col{display:table-cell;}
   .sel-inline{display:none;}
   .select-on .sel-inline{display:inline-block;}
-  .req-table td{vertical-align:top;}
-  .req-table .c-status{min-width:118px;}
-  .req-table .c-song{min-width:180px;}
-  .req-table .c-artist{min-width:130px;}
-  .req-table .c-user{min-width:180px;word-break:break-word;}
-  .req-table .c-note{min-width:170px;}
-  .req-table .c-lyrics{min-width:240px;max-width:340px;}
-  .req-table .c-date{min-width:120px;white-space:nowrap;font-size:12.5px;}
+  .req-table{font-size:13px;}
+  .req-table td{vertical-align:top;padding:5px 5px;line-height:1.3;}
+  .req-table th{padding:6px 5px;font-size:11px;}
+  .req-table .c-status{width:34px;min-width:34px;text-align:center;padding-left:2px;padding-right:2px;}
+  .req-table .c-status .badge-sym{padding:2px 6px;}
+  .req-table .c-song{min-width:120px;max-width:220px;}
+  .req-table .c-artist{min-width:80px;max-width:150px;}
+  .req-table .c-user{min-width:90px;max-width:150px;word-break:break-word;}
+  .req-table .c-user .msg-ic{cursor:pointer;margin-left:4px;opacity:.75;text-decoration:none;}
+  .req-table .c-note{min-width:80px;max-width:200px;font-size:12.5px;}
+  .req-table .c-lyrics{min-width:110px;max-width:220px;}
+  .req-table .c-lyrics .lyr-snip{-webkit-line-clamp:2;}
+  .req-table .c-date{min-width:0;white-space:nowrap;font-size:12px;}
+  .req-table .c-act{width:30px;padding-left:0;padding-right:0;}
   .lyr-snip{white-space:pre-line;font-size:12.5px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;}
   .yt-link{text-decoration:none;font-weight:600;}
   .yt-link:hover{text-decoration:underline;}
@@ -6583,8 +6590,61 @@ function publishSongNow_(id) {
     .catch(err => alert(err.message));
 }
 let editPublishChoice = 'keep'; // which save button was pressed: 'publish' | 'draft' | 'keep'
-function saveSong(evt, id) {
+// Before publishing: list any section left blank and ask whether to
+// publish anyway or go back and fill it in. (Hebrew title is optional and
+// not checked - most English songs don't have one. Saving a draft is never
+// held up.)
+function blankSongSections_() {
+  const out = [];
+  if (!editPick.artists.some(a => (a.en || '').trim())) out.push({ label: 'Artist', el: 'pk_artists' });
+  if (!editPick.languages.length) out.push({ label: 'Language', el: 'pk_languages' });
+  if (!editPick.tags.length) out.push({ label: 'Tags', el: 'pk_tags' });
+  if (!document.getElementById('f_youtube').value.trim()) out.push({ label: 'YouTube link', el: 'f_youtube' });
+  if (document.getElementById('f_capo').value.trim() === '') out.push({ label: 'Capo', el: 'f_capo' });
+  const chart = currentChordsLyricsValue();
+  const chartText = String(chart || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').trim();
+  const edId = editChordMode === 'simple' ? 'f_chords_simple_ed' : 'f_chords_raw';
+  if (!chartText) out.push({ label: 'Chords + Lyrics', el: edId });
+  else if (!chordsUsedIn(chart, 0).length) out.push({ label: 'Chords (only lyrics were typed — no chord lines)', el: edId });
+  return out;
+}
+function warnBlankSections_(missing) {
+  return new Promise(resolve => {
+    openModal(`
+      <h2 style="margin-top:0">Some sections are blank</h2>
+      <p>This song doesn't have:</p>
+      <ul style="margin:0 0 12px 18px;padding:0;">${missing.map(m => `<li>${escapeHtml(m.label)}</li>`).join('')}</ul>
+      <p class="muted" style="font-size:13px;">Publish it anyway, or go back and fill them in?</p>
+      <div class="modal-actions">
+        <button class="btn secondary" onclick="resolveDialog_(false)">Go back</button>
+        <button class="btn" onclick="resolveDialog_(true)">Publish anyway</button>
+      </div>`);
+    window.__dialogResolve = resolve;
+  });
+}
+['input', 'click'].forEach(ev => document.addEventListener(ev, e => {
+  const f = e.target && e.target.closest && e.target.closest('.blank-flag');
+  if (f) f.classList.remove('blank-flag');
+}));
+function highlightBlankSections_(missing) {
+  document.querySelectorAll('.blank-flag').forEach(e => e.classList.remove('blank-flag'));
+  missing.forEach(m => { const e = document.getElementById(m.el); if (e) e.classList.add('blank-flag'); });
+  const first = missing.length && document.getElementById(missing[0].el);
+  if (first) { first.scrollIntoView({ behavior: 'smooth', block: 'center' }); if (first.focus && /INPUT|TEXTAREA/.test(first.tagName)) setTimeout(() => first.focus(), 300); }
+}
+function saveSong(evt, id, skipBlankCheck) {
   evt.preventDefault();
+  if (!skipBlankCheck && editPublishChoice === 'publish') {
+    const missing = blankSongSections_();
+    if (missing.length) {
+      const choice = editPublishChoice;
+      warnBlankSections_(missing).then(ok => {
+        if (ok) { editPublishChoice = choice; saveSong({ preventDefault() {} }, id, true); }
+        else highlightBlankSections_(missing);
+      });
+      return false;
+    }
+  }
   const song = {
     id: id || undefined,
     title: document.getElementById('f_title').value.trim(),
@@ -7685,6 +7745,15 @@ function setRequestsSort(key) {
   adminRequestsPage = 0;
   renderAdminRequestsList_();
 }
+// "Oct 6<br>9:14 PM" (year added only when it isn't this year) - keeps the
+// Requested column narrow.
+function reqShortDate_(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  const thisYear = d.getFullYear() === new Date().getFullYear();
+  return escapeHtml(d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: thisYear ? undefined : '2-digit' }))
+    + '<br>' + escapeHtml(d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }));
+}
 function renderAdminRequestsList_() {
   const wrap = document.getElementById('adminRequestsListWrap');
   if (!wrap) return;
@@ -7698,7 +7767,7 @@ function renderAdminRequestsList_() {
   const focusBar = requestsFocusId ? `<div class="focus-banner">${filtered.length ? 'Showing the request this message is about.' : 'That request couldn’t be found (it may have been deleted).'} <span class="adv-link" onclick="requestsFocusId=null;renderAdminRequestsList_()">Show all requests</span></div>` : '';
   const th = (key, label, cls) => {
     const on = requestsSort.key === key;
-    return `<th class="sortable-th ${cls || ''}${on ? ' sorted' : ''}" onclick="setRequestsSort('${key}')" title="Sort by ${label.toLowerCase()}">${label}${on ? (requestsSort.dir > 0 ? ' ▴' : ' ▾') : ''}</th>`;
+    return `<th class="sortable-th ${cls || ''}${on ? ' sorted' : ''}" onclick="setRequestsSort('${key}')" title="Sort by ${label === '●' ? 'status' : label.toLowerCase()}">${label}${on ? (requestsSort.dir > 0 ? ' ▴' : ' ▾') : ''}</th>`;
   };
   // Every row shows just its current status (new requests come in as
   // Pending); clicking it opens the Change status menu with the other options.
@@ -7716,21 +7785,21 @@ function renderAdminRequestsList_() {
     return title + cats;
   };
   const lyricsCell = r => (r.lyrics || '').trim()
-    ? `<div class="lyr-snip" dir="auto">${escapeHtml(r.lyrics.trim())}</div><span class="adv-link" style="font-size:12px;" onclick="viewRequestDetails('${r.id}')">Show all</span>`
+    ? `<div class="lyr-snip" dir="auto" style="cursor:pointer;" title="Click to see all the lyrics" onclick="viewRequestDetails('${r.id}')">${escapeHtml(r.lyrics.trim())}</div>`
     : `<span class="muted">—</span>`;
   wrap.innerHTML = focusBar + filterBar + (selOn ? requestsBulkBarHtml_(filtered) : '') + `<div class="table-wrap"><table class="admin-table req-table${selOn ? ' select-on' : ''}"><tr>
       <th class="sel-col"><input type="checkbox" ${pageAllSelected?'checked':''} onchange="toggleRequestsPageSelected(this.checked)" title="Select all on this page"></th>
-      ${th('status', 'Status', 'c-status')}${th('song', 'Song', 'c-song')}${th('artist', 'Artist', 'c-artist')}${th('user', 'Requested by', 'c-user')}${th('note', 'Note', 'c-note')}${th('lyrics', 'Lyrics', 'c-lyrics')}${th('created_at', 'Requested', 'c-date')}<th></th></tr>` +
+      ${th('status', '●', 'c-status')}${th('song', 'Song', 'c-song')}${th('artist', 'Artist', 'c-artist')}${th('user', 'User', 'c-user')}${th('note', 'Note', 'c-note')}${th('lyrics', 'Lyrics', 'c-lyrics')}${th('created_at', 'Date', 'c-date')}<th></th></tr>` +
     (pageRows.map(r => `<tr>
       <td class="sel-col"><input type="checkbox" ${requestsSelected.has(r.id)?'checked':''} onchange="toggleRequestRowSelected('${r.id}')"></td>
       <td class="c-status">${statusCell(r)}</td>
       <td class="c-song" dir="auto">${songCell(r)}</td>
       <td class="c-artist" dir="auto">${escapeHtml(fmtArtists_(r.artist))}</td>
-      <td class="c-user">${escapeHtml(r.user_name)}<br><span class="muted">${escapeHtml(r.user_email)}</span><br><span class="adv-link" onclick='openThreadModal(${escapeHtml(JSON.stringify(r.user_email))},${escapeHtml(JSON.stringify(r.user_name))},${escapeHtml(JSON.stringify({ type: 'request', id: r.id, label: 'Song Request – "' + r.song_title + '"' }))})'>Message</span></td>
+      <td class="c-user"><span title="${escapeHtml(r.user_email)}">${escapeHtml(r.user_name || r.user_email)}</span><span class="msg-ic" role="button" title="Message ${escapeHtml(r.user_name || r.user_email)} about this request" onclick='openThreadModal(${escapeHtml(JSON.stringify(r.user_email))},${escapeHtml(JSON.stringify(r.user_name))},${escapeHtml(JSON.stringify({ type: 'request', id: r.id, label: 'Song Request – "' + r.song_title + '"' }))})'>✉️</span></td>
       <td class="c-note" dir="auto">${escapeHtml(r.note)}</td>
       <td class="c-lyrics">${lyricsCell(r)}</td>
-      <td class="c-date muted">${r.created_at ? new Date(r.created_at).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''}</td>
-      <td><button class="status-icon-btn archive-action" onclick="setRequestArchived('${r.id}',${r.archived==='true'?'false':'true'})" title="${r.archived==='true'?'Unarchive':'Archive'}" aria-label="${r.archived==='true'?'Unarchive':'Archive'}">${r.archived==='true'?SVG_ICONS.unarchive:SVG_ICONS.archive}</button></td>
+      <td class="c-date muted" title="${r.created_at ? escapeHtml(new Date(r.created_at).toLocaleString()) : ''}">${r.created_at ? reqShortDate_(r.created_at) : ''}</td>
+      <td class="c-act"><button class="status-icon-btn archive-action" onclick="setRequestArchived('${r.id}',${r.archived==='true'?'false':'true'})" title="${r.archived==='true'?'Unarchive':'Archive'}" aria-label="${r.archived==='true'?'Unarchive':'Archive'}">${r.archived==='true'?SVG_ICONS.unarchive:SVG_ICONS.archive}</button></td>
     </tr>`).join('') || `<tr><td colspan="9" class="muted">No requests${requestsFilter.length===0 && !requestsSearch?' yet':' match'}.</td></tr>`) + `</table></div>` +
     pagerHtml(filtered.length, adminRequestsPage, 'changeAdminRequestsPage') + adminDraftsSectionHtml_();
 }
