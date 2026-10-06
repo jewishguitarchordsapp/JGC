@@ -245,6 +245,12 @@
   .stat-chart-col{cursor:pointer;}
   .stat-chart-col.selected .stat-bar{filter:brightness(.85);outline:2px solid var(--accent);}
   .stat-detail{margin-top:12px;font-size:13px;min-height:20px;}
+  @font-face{font-family:"Twemoji Country Flags";unicode-range:U+1F1E6-1F1FF,U+1F3F4,U+E0062-E0063,U+E0065,U+E0067,U+E006C,U+E006E,U+E0073-E0074,U+E0077,U+E007F;src:url('https://cdn.jsdelivr.net/npm/country-flag-emoji-polyfill@0.1.10/dist/TwemojiCountryFlags.woff2') format('woff2');font-display:swap;}
+  .country-pill,.stat-detail{font-family:"Twemoji Country Flags",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .detail-tile.stat-hero{background:#e6f4f2;border-color:#9fd3cb;padding:14px 8px;}
+  .detail-tile.stat-hero .tile-value{font-size:38px;font-weight:800;line-height:1.05;color:var(--teal-dark);}
+  .detail-tile.stat-hero .tile-label{font-size:12.5px;font-weight:600;color:var(--teal-dark);}
+  .detail-tile.stat-plain .tile-value{font-size:24px;}
   .country-pill{display:inline-flex;align-items:center;gap:5px;background:#f2f6f6;border:1px solid var(--border);border-radius:16px;padding:4px 10px;margin:3px;font-size:13px;color:var(--text);}
   .draft-banner{background:#fff8e1;border:1px solid #f0d98a;color:#6b5300;border-radius:8px;padding:7px 10px;font-size:13.5px;margin-bottom:8px;display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px;}
   .badge-sym{min-width:30px;text-align:center;font-size:12px;}
@@ -679,6 +685,8 @@
   :where(html[data-theme="dark"]) .badge.added{background:#424a49;color:#8cbc9e}
   :where(html[data-theme="dark"]) .badge.declined{background:#484649;color:#d49999}
   :where(html[data-theme="dark"]) .country-pill{background:#464b4d}
+  html[data-theme="dark"] .detail-tile.stat-hero{background:#1f3b38;border-color:#2f6b62;}
+  html[data-theme="dark"] .detail-tile.stat-hero .tile-value, html[data-theme="dark"] .detail-tile.stat-hero .tile-label{color:#7fd6c8;}
   :where(html[data-theme="dark"]) .draft-banner{background:#494b49;border:1px solid #575440;color:#b5a980}
   :where(html[data-theme="dark"]) .status-menu-opt{background:#3b3f42}
   :where(html[data-theme="dark"]) .status-menu-opt:hover:not([disabled]){background:#474b4e}
@@ -4685,12 +4693,78 @@ function recordSongView_(id) {
   // opens only - whether this was a first-time viewer is only known server-side).
   if (topSongCounts) { const c = topSongCounts[id] || (topSongCounts[id] = { view_count: 0, unique_view_count: 0 }); c.view_count++; }
 }
+// "Back to where you came from": opening a song (or editing one) remembers
+// the screen it was opened from - including which Songs tab / filter /
+// page, which Admin tab, and how far down the page was scrolled - so the
+// song page's back link (and the phone's Back button) return exactly there.
+function uiSnapshot_() {
+  return { songTab, songListPage, filters: Object.assign({}, filters), adminSection, adminTab, y: window.scrollY || 0 };
+}
+function applyUiSnapshot_(u) {
+  if (!u) return;
+  if (u.songTab) songTab = u.songTab;
+  if (typeof u.songListPage === 'number') songListPage = u.songListPage;
+  if (u.filters) Object.assign(filters, u.filters);
+  if (u.adminSection) adminSection = u.adminSection;
+  if (u.adminTab) adminTab = u.adminTab;
+}
+function restoreScroll_(y) {
+  if (!y) return;
+  let last = null;
+  // Pages like Admin fill in after a moment, so try a few times - but stop
+  // as soon as the person scrolls on their own.
+  [0, 120, 400, 900, 1600].forEach(ms => setTimeout(() => {
+    const cur = window.scrollY || 0;
+    if (last !== null && Math.abs(cur - last) > 2) { last = -9999; return; }
+    if (last === -9999) return;
+    window.scrollTo(0, y); last = window.scrollY || 0;
+  }, ms));
+}
+const ADMIN_TAB_BACK_LABELS = { requests: 'Song Requests', messages: 'Messages', errors: 'Error Reports', users: 'Users', topSongs: 'Top Songs', overview: 'Stats', backup: 'Backup' };
+function backLabel_(f) {
+  const v = (f && f.view) || {}, u = (f && f.ui) || {};
+  if (v.name === 'home') return 'Home';
+  if (v.name === 'list') {
+    if (u.filters && u.filters.artist) return u.filters.artist;
+    if (u.filters && u.filters.q) return 'Search';
+    return t('songtab_' + (u.songTab || 'all')) || t('nav_list');
+  }
+  if (v.name === 'artists') return t('nav_artists');
+  if (v.name === 'categories') return t('nav_categories');
+  if (v.name === 'playlists') return t('nav_playlists');
+  if (v.name === 'playlistDetail') {
+    const pl = playlists.find(p => p.id === v.id) || (viewAsUser && (viewAsData.playlists || []).find(p => p.id === v.id));
+    return (pl && pl.title) || 'Playlist';
+  }
+  if (v.name === 'contact') return t('nav_contact');
+  if (v.name === 'knownChords') return 'Known Chords';
+  if (v.name === 'tuner') return 'Tuner';
+  if (v.name === 'admin') return ADMIN_TAB_BACK_LABELS[u.adminTab] || 'Admin';
+  return t('nav_list');
+}
+function goBackFrom_() {
+  const f = view.from;
+  if (!f || !f.view || !f.view.name) { goTo('list'); return; }
+  applyUiSnapshot_(f.ui);
+  const { name, ...rest } = f.view;
+  goTo(name, rest);
+  restoreScroll_(f.ui && f.ui.y);
+}
 function goTo(name, extra) {
   // Leaving the Tuner page: always release the microphone rather than
   // leaving it listening in the background on whatever screen comes next.
   if (view.name === 'tuner' && name !== 'tuner' && typeof stopTunerSilently_ === 'function') stopTunerSilently_();
   if (typeof hideChordPopover === 'function') hideChordPopover();
+  const leaving = view;
+  const snap = uiSnapshot_();
+  // Remember this screen's tab/filter/scroll on its own history entry too,
+  // so the phone's Back button lands in the same spot.
+  try { if (history.state && history.state.jgcView) history.replaceState(Object.assign({}, history.state, { ui: snap }), ''); } catch (e) {}
   view = Object.assign({ name }, extra || {});
+  if ((name === 'detail' || name === 'edit') && !view.from && leaving && leaving.name) {
+    if (leaving.name === 'detail' || leaving.name === 'edit') { if (leaving.from) view.from = leaving.from; }
+    else { const { from, ...lv } = leaving; view.from = { view: lv, ui: snap }; }
+  }
   saveViewCache(view);
   pushViewHistory_(view);
   render();
@@ -4725,8 +4799,10 @@ window.addEventListener('popstate', (e) => {
   if (typeof hideChordPopover === 'function') hideChordPopover();
   if (!e.state || !e.state.jgcView) return; // stepped past the app's own history (or it isn't seeded yet) - let that happen normally, e.g. actually exiting
   view = e.state.jgcView;
+  applyUiSnapshot_(e.state.ui);
   render();
   window.scrollTo(0,0);
+  restoreScroll_(e.state.ui && e.state.ui.y);
   if (view.name === 'detail' && view.id) recordSongView_(view.id);
 });
 
@@ -5461,7 +5537,9 @@ function renderDetail() {
     : '<span class="muted">Loading chords…</span>';
 
   const backPl = view.fromPlaylist ? (playlists.find(pl => pl.id === view.fromPlaylist) || (viewAsUser && (viewAsData.playlists || []).find(pl => pl.id === view.fromPlaylist))) : null;
-  const backLink = view.backTo === 'errorReport'
+  const backLink = (view.from && view.from.view)
+    ? `<span class="backlink" onclick="goBackFrom_()" dir="auto">‹ Back to ${escapeHtml(backLabel_(view.from))}</span>`
+    : view.backTo === 'errorReport'
     ? `<span class="backlink" onclick="goTo('admin')">‹ Back to Error Report</span>`
     : backPl
       ? `<span class="backlink" onclick="goTo('playlistDetail',{id:'${backPl.id}'})" dir="auto">‹ Back to ${escapeHtml(backPl.title || 'Playlist')}</span>`
@@ -7928,7 +8006,8 @@ function renderAdminStatsOverview() {
 
   body.innerHTML = `
     <div class="detail-tiles-row" style="margin-bottom:18px;">
-      <div class="detail-tile"><div class="tile-value">${d.totalUsers}</div><div class="tile-label">Total Users</div></div>
+      <div class="detail-tile stat-hero"><div class="tile-value">${(d.todayVisits || []).length}</div><div class="tile-label">Visitors today</div></div>
+      <div class="detail-tile stat-plain"><div class="tile-value">${d.totalUsers}</div><div class="tile-label">Total Users</div></div>
     </div>
     ${periodTabs}
     <div class="card">
