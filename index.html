@@ -561,6 +561,17 @@
   .mobile-drawer-nav button:active{background:#f2f4f5;}
   .mobile-drawer-nav-icon{display:inline-flex;width:20px;height:20px;color:var(--teal);}
   .mobile-drawer-nav-icon svg{width:100%;height:100%;}
+  .nav-badge{position:absolute;top:-4px;right:-8px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:#d93a3a;color:#fff;font-size:10px;font-weight:700;line-height:16px;text-align:center;box-sizing:border-box;}
+  .nav-badge.dot{min-width:9px;width:9px;height:9px;padding:0;top:-2px;right:-4px;}
+  .nav-badge-host{position:relative;display:inline-flex;}
+  .settings-page .card{margin-bottom:14px;}
+  .settings-page h3{margin:0 0 8px;font-size:15px;}
+  .settings-page .adv-row{padding:8px 0;border-bottom:1px solid var(--border);}
+  .settings-page .adv-row:last-child{border-bottom:none;}
+  .settings-page .adv-row{flex-wrap:nowrap;gap:12px;align-items:center;}
+  .settings-page .adv-label{flex:1;min-width:0;}
+  .settings-sub{font-size:12px;color:var(--muted);margin-top:2px;}
+  .profile-photo{width:96px;height:96px;border-radius:50%;object-fit:cover;background:#e6eeee;display:flex;align-items:center;justify-content:center;font-size:38px;font-weight:700;color:var(--teal-dark);}
   .mobile-drawer-section{margin:16px 0 0;border-top:1px solid var(--border);padding-top:12px;}
   .mobile-drawer-heading{font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:0.02em;color:var(--muted);margin-bottom:4px;}
   .switch-toggle{background:#ccd3d4;transition:background .15s;}
@@ -802,45 +813,9 @@
     <div id="userAreaMobile" class="userbox"></div>
     <nav class="mobile-drawer-nav">
       <button onclick="closeMobileDrawer();goTo('tuner')"><span class="mobile-drawer-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 1 1 9-9"/><line x1="12" y1="12" x2="12" y2="5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg></span><span>Tuner</span></button>
-      <button onclick="closeMobileDrawer();goTo('knownChords')"><span class="mobile-drawer-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></span><span>My Chords &amp; Favorites</span></button>
-      <button class="lang-toggle-btn" onclick="toggleUiLang()" style="font-weight:600;">עברית</button>
+      <button onclick="closeMobileDrawer();goTo('profile')"><span class="mobile-drawer-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span><span>Profile</span></button>
+      <button onclick="closeMobileDrawer();goTo('settings')"><span class="mobile-drawer-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span><span>Settings</span></button>
     </nav>
-    <div class="mobile-drawer-section">
-      <div class="mobile-drawer-heading">Display</div>
-      <div class="adv-row">
-        <span class="adv-label">Font size</span>
-        <span class="adv-controls">
-          <button class="stepper-btn" onclick="changeDisplayFontSize(-1)">A&#8595;</button>
-          <span class="ppt-val" id="prefFontSizeVal">17</span>
-          <button class="stepper-btn" onclick="changeDisplayFontSize(1)">A&#8593;</button>
-        </span>
-      </div>
-      <div class="adv-row">
-        <span class="adv-label">Bold chart text</span>
-        <span class="adv-controls"><div class="switch-toggle" id="prefBoldToggle" onclick="toggleDisplayBold()" role="button" aria-pressed="false"><span class="knob"></span></div></span>
-      </div>
-      <div class="adv-row">
-        <span class="adv-label">Show chords</span>
-        <span class="adv-controls"><div class="switch-toggle" id="prefShowChordsToggle" onclick="toggleDisplayShowChords()" role="button" aria-pressed="true"><span class="knob"></span></div></span>
-      </div>
-      <div class="adv-row instr-row">
-        <span class="adv-label">Theme</span>
-        <span class="adv-controls instr-pills">
-          <button type="button" class="chip" id="prefTheme_light" onclick="setThemePref('light')">☀ Light</button>
-          <button type="button" class="chip" id="prefTheme_dark" onclick="setThemePref('dark')">☾ Dark</button>
-          <button type="button" class="chip" id="prefTheme_auto" onclick="setThemePref('auto')" title="Follow your phone or computer's setting">Auto</button>
-        </span>
-      </div>
-      <div class="adv-row instr-row">
-        <span class="adv-label">Chord pictures</span>
-        <span class="adv-controls instr-pills">
-          <button type="button" class="chip" id="prefInstr_guitar" onclick="setChordInstrument('guitar')">Guitar</button>
-          <button type="button" class="chip" id="prefInstr_ukulele" onclick="setChordInstrument('ukulele')">Ukulele</button>
-          <button type="button" class="chip" id="prefInstr_piano" onclick="setChordInstrument('piano')">Piano</button>
-        </span>
-      </div>
-      <div class="instr-explain muted" id="prefInstrExplain" hidden>Tap any chord in a song to see how to play it on <span id="prefInstrName">ukulele</span>. It shows exactly the chord that's written — if the song says <b>F</b>, you'll see an F chord.</div>
-    </div>
   </div>
 </div>
 
@@ -939,6 +914,9 @@ function filterChipsHtml(options, selected, toggleFn) {
   ).join('') + `</div>`;
 }
 const SVG_ICONS = {
+  browse: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>',
+  profile: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+  settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
   list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
   artists: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
   categories: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>',
@@ -1059,7 +1037,7 @@ function saveDisplayPrefs_() {
 
 const I18N = {
   en: {
-    nav_list: 'Songs', nav_artists: 'Artists', nav_categories: 'Categories', nav_playlists: 'Playlists', nav_contact: 'Contact', nav_admin: 'Admin',
+    nav_browse: 'Browse', nav_list: 'Songs', nav_artists: 'Artists', nav_categories: 'Categories', nav_playlists: 'Playlists', nav_contact: 'Contact', nav_admin: 'Admin',
     header_welcome: 'Welcome', header_tuner: 'Tuner', header_known: 'My Chords & Favorites', header_add_song: 'Add Song', header_edit_song: 'Edit Song',
     signin_title: 'Sign in to continue',
     signin_sub: 'Sign in with Google to browse songs, chords, and playlists.',
@@ -1106,7 +1084,7 @@ const I18N = {
     home_share_desc: 'Share this app with others and spread the love to fellow guitar players.',
   },
   he: {
-    nav_list: 'שירים', nav_artists: 'אמנים', nav_categories: 'קטגוריות', nav_playlists: 'פלייליסטים', nav_contact: 'צור קשר', nav_admin: 'ניהול',
+    nav_browse: 'עיון', nav_list: 'שירים', nav_artists: 'אמנים', nav_categories: 'קטגוריות', nav_playlists: 'פלייליסטים', nav_contact: 'צור קשר', nav_admin: 'ניהול',
     header_welcome: 'ברוכים הבאים', header_tuner: 'מכוון גיטרה', header_known: 'האקורדים והמועדפים שלי', header_add_song: 'הוספת שיר', header_edit_song: 'עריכת שיר',
     signin_title: 'התחברו כדי להמשיך',
     signin_sub: 'התחברו עם Google כדי לעיין בשירים, אקורדים ופלייליסטים.',
@@ -1506,7 +1484,7 @@ function loadAuthCache() {
 
 async function handleCredentialResponse(response) {
   const claims = decodeJwt(response.credential);
-  currentUser = { idToken: response.credential, email: (claims.email||'').toLowerCase(), name: claims.name || claims.email, picture: claims.picture || '', isAdmin: currentUser ? currentUser.isAdmin : false };
+  currentUser = { idToken: response.credential, email: (claims.email||'').toLowerCase(), name: (currentUser && currentUser.email === (claims.email||'').toLowerCase() && currentUser.name) || claims.name || claims.email, picture: (currentUser && currentUser.email === (claims.email||'').toLowerCase() && currentUser.picture) || claims.picture || '', googlePicture: claims.picture || '', isAdmin: currentUser ? currentUser.isAdmin : false };
   saveAuthCache(currentUser);
   renderUserArea();
   // On the Supabase backend, the same Google idToken that used to go
@@ -1642,7 +1620,10 @@ async function loadMyData() {
     myCapos = data.myCapos || {};
     if (view.name === 'detail' && playerState.songId && myCapos[playerState.songId] !== undefined && playerState.myCapo == null) playerState.myCapo = myCapos[playerState.songId];
     currentUser.isAdmin = !!(data.user && data.user.isAdmin);
+    if (data.user && data.user.name) currentUser.name = data.user.name;
+    if (data.user && data.user.photo) currentUser.picture = data.user.photo;
     myDataReady = true;
+    refreshUserBadges_();
     saveMyDataCache();
     renderUserArea();
     render();
@@ -2174,7 +2155,7 @@ async function supaApi(action, fields) {
       favorites: (favRes.data || []).map(f => f.song_id),
       knownChords: (kcRes.data && kcRes.data.chords) || [],
       myCapos: await supaLoadMyCapos_(me.id),
-      user: { email: me.email, name: me.name, isAdmin: !!me.is_admin },
+      user: { email: me.email, name: me.name, photo: me.photo || '', isAdmin: !!me.is_admin },
     };
   }
 
@@ -2739,6 +2720,22 @@ async function supaApi(action, fields) {
     if (!target) return { success: true }; // nothing to archive for an unknown email - matches the old backend's silent no-op here
     const { error } = await getSupa_().from('messages').update({ archived: !!fields.archived }).eq('user_id', target.id);
     throwIfErr_(error);
+    return { success: true };
+  }
+  if (action === 'updateProfile') {
+    const me = await supaRequireUser_();
+    const name = String(fields.name || '').trim().slice(0, 80);
+    if (!name) return { success: false, error: 'Please enter a name.' };
+    const update = { name };
+    if (fields.photo !== undefined) {
+      const ph = fields.photo ? String(fields.photo) : null;
+      if (ph && !/^data:image\/(jpeg|png|webp);base64,/.test(ph) && !/^https:\/\//.test(ph)) return { success: false, error: 'That photo could not be used.' };
+      if (ph && ph.length > 60000) return { success: false, error: 'That photo is too large.' };
+      update.photo = ph;
+    }
+    const { error } = await getSupa_().from('profiles').update(update).eq('id', me.id);
+    throwIfErr_(error);
+    Object.assign(me, update);
     return { success: true };
   }
   if (action === 'reactMessage') {
@@ -4819,6 +4816,9 @@ function backLabel_(f) {
     return t('songtab_' + (u.songTab || 'all')) || t('nav_list');
   }
   if (v.name === 'artists') return t('nav_artists');
+  if (v.name === 'browse') return t('nav_browse');
+  if (v.name === 'profile') return 'Profile';
+  if (v.name === 'settings') return 'Settings';
   if (v.name === 'categories') return t('nav_categories');
   if (v.name === 'playlists') return t('nav_playlists');
   if (v.name === 'playlistDetail') {
@@ -4900,7 +4900,7 @@ window.addEventListener('popstate', (e) => {
 // title already goes home when clicked (onclick="goTo('home')" above), so a
 // separate tab would just be a redundant second way to do the same thing.
 function navTabs() {
-  const tabs = [['list',t('nav_list')],['artists',t('nav_artists')],['categories',t('nav_categories')],['playlists',t('nav_playlists')],['contact',t('nav_contact')]];
+  const tabs = [['list',t('nav_list')],['browse',t('nav_browse')],['playlists',t('nav_playlists')],['contact',t('nav_contact')]];
   if (effectiveIsAdmin()) tabs.push(['admin',t('nav_admin')]);
   return tabs;
 }
@@ -4909,7 +4909,7 @@ function renderNav() {
   if (!currentUser) { nav.innerHTML = ''; return; }
   nav.innerHTML = navTabs().map(([name,label]) => {
     const icon = SVG_ICONS[name] || '';
-    return `<button class="${view.name===name?'active':''}" data-tab="${name}" style="display:inline-flex;align-items:center;gap:6px;" onclick="goTo('${name}')">${icon}<span>${label}</span></button>`;
+    return `<button class="${navTabActive_(name)?'active':''}" data-tab="${name}" style="display:inline-flex;align-items:center;gap:6px;" onclick="goTo('${name}')"><span class="nav-badge-host">${icon}${navBadgeHtml_(name)}</span><span>${label}</span></button>`;
   }).join('');
 }
 // Mobile-only fixed tab bar (see .bottom-nav CSS) — same tabs as renderNav,
@@ -4922,7 +4922,7 @@ function renderBottomNav() {
   if (!currentUser) { el.innerHTML = ''; return; }
   el.innerHTML = navTabs().map(([name,label]) => {
     const icon = SVG_ICONS[name] || '';
-    return `<button class="${view.name===name?'active':''}" data-tab="${name}" onclick="goTo('${name}')"><span class="nav-icon-wrap">${icon}</span><span>${label}</span></button>`;
+    return `<button class="${navTabActive_(name)?'active':''}" data-tab="${name}" onclick="goTo('${name}')"><span class="nav-icon-wrap nav-badge-host">${icon}${navBadgeHtml_(name)}</span><span>${label}</span></button>`;
   }).join('');
 }
 function openMobileDrawer() { document.getElementById('mobileDrawer').classList.add('open'); renderMenuDrawerSettings_(); }
@@ -5569,6 +5569,249 @@ function saveKnownChords() {
    ARTISTS / CATEGORIES
    ============================================================ */
 let artistsSearch = '';
+// ============================================================
+// BROWSE (Artists + Categories on one page) / PROFILE / SETTINGS
+// ============================================================
+let browseTab = 'artists';
+function navTabActive_(name) {
+  if (name === 'browse') return ['browse', 'artists', 'categories'].includes(view.name);
+  return view.name === name;
+}
+function renderBrowse_() {
+  if (view.name === 'artists') browseTab = 'artists';
+  else if (view.name === 'categories') browseTab = 'categories';
+  if (browseTab === 'categories') renderCategories(); else renderArtists();
+  const app = document.getElementById('app');
+  app.insertAdjacentHTML('afterbegin', `<div class="subtabs" style="margin-bottom:12px;">
+      <button class="${browseTab === 'artists' ? 'active' : ''}" onclick="browseTab='artists';goTo('browse')">${t('nav_artists')}</button>
+      <button class="${browseTab === 'categories' ? 'active' : ''}" onclick="browseTab='categories';goTo('browse')">${t('nav_categories')}</button>
+    </div>`);
+}
+
+// ---- Profile: change your name / photo -----------------------------------
+let profileDraftPhoto; // undefined = unchanged, '' = removed, data URL = new
+function renderProfile_() {
+  const app = document.getElementById('app');
+  if (!currentUser) { app.innerHTML = '<div class="empty">Sign in to see your profile.</div>'; return; }
+  if (viewAsUser) { app.innerHTML = '<div class="empty">Profile can’t be changed while viewing as another user.</div>'; return; }
+  const photo = profileDraftPhoto !== undefined ? profileDraftPhoto : (currentUser.picture || '');
+  const initial = escapeHtml(((currentUser.name || currentUser.email || '?').trim()[0] || '?').toUpperCase());
+  app.innerHTML = `<h2>Profile</h2>
+    <div class="card" style="max-width:520px;">
+      <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
+        ${photo ? `<img class="profile-photo" src="${escapeHtml(photo)}" alt="">` : `<div class="profile-photo">${initial}</div>`}
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <label class="btn secondary" style="margin:0;cursor:pointer;">Change photo<input type="file" accept="image/*" style="display:none" onchange="pickProfilePhoto_(this)"></label>
+          ${photo ? `<button class="btn secondary" type="button" onclick="profileDraftPhoto='';renderProfile_()">Remove photo</button>` : ''}
+        </div>
+      </div>
+      <label>Name</label>
+      <input type="text" id="profileName" maxlength="80" value="${escapeHtml(currentUser.name || '')}">
+      <div class="muted" style="font-size:12.5px;margin-top:4px;">${escapeHtml(currentUser.email || '')}</div>
+      <div style="margin-top:14px;display:flex;gap:10px;align-items:center;">
+        <button class="btn" onclick="saveProfile_()">Save</button>
+        <span id="profileStatus" class="status"></span>
+      </div>
+    </div>
+    <div class="card" style="max-width:520px;">
+      <div class="adv-row" style="border:none;"><span class="adv-label">My known chords</span><span class="adv-controls"><button class="btn secondary" onclick="goTo('knownChords')">Edit</button></span></div>
+      <div class="adv-row" style="border:none;"><span class="adv-label">Sign out of this device</span><span class="adv-controls"><button class="btn secondary" onclick="signOut()">Sign out</button></span></div>
+    </div>`;
+}
+// Shrinks the picked picture to a small square (center-cropped), so it's
+// only a few KB - it's stored right on the profile, no separate file storage.
+function pickProfilePhoto_(input) {
+  const f = input.files && input.files[0];
+  if (!f) return;
+  const st = document.getElementById('profileStatus');
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const S = 160, c = document.createElement('canvas');
+      c.width = S; c.height = S;
+      const side = Math.min(img.width, img.height);
+      c.getContext('2d').drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, S, S);
+      let q = 0.82, url = c.toDataURL('image/jpeg', q);
+      while (url.length > 40000 && q > 0.4) { q -= 0.1; url = c.toDataURL('image/jpeg', q); }
+      profileDraftPhoto = url;
+      const name = document.getElementById('profileName') ? document.getElementById('profileName').value : null;
+      renderProfile_();
+      if (name !== null) document.getElementById('profileName').value = name;
+      const st2 = document.getElementById('profileStatus'); if (st2) { st2.textContent = 'Press Save to keep this photo.'; st2.className = 'status'; }
+    };
+    img.onerror = () => { if (st) { st.textContent = 'That file isn’t a picture we can use.'; st.className = 'error'; } };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(f);
+}
+function saveProfile_() {
+  const name = (document.getElementById('profileName').value || '').trim();
+  const st = document.getElementById('profileStatus');
+  if (!name) { st.textContent = 'Please enter a name.'; st.className = 'error'; return; }
+  st.textContent = 'Saving…'; st.className = 'status';
+  const fields = { name };
+  if (profileDraftPhoto !== undefined) fields.photo = profileDraftPhoto || null;
+  api('updateProfile', fields).then(() => {
+    currentUser.name = name;
+    if (profileDraftPhoto !== undefined) currentUser.picture = profileDraftPhoto || currentUser.googlePicture || '';
+    profileDraftPhoto = undefined;
+    renderUserArea();
+    renderProfile_();
+    const st2 = document.getElementById('profileStatus'); if (st2) { st2.textContent = 'Saved!'; st2.className = 'status'; }
+  }).catch(err => { st.textContent = 'Error: ' + err.message; st.className = 'error'; });
+}
+
+// ---- Settings: display defaults + in-app alerts ----------------------------
+const ALERT_PREFS_KEY = 'jgc_alert_prefs';
+let alertPrefs = { newSongs: true, myRequests: true, messages: true, appIcon: true };
+try { Object.assign(alertPrefs, JSON.parse(localStorage.getItem(ALERT_PREFS_KEY) || '{}')); } catch (e) {}
+function setAlertPref_(k, on) {
+  alertPrefs[k] = !!on;
+  try { localStorage.setItem(ALERT_PREFS_KEY, JSON.stringify(alertPrefs)); } catch (e) {}
+  if (k === 'appIcon' && !on) { try { navigator.clearAppBadge && navigator.clearAppBadge(); } catch (e) {} }
+  updateBadges_();
+  renderSettings_();
+}
+function settingsSwitch_(on, onclick) {
+  return `<div class="switch-toggle${on ? ' on' : ''}" onclick="${onclick}" role="button" aria-pressed="${on}"><span class="knob"></span></div>`;
+}
+function renderSettings_() {
+  const app = document.getElementById('app');
+  const sw = (k) => settingsSwitch_(!!alertPrefs[k], `setAlertPref_('${k}', ${!alertPrefs[k]})`);
+  const iconSupported = 'setAppBadge' in navigator;
+  app.innerHTML = `<div class="settings-page" style="max-width:560px;">
+    <h2>Settings</h2>
+    <div class="card">
+      <h3>Display</h3><div class="settings-sub" style="margin:-4px 0 6px;">Defaults for every song you open. You can still change them on any song.</div>
+      <div class="adv-row">
+        <span class="adv-label">Font size</span>
+        <span class="adv-controls">
+          <button class="stepper-btn" onclick="changeDisplayFontSize(-1)">A&#8595;</button>
+          <span class="ppt-val" id="prefFontSizeVal">17</span>
+          <button class="stepper-btn" onclick="changeDisplayFontSize(1)">A&#8593;</button>
+        </span>
+      </div>
+      <div class="adv-row">
+        <span class="adv-label">Bold chart text</span>
+        <span class="adv-controls"><div class="switch-toggle" id="prefBoldToggle" onclick="toggleDisplayBold()" role="button" aria-pressed="false"><span class="knob"></span></div></span>
+      </div>
+      <div class="adv-row">
+        <span class="adv-label">Show chords</span>
+        <span class="adv-controls"><div class="switch-toggle" id="prefShowChordsToggle" onclick="toggleDisplayShowChords()" role="button" aria-pressed="true"><span class="knob"></span></div></span>
+      </div>
+      <div class="adv-row instr-row">
+        <span class="adv-label">Theme</span>
+        <span class="adv-controls instr-pills">
+          <button type="button" class="chip" id="prefTheme_light" onclick="setThemePref('light')">☀ Light</button>
+          <button type="button" class="chip" id="prefTheme_dark" onclick="setThemePref('dark')">☾ Dark</button>
+          <button type="button" class="chip" id="prefTheme_auto" onclick="setThemePref('auto')" title="Follow your phone or computer's setting">Auto</button>
+        </span>
+      </div>
+      <div class="adv-row instr-row">
+        <span class="adv-label">Chord pictures</span>
+        <span class="adv-controls instr-pills">
+          <button type="button" class="chip" id="prefInstr_guitar" onclick="setChordInstrument('guitar')">Guitar</button>
+          <button type="button" class="chip" id="prefInstr_ukulele" onclick="setChordInstrument('ukulele')">Ukulele</button>
+          <button type="button" class="chip" id="prefInstr_piano" onclick="setChordInstrument('piano')">Piano</button>
+        </span>
+      </div>
+      <div class="instr-explain muted" id="prefInstrExplain" hidden>Tap any chord in a song to see how to play it on <span id="prefInstrName">ukulele</span>. It shows exactly the chord that's written — if the song says <b>F</b>, you'll see an F chord.</div>
+    
+    </div>
+    <div class="card">
+      <h3>Language</h3>
+      <div class="adv-row instr-row" style="border:none;">
+        <span class="adv-label">App language</span>
+        <span class="adv-controls instr-pills">
+          <button type="button" class="chip${uiLang !== 'he' ? ' active' : ''}" onclick="if(uiLang==='he')toggleUiLang()">English</button>
+          <button type="button" class="chip${uiLang === 'he' ? ' active' : ''}" onclick="if(uiLang!=='he')toggleUiLang()">עברית</button>
+        </span>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Alerts</h3>
+      <div class="settings-sub" style="margin:-4px 0 6px;">A red dot or number on the tabs below when there's something new for you.</div>
+      <div class="adv-row"><span class="adv-label">New songs added<div class="settings-sub">Number on the Songs tab</div></span><span class="adv-controls">${sw('newSongs')}</span></div>
+      <div class="adv-row"><span class="adv-label">My song requests added<div class="settings-sub">On the Contact tab</div></span><span class="adv-controls">${sw('myRequests')}</span></div>
+      <div class="adv-row"><span class="adv-label">New messages to me<div class="settings-sub">On the Contact tab</div></span><span class="adv-controls">${sw('messages')}</span></div>
+      <div class="adv-row"><span class="adv-label">Number on the app icon<div class="settings-sub">${iconSupported ? 'If the app is on your home screen. Updates whenever you open the app.' : 'Not available on this phone/browser.'}</div></span><span class="adv-controls">${iconSupported ? sw('appIcon') : ''}</span></div>
+    </div>
+  </div>`;
+  renderMenuDrawerSettings_();
+}
+
+// ---- Badges ----------------------------------------------------------------
+// All per device (localStorage): when you last looked at New Songs, which of
+// your requests you've seen marked Added, and when you last opened your
+// messages. Your own requests/messages are fetched once on app open (and
+// again when the app comes back to the screen, at most every 10 minutes).
+const BADGE_SEEN_KEY = 'jgc_badge_seen_v1';
+let badgeSeen = { newSongsAt: 0, requestsAdded: [], messagesAt: 0 };
+try { Object.assign(badgeSeen, JSON.parse(localStorage.getItem(BADGE_SEEN_KEY) || '{}')); } catch (e) {}
+function saveBadgeSeen_() { try { localStorage.setItem(BADGE_SEEN_KEY, JSON.stringify(badgeSeen)); } catch (e) {} }
+// First run on this device: start counting from now, not from every song ever.
+if (!badgeSeen.newSongsAt) { badgeSeen.newSongsAt = Date.now(); saveBadgeSeen_(); }
+let userBadgeData = null; // { requests, messages } for the signed-in (non-admin) user
+let userBadgeFetchedAt = 0;
+function refreshUserBadges_(force) {
+  if (!currentUser || viewAsUser || isOffline) { updateBadges_(); return; }
+  if (!force && Date.now() - userBadgeFetchedAt < 10 * 60 * 1000) { updateBadges_(); return; }
+  userBadgeFetchedAt = Date.now();
+  const fetches = currentUser.isAdmin ? [api('getRequests', { scope: 'mine' })] : [api('getRequests', { scope: 'mine' }), api('getMessages', { scope: 'mine' })];
+  Promise.all(fetches).then(([r, m]) => {
+    userBadgeData = { requests: r.requests || [], messages: m ? (m.messages || []) : [] };
+    // First time on this device: don't light up for things from before.
+    if (!badgeSeen.initialized) {
+      badgeSeen.initialized = true;
+      badgeSeen.requestsAdded = userBadgeData.requests.filter(x => x.status === 'added').map(x => x.id);
+      badgeSeen.messagesAt = Date.now();
+      saveBadgeSeen_();
+    }
+    updateBadges_();
+  }).catch(() => {});
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshUserBadges_(); });
+function badgeCounts_() {
+  const c = { songs: 0, contact: 0 };
+  if (!currentUser || viewAsUser) return c;
+  if (alertPrefs.newSongs) c.songs = visibleSongs_().filter(s => { const t = Date.parse(s.date_added || s.created_at || ''); return t && t > badgeSeen.newSongsAt; }).length;
+  if (userBadgeData) {
+    if (alertPrefs.myRequests) c.contact += userBadgeData.requests.filter(r => r.status === 'added' && !badgeSeen.requestsAdded.includes(r.id)).length;
+    if (alertPrefs.messages) c.contact += userBadgeData.messages.filter(m => m.sender === 'admin' && Date.parse(m.created_at) > badgeSeen.messagesAt).length;
+  }
+  return c;
+}
+function navBadgeHtml_(name) {
+  const c = badgeCounts_();
+  const n = name === 'list' ? c.songs : name === 'contact' ? c.contact : 0;
+  return n ? `<span class="nav-badge">${n > 99 ? '99+' : n}</span>` : '';
+}
+function updateBadges_() {
+  // Looking at the page clears its badge.
+  if (view.name === 'list' && songTab === 'new' && badgeSeen.newSongsAt < Date.now() - 1000) { badgeSeen.newSongsAt = Date.now(); saveBadgeSeen_(); }
+  if (view.name === 'contact' && userBadgeData) {
+    const added = userBadgeData.requests.filter(r => r.status === 'added').map(r => r.id);
+    if (added.some(id => !badgeSeen.requestsAdded.includes(id))) { badgeSeen.requestsAdded = added; saveBadgeSeen_(); }
+  }
+  if (view.name === 'contact' && typeof contactChatOpen !== 'undefined' && contactChatOpen) { badgeSeen.messagesAt = Date.now(); saveBadgeSeen_(); }
+  ['mainNav', 'bottomNav'].forEach(id => {
+    const nav = document.getElementById(id); if (!nav) return;
+    ['list', 'contact'].forEach(tab => {
+      const host = nav.querySelector(`[data-tab="${tab}"] .nav-badge-host`); if (!host) return;
+      const old = host.querySelector('.nav-badge'); if (old) old.remove();
+      host.insertAdjacentHTML('beforeend', navBadgeHtml_(tab));
+    });
+  });
+  const c = badgeCounts_(), total = c.songs + c.contact;
+  try {
+    if ('setAppBadge' in navigator) {
+      if (alertPrefs.appIcon && total) navigator.setAppBadge(total).catch(() => {});
+      else navigator.clearAppBadge().catch(() => {});
+    }
+  } catch (e) {}
+}
+
 function renderArtists() {
   let html = `<h2>Artists</h2>
     <div class="searchRow"><input type="text" id="artistsSearchBox" placeholder="${uiLang === 'he' ? 'חיפוש אמנים — בעברית או באנגלית…' : 'Search artists — English or Hebrew…'}" value="${escapeHtml(artistsSearch)}"></div>
@@ -7243,7 +7486,9 @@ function renderContact() {
     : [api('getRequests', {scope:'mine'}), api('getMessages', {scope:'mine'})];
   Promise.all(fetches).then(([reqData, msgData]) => {
     contactRequestsCache = reqData.requests || []; contactMessagesCache = msgData ? (msgData.messages || []) : [];
+    userBadgeData = { requests: contactRequestsCache, messages: contactMessagesCache };
     renderContactBody();
+    updateBadges_();
   }).catch(err => { document.getElementById('app').innerHTML = `<div class="error">${err.message}</div>`; });
 }
 // Renders from the already-loaded contactRequestsCache/contactMessagesCache
@@ -7284,7 +7529,7 @@ function renderContactBody() {
     const isOpen = contactChatOpen;
     html += `<div class="chat-card" onclick="toggleContactChat()">
         <span class="chat-card-icon">${SVG_ICONS.message}</span>
-        <div class="chat-card-text"><div class="chat-card-title">${chatTitle}</div><div class="chat-card-preview">${preview}</div></div>
+        <div class="chat-card-text"><div class="chat-card-title">${!viewAsUser && alertPrefs.messages && myMessages.some(m => m.sender === 'admin' && Date.parse(m.created_at) > badgeSeen.messagesAt) ? '<span class="tab-dot"></span>' : ''}${chatTitle}</div><div class="chat-card-preview">${preview}</div></div>
         <span class="chat-card-arrow">${isOpen ? '▾' : '▸'}</span>
       </div>`;
     if (isOpen) {
@@ -7320,7 +7565,7 @@ function submitRequestLyrics_(id) {
   }).catch(err => { st.textContent = 'Error: ' + err.message; st.className = 'error'; });
 }
 function changeContactRequestsPage(p) { contactRequestsPage = p; renderContactBody(); }
-function toggleContactChat() { contactChatOpen = !contactChatOpen; renderContactBody(); }
+function toggleContactChat() { contactChatOpen = !contactChatOpen; renderContactBody(); if (contactChatOpen) { badgeSeen.messagesAt = Date.now(); saveBadgeSeen_(); updateBadges_(); } }
 // The "Re: Song Request / Error Report" reference on a message, drawn as its
 // own small box with a link, separate from the message text itself.
 // ctx 'admin' (the admin's thread modal) links to the request/error in the
@@ -8802,8 +9047,9 @@ function render() {
   }
   if (view.name === 'home') renderHome();
   else if (view.name === 'list') renderList();
-  else if (view.name === 'artists') renderArtists();
-  else if (view.name === 'categories') renderCategories();
+  else if (view.name === 'artists' || view.name === 'categories' || view.name === 'browse') renderBrowse_();
+  else if (view.name === 'profile') renderProfile_();
+  else if (view.name === 'settings') renderSettings_();
   else if (view.name === 'detail') renderDetail();
   else if (view.name === 'edit') renderEdit();
   else if (view.name === 'knownChords') renderKnownChords();
@@ -8813,6 +9059,7 @@ function render() {
   else if (view.name === 'contact') renderContact();
   else if (view.name === 'admin') renderAdmin();
   maybeStartOnboardingTour();
+  updateBadges_();
 }
 
 /* ============================================================
