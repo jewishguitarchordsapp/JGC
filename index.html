@@ -212,6 +212,14 @@
   .picker-artist-he{flex:1;min-width:0;font-size:14px;color:var(--text);overflow-wrap:anywhere;text-align:right;}
   .picker-artist-he.none{color:var(--muted);font-size:12px;font-style:italic;text-align:left;}
   .blank-flag{outline:2px solid #e8a33d !important;outline-offset:3px;border-radius:8px;}
+  .req-checks{margin-top:14px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:#f7fafa;}
+  .req-checks-head{font-weight:600;font-size:14px;margin-bottom:6px;}
+  .req-check{display:flex;gap:9px;align-items:flex-start;margin:0;padding:6px 0;cursor:pointer;font-weight:normal;}
+  .req-check input{margin-top:3px;flex:none;width:17px;height:17px;}
+  .req-check-main{display:block;font-size:14px;color:var(--text);}
+  .req-check-why{display:block;font-size:12px;color:var(--muted);line-height:1.35;margin-top:1px;}
+  #reqSubmitBtn:disabled{opacity:.5;cursor:not-allowed;}
+  html[data-theme="dark"] .req-checks{background:#33393b;}
   .fr-panel{border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin:4px 0 8px;background:#f7fafa;}
   .fr-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px;}
   .fr-row input[type=text]{flex:1;min-width:140px;padding:6px 8px;}
@@ -7884,10 +7892,33 @@ function openRequestSongModal() {
     <label>Categories (optional)</label><input type="text" id="req_categories" placeholder="e.g. Chanukah, Slow">
     <label>Lyrics (optional)</label><textarea id="req_lyrics" style="min-height:80px"></textarea>
     <label>Note (optional)</label><input type="text" id="req_note">
-    <div class="modal-actions"><span id="reqStatus" class="status"></span><button class="btn secondary" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitRequest()">Request Song</button></div>
+    <div class="req-checks">
+      <div class="req-checks-head">Before you request, please check: <span class="muted">(all required)</span></div>
+      ${REQUEST_CHECKS.map((c, i) => `<label class="req-check"><input type="checkbox" class="req-check-box" onchange="updateRequestChecks_()"><span><span class="req-check-main">${c.main}</span><span class="req-check-why">${c.why}</span></span></label>`).join('')}
+      <div class="req-check-why" style="margin-top:6px;font-style:italic;">Requests that don't meet these will be declined, and still count toward your 2 requests for the week.</div>
+    </div>
+    <div class="modal-actions"><span id="reqStatus" class="status"></span><button class="btn secondary" onclick="closeModal()">Cancel</button><button class="btn" id="reqSubmitBtn" onclick="submitRequest()" disabled>Request Song</button></div>
+    <div id="reqChecksHint" class="muted" style="font-size:12px;text-align:right;margin-top:4px;">Please tick all four boxes to send your request.</div>
   `);
 }
+// Required checkboxes in the Request a Song form.
+const REQUEST_CHECKS = [
+  { main: 'The song has lyrics.', why: 'Without words, it\u2019s very hard to follow where the chords change, so songs without lyrics (like most niggunim) can\u2019t be added.' },
+  { main: 'The YouTube video has at least 800 views.', why: 'We get a lot of requests, so more popular songs are added first.' },
+  { main: 'The YouTube link is for this exact song.', why: 'The video is used to hear the song and work out the chords, so a different video means it can\u2019t be added.' },
+  { main: 'The song fits the app\u2019s religious standards.', why: 'If you\u2019re not sure, it\u2019s best to choose a different song.' },
+];
+function requestChecksAllTicked_() {
+  const boxes = document.querySelectorAll('.req-check-box');
+  return boxes.length === REQUEST_CHECKS.length && Array.from(boxes).every(b => b.checked);
+}
+function updateRequestChecks_() {
+  const ok = requestChecksAllTicked_();
+  const btn = document.getElementById('reqSubmitBtn'); if (btn) btn.disabled = !ok;
+  const hint = document.getElementById('reqChecksHint'); if (hint) hint.hidden = ok;
+}
 function submitRequest() {
+  if (!requestChecksAllTicked_()) { const st = document.getElementById('reqStatus'); if (st) { st.textContent = 'Please tick all four boxes first.'; st.className = 'error'; } return; }
   const song_title = document.getElementById('req_title').value.trim();
   const artist = document.getElementById('req_artist').value.trim();
   const youtube_url = document.getElementById('req_youtube').value.trim();
