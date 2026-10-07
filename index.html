@@ -2315,7 +2315,8 @@ async function supaApi(action, fields) {
   // way to pass any other user id or date through it.
   if (action === 'logVisit') {
     await supaRequireUser_();
-    let { error } = await getSupa_().rpc('log_app_visit', { p_country: fields.country || null });
+    let { error } = await getSupa_().rpc('log_app_visit', { p_country: fields.country || null, p_mode: fields.mode || null, p_platform: fields.platform || null });
+    if (error) ({ error } = await getSupa_().rpc('log_app_visit', { p_country: fields.country || null })); // add_home_screen_stats.sql not run yet
     if (error) ({ error } = await getSupa_().rpc('log_app_visit')); // add_visit_countries.sql not run yet
     throwIfErr_(error);
     return { success: true };
@@ -2341,6 +2342,12 @@ async function supaApi(action, fields) {
   //    load - that's all app_visits tracks per user per day, so someone
   //    who opens the app again later the same day doesn't add a second
   //    entry here.
+  if (action === 'getAppModeStats') {
+    await supaRequireAdmin_();
+    const { data, error } = await getSupa_().rpc('admin_app_mode_stats');
+    if (error) return { success: true, stats: null }; // add_home_screen_stats.sql not run yet
+    return { success: true, stats: data };
+  }
   if (action === 'getVisitStats') {
     await supaRequireAdmin_();
     // Preferred: computed in the database in New York time (admin_visit_stats,
@@ -3054,7 +3061,7 @@ function startAfterSignIn() {
   // chart (see getVisitStats). Same fire-and-forget pattern as
   // recordSongView_'s incrementSongView call - never blocks anything or
   // surfaces an error to the person using the app.
-  api('logVisit', { country: detectVisitorCountry_() }).catch(() => {});
+  api('logVisit', { country: detectVisitorCountry_(), mode: isStandaloneDisplay() ? 'home' : 'browser', platform: devicePlatform_() }).catch(() => {});
 }
 
 // Fetches one song's full text on demand — used when its detail page is
@@ -4756,6 +4763,30 @@ function formatChordLabel(c) {
 // playlists arrive asynchronously after sign-in), showing a brief "not
 // found yet"-style placeholder that self-corrects once that data arrives.
 const VIEW_CACHE_KEY = 'jgc_view_cache_v1';
+// ---- Back to the Welcome page after a long break ---------------------------
+// Closed (or in the background) for more than 30 minutes -> reopening starts
+// on the Welcome page instead of wherever it was left. Not while a song is
+// being added/edited, so nothing typed is lost.
+const APP_IDLE_RESET_MS = 30 * 60 * 1000;
+const APP_LAST_ACTIVE_KEY = 'jgc_last_active_at';
+function markAppActive_() { try { localStorage.setItem(APP_LAST_ACTIVE_KEY, String(Date.now())); } catch (e) {} }
+function appIdleTooLong_() {
+  let t = 0;
+  try { t = parseInt(localStorage.getItem(APP_LAST_ACTIVE_KEY), 10) || 0; } catch (e) {}
+  return !!t && Date.now() - t > APP_IDLE_RESET_MS;
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') { markAppActive_(); return; }
+  // Came back to the screen without a reload (common for home-screen apps).
+  if (appIdleTooLong_() && currentUser && view.name !== 'home' && view.name !== 'edit') {
+    if (playerState && playerState.playing) { try { stopPlayMode(); } catch (e) {} }
+    try { closeModal(); } catch (e) {}
+    goTo('home');
+  }
+  markAppActive_();
+});
+window.addEventListener('pagehide', markAppActive_);
+setInterval(() => { if (document.visibilityState === 'visible') markAppActive_(); }, 60 * 1000);
 function saveViewCache(v) {
   try { localStorage.setItem(VIEW_CACHE_KEY, JSON.stringify(v)); } catch (e) {}
 }
@@ -4940,6 +4971,13 @@ function closeMobileDrawer() { document.getElementById('mobileDrawer').classList
 let deferredInstallPrompt = null;
 let installBannerDismissed = false;
 function isStandaloneDisplay() { return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true; }
+// 'ios' | 'android' | 'desktop' - only for the admin's home-screen stat.
+function devicePlatform_() {
+  const ua = navigator.userAgent || '';
+  if (/iphone|ipad|ipod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return 'ios';
+  if (/android/i.test(ua)) return 'android';
+  return 'desktop';
+}
 function isIosDevice() { return /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream; }
 function showInstallBanner(kind) {
   if (installBannerDismissed || isStandaloneDisplay()) return;
@@ -8772,6 +8810,40 @@ function statsBarsHtml_(items) {
     </div>`;
   }).join('');
 }
+let appModeStats = null;
+let appModePeriod = 'days30';
+// "How people open the app": home screen (installed) vs browser tab, by device.
+function appModeCardHtml_() {
+  if (!appModeStats) return '';
+  const rows = appModeStats[appModePeriod] || [];
+  const sum = f => rows.filter(f).reduce((a, r) => a + (r.n || 0), 0);
+  const known = sum(r => r.mode !== 'unknown');
+  const home = sum(r => r.mode === 'home');
+  const pct = n => known ? Math.round(n * 100 / known) + '%' : '—';
+  const plat = [['ios', 'iPhone / iPad'], ['android', 'Android'], ['desktop', 'Computer']];
+  const tableRows = plat.map(([k, label]) => {
+    const h = sum(r => r.platform === k && r.mode === 'home'), b = sum(r => r.platform === k && r.mode === 'browser');
+    return (h + b) ? `<tr><td>${label}</td><td style="text-align:right;"><b>${h}</b></td><td style="text-align:right;">${b}</td></tr>` : '';
+  }).join('');
+  const older = sum(r => r.mode === 'unknown');
+  const since = appModeStats.since ? new Date(appModeStats.since + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
+  return `<div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+        <div class="muted">How people open the app</div>
+        <div class="subtabs" style="margin:0;">
+          <button class="${appModePeriod === 'days7' ? 'active' : ''}" onclick="appModePeriod='days7';renderAdminStatsOverview()">7 days</button>
+          <button class="${appModePeriod === 'days30' ? 'active' : ''}" onclick="appModePeriod='days30';renderAdminStatsOverview()">30 days</button>
+        </div>
+      </div>
+      ${known ? `<div style="display:flex;gap:10px;margin-bottom:10px;">
+          <div class="detail-tile stat-hero"><div class="tile-value">${pct(home)}</div><div class="tile-label">From the home screen (${home})</div></div>
+          <div class="detail-tile stat-plain"><div class="tile-value">${pct(known - home)}</div><div class="tile-label">In a browser tab (${known - home})</div></div>
+        </div>
+        <table style="font-size:13.5px;"><tr><th>Device</th><th style="text-align:right;">Home screen</th><th style="text-align:right;">Browser</th></tr>${tableRows}</table>`
+        : `<div class="muted" style="font-size:13px;">No data yet — it starts counting from the first visits on the updated app.</div>`}
+      <div class="muted" style="font-size:11.5px;margin-top:8px;">People, not visits. Someone who used both counts as home screen.${since ? ` Counting since ${escapeHtml(since)}.` : ''}${older ? ` ${older} visitor${older === 1 ? '' : 's'} still on an older copy of the app aren't included yet.` : ''}</div>
+    </div>`;
+}
 function loadAdminStatsOverview() {
   if (statsOverviewCache && usersLoaded) { renderAdminStatsOverview(); return; }
   const body = document.getElementById('adminBody');
@@ -8782,6 +8854,7 @@ function loadAdminStatsOverview() {
   // user-activity readings - see renderUsersSummary_() below, now rendered
   // here instead of at the top of the Users tab.
   const usersPromise = usersLoaded ? Promise.resolve({ users: usersCache }) : api('getUsers', {});
+  api('getAppModeStats', {}).then(d => { appModeStats = d.stats || null; if (adminTab === 'overview' && statsOverviewCache) renderAdminStatsOverview(); }).catch(() => {});
   Promise.all([visitsPromise, usersPromise]).then(([visitData, usersData]) => {
     statsOverviewCache = visitData;
     usersCache = usersData.users || usersCache;
@@ -8867,7 +8940,8 @@ function renderAdminStatsOverview() {
       else { obj = d.countries12m; title = 'Visitors by country — last 12 months'; }
       if (!obj) return '';
       return `<div class="card"><div class="muted" style="margin-bottom:8px;">${title}</div>${countryBreakdownHtml_(obj)}<div class="muted" style="font-size:11.5px;margin-top:8px;">Based on each device's time-zone setting.</div></div>`;
-    })()}`;
+    })()}
+    ${appModeCardHtml_()}`;
 }
 
 /* ============================================================
@@ -9567,7 +9641,10 @@ if (currentUser) {
 // pull-to-refresh stay put on, say, the Known Chords page instead of
 // bouncing back to the start.
 const cachedView = loadViewCache();
-if (cachedView) view = cachedView;
+// ...unless the app has been closed for more than APP_IDLE_RESET_MS - then it
+// starts fresh on the Welcome page (a quick refresh still stays put).
+if (cachedView && !appIdleTooLong_()) view = cachedView;
+markAppActive_();
 // Seeds the history stack with the screen we're actually starting on, so
 // pushViewHistory_ (see goTo above) has something correct to compare
 // against and popstate has something correct to fall back to/past.
