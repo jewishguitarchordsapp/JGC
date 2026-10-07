@@ -220,6 +220,8 @@
   .req-check-why{display:block;font-size:12px;color:var(--muted);line-height:1.35;margin-top:1px;}
   #reqSubmitBtn:disabled{opacity:.5;cursor:not-allowed;}
   html[data-theme="dark"] .req-checks{background:#33393b;}
+  .transpose-lock{margin-left:6px;display:inline-flex;align-items:center;justify-content:center;}
+  .transpose-lock.on{background:var(--teal);color:#fff;border-color:var(--teal);}
   .fr-panel{border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin:4px 0 8px;background:#f7fafa;}
   .fr-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px;}
   .fr-row input[type=text]{flex:1;min-width:140px;padding:6px 8px;}
@@ -1402,7 +1404,7 @@ const MYDATA_CACHE_KEY = 'jgc_mydata_cache_v1';
 function saveMyDataCache() {
   try {
     if (!currentUser) return;
-    localStorage.setItem(MYDATA_CACHE_KEY, JSON.stringify({ email: currentUser.email, favorites, knownChords, myCapos }));
+    localStorage.setItem(MYDATA_CACHE_KEY, JSON.stringify({ email: currentUser.email, favorites, knownChords, myCapos, myTransposes }));
   } catch (e) {}
 }
 function loadMyDataCache(email) {
@@ -1626,6 +1628,8 @@ async function loadMyData() {
     favorites.length = 0; favorites.push(...(data.favorites || []));
     knownChords.length = 0; knownChords.push(...(data.knownChords || []));
     myCapos = data.myCapos || {};
+    myTransposes = data.myTransposes || {};
+    if (view.name === 'detail' && playerState.songId && myTransposes[playerState.songId] !== undefined && !playerState.transpose) playerState.transpose = Number(myTransposes[playerState.songId]) || 0;
     if (view.name === 'detail' && playerState.songId && myCapos[playerState.songId] !== undefined && playerState.myCapo == null) playerState.myCapo = myCapos[playerState.songId];
     currentUser.isAdmin = !!(data.user && data.user.isAdmin);
     if (data.user && data.user.name) currentUser.name = data.user.name;
@@ -2163,6 +2167,7 @@ async function supaApi(action, fields) {
       favorites: (favRes.data || []).map(f => f.song_id),
       knownChords: (kcRes.data && kcRes.data.chords) || [],
       myCapos: await supaLoadMyCapos_(me.id),
+      myTransposes: await supaLoadMyTransposes_(me.id),
       user: { email: me.email, name: me.name, photo: me.photo || '', isAdmin: !!me.is_admin },
     };
   }
@@ -2444,6 +2449,7 @@ async function supaApi(action, fields) {
       requests: (reqRes.data || []).map(r => supaRequestToOld_(r, emailMap)),
       messages: (msgRes.data || []).map(m => supaMessageToOld_(m, emailMap)),
       myCapos: await supaLoadMyCapos_(target.id),
+      myTransposes: await supaLoadMyTransposes_(target.id),
     };
   }
 
@@ -2592,6 +2598,17 @@ async function supaApi(action, fields) {
     await Promise.all(orderedIds.map((song_id, idx) =>
       getSupa_().from('favorites').update({ position: idx }).eq('user_id', eff.id).eq('song_id', song_id)
     ));
+    return { success: true };
+  }
+  if (action === 'setMyTranspose') {
+    const me = await supaRequireUser_();
+    const eff = await supaEffectiveProfile_(me, fields);
+    const t = Number(fields.transpose);
+    const q = (fields.transpose === null || fields.transpose === undefined || !t)
+      ? getSupa_().from('user_song_transposes').delete().eq('user_id', eff.id).eq('song_id', fields.song_id)
+      : getSupa_().from('user_song_transposes').upsert({ user_id: eff.id, song_id: fields.song_id, transpose: Math.max(-11, Math.min(11, t)), updated_at: new Date().toISOString() });
+    const { error } = await q;
+    throwIfErr_(error);
     return { success: true };
   }
   if (action === 'setMyCapo') {
@@ -2811,6 +2828,15 @@ function supaRequestToOld_(r, emailMap) {
 }
 // A user's saved "My Capo" per song, as { songId: capo }. Returns {} if
 // add_my_capo.sql hasn't been run yet, so nothing else breaks.
+// A user's locked transposes per song, as { songId: semitones }. {} if
+// add_transpose_lock.sql hasn't been run yet.
+async function supaLoadMyTransposes_(userId) {
+  const { data, error } = await getSupa_().from('user_song_transposes').select('song_id,transpose').eq('user_id', userId);
+  if (error) return {};
+  const out = {};
+  (data || []).forEach(r => { out[r.song_id] = r.transpose; });
+  return out;
+}
 async function supaLoadMyCapos_(userId) {
   const { data, error } = await getSupa_().from('user_song_capos').select('song_id,capo').eq('user_id', userId);
   if (error) return {};
@@ -4889,6 +4915,7 @@ function goTo(name, extra) {
   // so the phone's Back button lands in the same spot.
   try { if (history.state && history.state.jgcView) history.replaceState(Object.assign({}, history.state, { ui: snap }), ''); } catch (e) {}
   view = Object.assign({ name }, extra || {});
+  if (name === 'detail' && !(leaving && leaving.name === 'detail' && leaving.id === view.id)) playerState.songId = null;
   if ((name === 'detail' || name === 'edit') && !view.from && leaving && leaving.name) {
     if (leaving.name === 'detail' || leaving.name === 'edit') { if (leaving.from) view.from = leaving.from; }
     else { const { from, ...lv } = leaving; view.from = { view: lv, ui: snap }; }
@@ -4927,6 +4954,7 @@ window.addEventListener('popstate', (e) => {
   if (typeof hideChordPopover === 'function') hideChordPopover();
   if (!e.state || !e.state.jgcView) return; // stepped past the app's own history (or it isn't seeded yet) - let that happen normally, e.g. actually exiting
   view = e.state.jgcView;
+  if (view.name === 'detail') playerState.songId = null;
   applyUiSnapshot_(e.state.ui);
   render();
   window.scrollTo(0,0);
@@ -5074,6 +5102,8 @@ function renderHome() {
 // viewAsFields()/refreshAfterWrite() above) mutate this same data in place.
 function effectiveFavorites() { return viewAsUser ? (viewAsData.favorites || []) : favorites; }
 let myCapos = {}; // { songId: capo } - this user's saved "My Capo" choices
+let myTransposes = {}; // { songId: semitones } - transposes the user LOCKED for a song
+function effectiveMyTransposes() { return viewAsUser ? (viewAsData.myTransposes || (viewAsData.myTransposes = {})) : myTransposes; }
 function effectiveMyCapos() { return viewAsUser ? (viewAsData.myCapos || (viewAsData.myCapos = {})) : myCapos; }
 function effectiveKnownChords() { return viewAsUser ? (viewAsData.knownChords || []) : knownChords; }
 function effectiveRequests() { return viewAsUser ? (viewAsData.requests || []) : contactRequestsCache; }
@@ -5106,7 +5136,7 @@ function viewAsFields() { return viewAsUser ? { target_email: viewAsUser.email, 
 function refreshAfterWrite() {
   if (!viewAsUser) return Promise.resolve();
   return api('getUserSnapshot', { target_email: viewAsUser.email }).then(data => {
-    viewAsData = { favorites: data.favorites || [], knownChords: data.knownChords || [], playlists: data.playlists || [], requests: data.requests || [], messages: data.messages || [], myCapos: data.myCapos || {} };
+    viewAsData = { favorites: data.favorites || [], knownChords: data.knownChords || [], playlists: data.playlists || [], requests: data.requests || [], messages: data.messages || [], myCapos: data.myCapos || {}, myTransposes: data.myTransposes || {} };
   });
 }
 
@@ -5117,7 +5147,7 @@ function refreshAfterWrite() {
 function refreshPlaylistsOnly() {
   if (viewAsUser) {
     return api('getUserSnapshot', { target_email: viewAsUser.email }).then(data => {
-      viewAsData = { favorites: data.favorites || [], knownChords: data.knownChords || [], playlists: data.playlists || [], requests: data.requests || [], messages: data.messages || [], myCapos: data.myCapos || {} };
+      viewAsData = { favorites: data.favorites || [], knownChords: data.knownChords || [], playlists: data.playlists || [], requests: data.requests || [], messages: data.messages || [], myCapos: data.myCapos || {}, myTransposes: data.myTransposes || {} };
     });
   }
   return api('getPlaylists', {}).then(pl => { playlists = pl.playlists || []; });
@@ -5932,6 +5962,9 @@ function renderDetail() {
   const isSameSongAsBefore = playerState.songId === song.id;
   playerState.capo = isSameSongAsBefore ? playerState.capo : song.capo;
   if (!isSameSongAsBefore) { const saved = effectiveMyCapos()[song.id]; playerState.myCapo = (saved === undefined || saved === null) ? null : Number(saved); }
+  // Transpose belongs to this one song: a new song starts at its locked
+  // transpose (if the user locked one) or 0 - never another song's.
+  if (!isSameSongAsBefore) { const lt = effectiveMyTransposes()[song.id]; playerState.transpose = (lt === undefined || lt === null) ? 0 : Number(lt) || 0; }
   if (!isSameSongAsBefore) {
     playerState.fontSize = displayPrefs.fontSize;
     playerState.bold = displayPrefs.bold;
@@ -6041,6 +6074,9 @@ function renderDetail() {
           <button class="stepper-btn" onclick="changeTranspose(-1)">−</button>
           <span style="width:24px;text-align:center;font-size:13px;color:#444;">${playerState.transpose > 0 ? '+' + playerState.transpose : playerState.transpose}</span>
           <button class="stepper-btn" onclick="changeTranspose(1)">+</button>
+          ${currentUser ? `<button class="stepper-btn transpose-lock${transposeLocked_() ? ' on' : ''}" onclick="toggleTransposeLock_()" title="${transposeLocked_() ? 'Locked: this song opens at this transpose. Tap to unlock.' : 'Lock: remember this transpose for this song'}" aria-pressed="${transposeLocked_()}" aria-label="Lock transpose for this song">${transposeLocked_()
+            ? '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>'
+            : '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/></svg>'}</button>` : ''}
         </div>
       </div>
     </div>` : ''}`}
@@ -6173,7 +6209,39 @@ function toggleAdvanced() { playerState.advancedOpen = !playerState.advancedOpen
 function changeFontStep(delta) { playerState.fontSize = Math.max(-4, Math.min(8, (playerState.fontSize||0) + delta)); renderDetail(); }
 function toggleBold() { playerState.bold = !playerState.bold; renderDetail(); }
 function toggleShowChords() { playerState.showChords = !playerState.showChords; renderDetail(); }
-function changeTranspose(delta) { playerState.transpose = (playerState.transpose||0) + delta; renderDetail(); }
+function changeTranspose(delta) {
+  playerState.transpose = Math.max(-11, Math.min(11, (playerState.transpose||0) + delta));
+  // While locked, the saved value follows the change (back to 0 = unlocked).
+  if (transposeLocked_()) saveMyTranspose_(playerState.songId, playerState.transpose || null);
+  renderDetail();
+}
+function transposeLocked_() {
+  const v = effectiveMyTransposes()[playerState.songId];
+  return v !== undefined && v !== null;
+}
+function toggleTransposeLock_() {
+  if (!currentUser) return;
+  if (transposeLocked_()) {
+    saveMyTranspose_(playerState.songId, null);
+    showToast('Unlocked — this song will open at its normal key next time.');
+  } else {
+    if (!playerState.transpose) { showToast('Transpose the song first, then tap the lock to keep it.'); return; }
+    saveMyTranspose_(playerState.songId, playerState.transpose);
+    showToast('Locked — this song will open transposed ' + (playerState.transpose > 0 ? '+' : '') + playerState.transpose + ' next time.');
+  }
+  renderDetail();
+}
+// Saved on the account (follows the user to any device), like My Capo.
+function saveMyTranspose_(songId, t) {
+  if (!songId || !currentUser) return;
+  const map = effectiveMyTransposes();
+  if (t === null || !t) delete map[songId]; else map[songId] = t;
+  if (!viewAsUser) saveMyDataCache();
+  api('setMyTranspose', Object.assign({ song_id: songId, transpose: t || null }, viewAsFields())).catch(err => {
+    console.warn('Could not save transpose lock', err && err.message);
+    if (/user_song_transposes/.test((err && err.message) || '')) showToast('Locking a transpose needs add_transpose_lock.sql to be run first.');
+  });
+}
 function togglePlay() {
   // Only ever the ENTRY into Play Mode (the plain "▶ Play" button, shown
   // when not already playing) - once inside Play Mode, the floating bar's
@@ -9092,7 +9160,7 @@ function changeUsersPage(p) { usersPage = p; renderUsersList(); }
 function enterViewAs(email, name) {
   api('getUserSnapshot', { target_email: email }).then(data => {
     viewAsUser = { email: data.email, name: name || data.email };
-    viewAsData = { favorites: data.favorites || [], knownChords: data.knownChords || [], playlists: data.playlists || [], requests: data.requests || [], messages: data.messages || [], myCapos: data.myCapos || {} };
+    viewAsData = { favorites: data.favorites || [], knownChords: data.knownChords || [], playlists: data.playlists || [], requests: data.requests || [], messages: data.messages || [], myCapos: data.myCapos || {}, myTransposes: data.myTransposes || {} };
     songTab = 'all';
     contactChatOpen = true; // starts open on entering View As (see isOpen in renderContactBody) - but, unlike before, can now be collapsed
     goTo('list');
@@ -9673,7 +9741,7 @@ if (cachedAuth && cachedAuth.idToken) currentUser = cachedAuth;
 // had gone missing.
 if (currentUser) {
   const cachedMyData = loadMyDataCache(currentUser.email);
-  if (cachedMyData) { favorites = cachedMyData.favorites || []; knownChords = cachedMyData.knownChords || []; myCapos = cachedMyData.myCapos || {}; }
+  if (cachedMyData) { favorites = cachedMyData.favorites || []; knownChords = cachedMyData.knownChords || []; myCapos = cachedMyData.myCapos || {}; myTransposes = cachedMyData.myTransposes || {}; }
 }
 // Reopen whatever page was open before the reload (see saveViewCache above)
 // instead of always resetting to Home/Welcome — this is what makes a mobile
