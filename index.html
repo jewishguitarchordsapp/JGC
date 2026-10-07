@@ -5709,9 +5709,15 @@ function saveProfile_() {
 }
 
 // ---- Settings: display defaults + in-app alerts ----------------------------
+// Red badges on the Songs/Contact tabs are always on (new songs, your
+// requests marked Added, new messages to you). The per-user on/off switches
+// in Settings are hidden for now - set ALERT_OPTIONS_IN_SETTINGS to true to
+// bring them back.
+const ALERTS_ENABLED = true;
+const ALERT_OPTIONS_IN_SETTINGS = false;
 const ALERT_PREFS_KEY = 'jgc_alert_prefs';
-let alertPrefs = { newSongs: true, myRequests: true, messages: true, appIcon: true };
-try { Object.assign(alertPrefs, JSON.parse(localStorage.getItem(ALERT_PREFS_KEY) || '{}')); } catch (e) {}
+let alertPrefs = { newSongs: false, myRequests: true, messages: true, appIcon: true }; // new-songs badge off (only requests Added + messages)
+if (ALERT_OPTIONS_IN_SETTINGS) { try { Object.assign(alertPrefs, JSON.parse(localStorage.getItem(ALERT_PREFS_KEY) || '{}')); } catch (e) {} }
 function setAlertPref_(k, on) {
   alertPrefs[k] = !!on;
   try { localStorage.setItem(ALERT_PREFS_KEY, JSON.stringify(alertPrefs)); } catch (e) {}
@@ -5775,14 +5781,14 @@ function renderSettings_() {
         </span>
       </div>
     </div>
-    <div class="card">
+    ${ALERT_OPTIONS_IN_SETTINGS ? '' : '<!--'}<div class="card">
       <h3>Alerts</h3>
       <div class="settings-sub" style="margin:-4px 0 6px;">A red dot or number on the tabs below when there's something new for you.</div>
       <div class="adv-row"><span class="adv-label">New songs added<div class="settings-sub">Number on the Songs tab</div></span><span class="adv-controls">${sw('newSongs')}</span></div>
       <div class="adv-row"><span class="adv-label">My song requests added<div class="settings-sub">On the Contact tab</div></span><span class="adv-controls">${sw('myRequests')}</span></div>
       <div class="adv-row"><span class="adv-label">New messages to me<div class="settings-sub">On the Contact tab</div></span><span class="adv-controls">${sw('messages')}</span></div>
       <div class="adv-row"><span class="adv-label">Number on the app icon<div class="settings-sub">${iconSupported ? 'If the app is on your home screen. Updates whenever you open the app.' : 'Not available on this phone/browser.'}</div></span><span class="adv-controls">${iconSupported ? sw('appIcon') : ''}</span></div>
-    </div>
+    </div>${ALERT_OPTIONS_IN_SETTINGS ? '' : '-->'}
   </div>`;
   renderMenuDrawerSettings_();
 }
@@ -5801,6 +5807,7 @@ if (!badgeSeen.newSongsAt) { badgeSeen.newSongsAt = Date.now(); saveBadgeSeen_()
 let userBadgeData = null; // { requests, messages } for the signed-in (non-admin) user
 let userBadgeFetchedAt = 0;
 function refreshUserBadges_(force) {
+  if (!ALERTS_ENABLED) { try { if ('clearAppBadge' in navigator) navigator.clearAppBadge().catch(() => {}); } catch (e) {} return; }
   if (!currentUser || viewAsUser || isOffline) { updateBadges_(); return; }
   if (!force && Date.now() - userBadgeFetchedAt < 10 * 60 * 1000) { updateBadges_(); return; }
   userBadgeFetchedAt = Date.now();
@@ -5820,7 +5827,7 @@ function refreshUserBadges_(force) {
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshUserBadges_(); });
 function badgeCounts_() {
   const c = { songs: 0, contact: 0 };
-  if (!currentUser || viewAsUser) return c;
+  if (!ALERTS_ENABLED || !currentUser || viewAsUser) return c;
   if (alertPrefs.newSongs) c.songs = visibleSongs_().filter(s => { const t = Date.parse(s.date_added || s.created_at || ''); return t && t > badgeSeen.newSongsAt; }).length;
   if (userBadgeData) {
     if (alertPrefs.myRequests) c.contact += userBadgeData.requests.filter(r => r.status === 'added' && !badgeSeen.requestsAdded.includes(r.id)).length;
@@ -5834,6 +5841,7 @@ function navBadgeHtml_(name) {
   return n ? `<span class="nav-badge">${n > 99 ? '99+' : n}</span>` : '';
 }
 function updateBadges_() {
+  if (!ALERTS_ENABLED) return;
   // Looking at the page clears its badge.
   if (view.name === 'list' && songTab === 'new' && badgeSeen.newSongsAt < Date.now() - 1000) { badgeSeen.newSongsAt = Date.now(); saveBadgeSeen_(); }
   if (view.name === 'contact' && userBadgeData) {
@@ -7575,7 +7583,7 @@ function renderContactBody() {
     const isOpen = contactChatOpen;
     html += `<div class="chat-card" onclick="toggleContactChat()">
         <span class="chat-card-icon">${SVG_ICONS.message}</span>
-        <div class="chat-card-text"><div class="chat-card-title">${!viewAsUser && alertPrefs.messages && myMessages.some(m => m.sender === 'admin' && Date.parse(m.created_at) > badgeSeen.messagesAt) ? '<span class="tab-dot"></span>' : ''}${chatTitle}</div><div class="chat-card-preview">${preview}</div></div>
+        <div class="chat-card-text"><div class="chat-card-title">${ALERTS_ENABLED && !viewAsUser && alertPrefs.messages && myMessages.some(m => m.sender === 'admin' && Date.parse(m.created_at) > badgeSeen.messagesAt) ? '<span class="tab-dot"></span>' : ''}${chatTitle}</div><div class="chat-card-preview">${preview}</div></div>
         <span class="chat-card-arrow">${isOpen ? '▾' : '▸'}</span>
       </div>`;
     if (isOpen) {
