@@ -368,6 +368,19 @@
   .msg.admin .reply-ref-link{color:#fff;}
   .msg{position:relative;transition:transform .15s ease;}
   .msg.swiping{transition:none;}
+  .msg.has-react{margin-bottom:12px;}
+  .msg-reacts{position:absolute;bottom:-13px;right:8px;background:#fff;border:1px solid var(--border);border-radius:12px;padding:0 5px;font-size:13px;line-height:20px;box-shadow:0 1px 2px rgba(0,0,0,.12);cursor:pointer;white-space:nowrap;}
+  .msg.user .msg-reacts{right:auto;left:8px;}
+  .msg-reacts:empty{display:none;}
+  .msg-react-menu{position:fixed;z-index:3000;background:#fff;border:1px solid var(--border);border-radius:14px;box-shadow:0 6px 24px rgba(0,0,0,.18);padding:6px;display:flex;flex-direction:column;gap:4px;}
+  .msg-react-row{display:flex;gap:2px;}
+  .msg-react-row button{border:none;background:none;font-size:24px;line-height:1;padding:6px;border-radius:50%;cursor:pointer;}
+  .msg-react-row button:hover, .msg-react-row button.on{background:#e6f4f2;}
+  .msg-react-acts{display:flex;gap:4px;border-top:1px solid var(--border);padding-top:4px;}
+  .msg-react-acts button{flex:1;border:none;background:none;font-size:13.5px;padding:7px 8px;border-radius:8px;cursor:pointer;color:var(--text);text-align:left;}
+  .msg-react-acts button:hover{background:#f0f3f3;}
+  .msg.pressing{filter:brightness(.93);}
+  @media (hover:none){ .msg{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;} }
   .msg-quote{border-left:3px solid var(--teal);background:rgba(0,0,0,.05);border-radius:6px;padding:4px 8px;margin-bottom:5px;font-size:12.5px;cursor:pointer;}
   .msg.admin .msg-quote{background:rgba(255,255,255,.18);border-left-color:#fff;}
   .msg-quote-who{font-weight:700;font-size:11.5px;color:var(--teal-dark);}
@@ -739,6 +752,8 @@
   :where(html[data-theme="dark"]) .chat-card-title{color:#e4e8e9}
   :where(html[data-theme="dark"]) .msg.user{background:#393d40}
   html[data-theme="dark"] .quote-draft{background:#33393b;}
+  html[data-theme="dark"] .msg-reacts, html[data-theme="dark"] .msg-react-menu{background:#2f3436;}
+  html[data-theme="dark"] .msg-react-acts button:hover, html[data-theme="dark"] .msg-react-row button.on, html[data-theme="dark"] .msg-react-row button:hover{background:#3d4446;}
   html[data-theme="dark"] .msg-quote{background:rgba(255,255,255,.08);}
   html[data-theme="dark"] .msg-quote-who{color:#7fd6c8;}
   html[data-theme="dark"] .msg.admin .msg-quote-who{color:#fff;}
@@ -2726,6 +2741,13 @@ async function supaApi(action, fields) {
     throwIfErr_(error);
     return { success: true };
   }
+  if (action === 'reactMessage') {
+    await supaRequireUser_();
+    const { error } = await getSupa_().rpc('react_to_message', { p_id: fields.id, p_emoji: fields.emoji || '', p_as_user: !!fields.as_user });
+    if (error && /react_to_message/.test(error.message || '')) throw new Error('Reactions need a quick database update first (add_message_reactions.sql).');
+    throwIfErr_(error);
+    return { success: true };
+  }
   if (action === 'markThreadRead') {
     await supaRequireAdmin_();
     const targetEmail = String(fields.user_email || '').toLowerCase();
@@ -2794,6 +2816,7 @@ function supaMessageToOld_(m, emailMap) {
     reply_to_type: m.reply_to_type || null, reply_to_id: m.reply_to_id || null,
     reply_to_label: m.reply_to_label || '', reply_to_song_id: m.reply_to_song_id || null,
     quoted_message_id: m.quoted_message_id || null, quoted_text: m.quoted_text || '', quoted_sender: m.quoted_sender || '',
+    reaction_admin: m.reaction_admin || '', reaction_user: m.reaction_user || '',
   };
 }
 function supaErrorToOld_(e, emailMap) {
@@ -4372,6 +4395,15 @@ function looksLikeChordLine(line) {
 }
 // aligns (optional): per-line 'left'/'right' overrides set in the editor,
 // indexed like the text's lines; saved as data-align on that line's <p>.
+// Chord extensions are shown small and raised, the same way the original
+// charts were made in Word: B7 -> B<sup>7</sup>, Esus4 -> E<sup>sus4</sup>,
+// Am7 -> Am<sup>7</sup>, Cmaj7 -> C<sup>maj7</sup>, Bdim -> B<sup>dim</sup>.
+// Only whole chord-looking tokens on chord lines are touched; the raised
+// part still takes up the same width, so chords stay lined up.
+const CHORD_EXT_RE = /(^|[\s(\-])([A-G](?:#|b)?m?)(maj7|maj9|m7b5|sus2|sus4|sus|dim7|dim|aug|add9|add2|7sus4|13|11|9|7|6|5|2|4)((?:\/[A-G](?:#|b)?)?)(?=$|[\s)\-])/g;
+function supChordExtensions_(escapedLine) {
+  return escapedLine.replace(CHORD_EXT_RE, (m, pre, root, ext, bass) => pre + root + '<sup>' + ext + '</sup>' + bass);
+}
 function buildChordHtmlFromPlainText(text, aligns) {
   const lines = String(text || '').replace(/\r\n?/g, '\n').split('\n');
   const al = i => { const a = aligns && aligns[i]; return (a === 'left' || a === 'right') ? ` data-align="${a}"` : ''; };
@@ -4380,7 +4412,7 @@ function buildChordHtmlFromPlainText(text, aligns) {
     const line = lines[i];
     if (line.trim() === '') { out.push('<p class="black">&nbsp;</p>'); continue; }
     if (looksLikeChordLine(line)) {
-      out.push(`<p class="red"${al(i)}>${escapeHtml(line)}</p>`);
+      out.push(`<p class="red"${al(i)}>${supChordExtensions_(escapeHtml(line))}</p>`);
       if (i + 1 < lines.length) {
         const next = lines[i + 1];
         out.push(`<p class="black"${next.trim() === '' ? '' : al(i + 1)}>${next.trim() === '' ? '&nbsp;' : escapeHtml(next)}</p>`);
@@ -5337,12 +5369,34 @@ async function refreshFavOfflineButton() {
   btn.setAttribute('aria-label', btn.title);
   btn.classList.toggle('active', on);
 }
+// Searching while on New / Favorites / Known: the song may simply not be
+// in that tab - so matching songs from All Songs are listed underneath.
+function otherTabMatchesHtml_(list) {
+  if (!filters.q || !filters.q.trim() || songTab === 'all' || songTab === 'drafts') return '';
+  const saved = songTab;
+  songTab = 'all';
+  let all;
+  try { all = filteredSongs(); } finally { songTab = saved; }
+  const inTab = new Set(list.map(s => s.id));
+  const extra = all.filter(s => !inTab.has(s.id));
+  if (!extra.length) return '';
+  const cap = list.length ? 10 : 30;
+  const queueIds = extra.map(s => s.id);
+  return `<div class="other-tab-matches">
+      <h3 style="margin:18px 0 6px;font-size:15px;">${list.length ? 'More matches' : 'Matches'} in ${escapeHtml(t('songtab_all'))} <span class="muted" style="font-weight:normal;">(${extra.length})</span></h3>
+      ${extra.slice(0, cap).map(s => songRowHtml(s, queueIds)).join('')}
+      ${extra.length > cap ? `<div style="margin-top:8px;"><button class="btn secondary" onclick="songTab='all';songListPage=0;render()">See all ${extra.length} in ${escapeHtml(t('songtab_all'))}</button></div>` : ''}
+    </div>`;
+}
 function renderSongListBody() {
   const body = document.getElementById('songListBody');
   if (!body) return;
   const list = filteredSongs();
   let html;
-  if (list.length === 0) {
+  const tabNames = { new: t('songtab_new'), favorites: t('songtab_favorites'), known: t('songtab_known') };
+  if (list.length === 0 && filters.q && filters.q.trim() && tabNames[songTab]) {
+    html = `<div class="muted" style="padding:14px 4px 4px;">No matches in ${escapeHtml(tabNames[songTab])}.</div>`;
+  } else if (list.length === 0) {
     if (filters.q && !songContentLoaded) {
       html = `<div class="empty">No matches yet — lyric search is still loading the full song text.</div>`;
     } else {
@@ -5361,7 +5415,7 @@ function renderSongListBody() {
     const queueIds = list.map(s => s.id);
     html = pageSlice(list, songListPage).map(s => songRowHtml(s, queueIds)).join('') + pagerHtml(list.length, songListPage, 'changeSongPage');
   }
-  body.innerHTML = html;
+  body.innerHTML = html + otherTabMatchesHtml_(list);
   if (favoritesReorderable() && list.length > 1) {
     makeReorderable(document.getElementById('favoritesSongList'), (newIds) => {
       // Optimistic local reorder — the drag already shows the new order in
@@ -7350,6 +7404,114 @@ function jumpToQuotedMsg_(id) {
   el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   el.classList.remove('msg-flash'); void el.offsetWidth; el.classList.add('msg-flash');
 }
+// ---- Emoji reactions (like WhatsApp) -------------------------------------
+// Long-press a message (or right-click it on a computer) for a menu: a row
+// of emojis, Reply, and Copy. One reaction per side (you / the user);
+// tapping the same emoji again removes it.
+const MSG_REACT_EMOJIS = ['👍', '❤️', '😂', '😮', '🙏', '👏'];
+function msgReactsText_(m) {
+  const a = m.reaction_admin || '', u = m.reaction_user || '';
+  if (a && u && a === u) return a + ' 2';
+  return (u + a);
+}
+function myReactField_(ctx) { return ctx === 'admin' ? 'reaction_admin' : 'reaction_user'; }
+let msgReactMenuOpenedAt = 0;
+function closeMsgReactMenu_() {
+  const old = document.getElementById('msgReactMenu'); if (old) old.remove();
+}
+function openMsgReactMenu_(el) {
+  closeMsgReactMenu_();
+  if (!el) return;
+  const id = el.dataset.msgId, ctx = el.dataset.ctx;
+  const m = _chatMsgIndex[id];
+  if (!m) return;
+  const mine = m[myReactField_(ctx)] || '';
+  const menu = document.createElement('div');
+  menu.id = 'msgReactMenu';
+  menu.className = 'msg-react-menu';
+  menu.innerHTML = `<div class="msg-react-row">${MSG_REACT_EMOJIS.map(e => `<button type="button" class="${e === mine ? 'on' : ''}" data-e="${e}" aria-label="React ${e}">${e}</button>`).join('')}</div>
+    <div class="msg-react-acts"><button type="button" data-act="reply">↩ Reply</button><button type="button" data-act="copy">⧉ Copy</button></div>`;
+  menu.addEventListener('click', ev => {
+    ev.stopPropagation();
+    const b = ev.target.closest('button'); if (!b) return;
+    closeMsgReactMenu_();
+    if (b.dataset.e) setMsgReaction_(ctx, id, b.dataset.e === mine ? '' : b.dataset.e);
+    else if (b.dataset.act === 'reply') startMsgQuote_(ctx, id);
+    else if (b.dataset.act === 'copy') {
+      const done = () => { if (typeof showToast === 'function') showToast('Copied'); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(m.text || '').then(done).catch(() => {});
+    }
+  });
+  document.body.appendChild(menu);
+  msgReactMenuOpenedAt = Date.now();
+  const r = el.getBoundingClientRect(), mw = menu.offsetWidth, mh = menu.offsetHeight;
+  let top = r.top - mh - 8; if (top < 8) top = Math.min(r.bottom + 8, window.innerHeight - mh - 8);
+  let left = el.classList.contains('admin') ? r.right - mw : r.left;
+  left = Math.max(8, Math.min(left, window.innerWidth - mw - 8));
+  menu.style.top = top + 'px'; menu.style.left = left + 'px';
+}
+function setMsgReaction_(ctx, id, emoji) {
+  const m = _chatMsgIndex[id]; if (!m) return;
+  const field = myReactField_(ctx), prev = m[field] || '';
+  const paint = () => {
+    const el = document.querySelector('.msg[data-msg-id="' + id + '"]'); if (!el) return;
+    const t = msgReactsText_(m);
+    const pill = el.querySelector('.msg-reacts'); if (pill) pill.textContent = t;
+    el.classList.toggle('has-react', !!t);
+  };
+  m[field] = emoji; paint();
+  const asUser = ctx === 'user' && !!viewAsUser;
+  api('reactMessage', { id, emoji, as_user: asUser }).catch(err => { m[field] = prev; paint(); alert(err.message); });
+}
+['click', 'scroll', 'resize'].forEach(ev => window.addEventListener(ev, e => {
+  const menu = document.getElementById('msgReactMenu');
+  // The tap that's lifted right after a long-press opens it shouldn't close it.
+  if (menu && Date.now() - msgReactMenuOpenedAt < 700) return;
+  if (menu && !(e.target && e.target.closest && e.target.closest('#msgReactMenu'))) closeMsgReactMenu_();
+}, true));
+(function attachMsgLongPress_() {
+  let t = null, st = null, suppressClick = false;
+  const cancel = () => { clearTimeout(t); t = null; if (st) st.el.classList.remove('pressing'); st = null; };
+  const start = (el, x, y) => {
+    cancel();
+    st = { el, x, y };
+    el.classList.add('pressing');
+    t = setTimeout(() => {
+      const target = st && st.el; cancel();
+      if (!target) return;
+      suppressClick = true; setTimeout(() => { suppressClick = false; }, 600);
+      if (navigator.vibrate) { try { navigator.vibrate(15); } catch (e) {} }
+      openMsgReactMenu_(target);
+    }, 450);
+  };
+  const move = (x, y) => { if (st && (Math.abs(x - st.x) > 8 || Math.abs(y - st.y) > 8)) cancel(); };
+  document.addEventListener('touchstart', e => {
+    const el = e.target.closest && e.target.closest('.msg[data-msg-id]');
+    if (!el || e.touches.length !== 1 || e.target.closest('a,button,.msg-reply,.adv-link,.msg-quote,.reply-ref-link')) { cancel(); return; }
+    start(el, e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: true });
+  document.addEventListener('touchmove', e => { if (st) move(e.touches[0].clientX, e.touches[0].clientY); }, { passive: true });
+  document.addEventListener('touchend', cancel);
+  document.addEventListener('touchcancel', cancel);
+  document.addEventListener('mousedown', e => {
+    if (e.button !== 0 || ('ontouchstart' in window && e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents)) return;
+    const el = e.target.closest && e.target.closest('.msg[data-msg-id]');
+    if (!el || e.target.closest('a,button,.msg-reply,.adv-link,.msg-quote,.reply-ref-link')) return;
+    start(el, e.clientX, e.clientY);
+  });
+  document.addEventListener('mousemove', e => { if (st) move(e.clientX, e.clientY); });
+  document.addEventListener('mouseup', () => { if (t) cancel(); });
+  // Right-click on a computer opens the same menu (and on phones, stops
+  // the browser's own long-press menu from popping up over ours).
+  document.addEventListener('contextmenu', e => {
+    const el = e.target.closest && e.target.closest('.msg[data-msg-id]');
+    if (!el) return;
+    e.preventDefault(); cancel(); openMsgReactMenu_(el);
+  });
+  document.addEventListener('click', e => {
+    if (suppressClick && e.target.closest && e.target.closest('.msg[data-msg-id], #msgReactMenu') && !e.target.closest('#msgReactMenu')) { e.stopPropagation(); e.preventDefault(); }
+  }, true);
+})();
 // Swipe a message to the right (phones) to reply to it.
 (function attachMsgSwipeReply_() {
   let st = null;
@@ -7386,7 +7548,8 @@ function renderChatMessages(list, opts) {
         ? ` · <span class="adv-link" onclick='startEditAdminMessage_(${escapeHtml(JSON.stringify(m.id))},${escapeHtml(JSON.stringify(m.text))})'>Edit</span>`
         : '';
       const replyLink = m.id ? ` · <span class="msg-reply" onclick="startMsgQuote_('${ctx}','${escapeHtml(m.id)}')">↩ Reply</span>` : '';
-      return `<div class="msg ${m.sender}" data-msg-id="${escapeHtml(m.id || '')}" data-ctx="${ctx}">${m.reply_to_type ? replyRefBoxHtml_(m, ctx) : ''}${msgQuoteBoxHtml_(m, ctx)}${escapeHtml(m.text)}<div class="meta">${new Date(m.created_at).toLocaleString()}${editedTag}${replyLink}${editLink}</div></div>`;
+      const reacts = msgReactsText_(m);
+      return `<div class="msg ${m.sender}${reacts ? ' has-react' : ''}" data-msg-id="${escapeHtml(m.id || '')}" data-ctx="${ctx}">${m.reply_to_type ? replyRefBoxHtml_(m, ctx) : ''}${msgQuoteBoxHtml_(m, ctx)}${escapeHtml(m.text)}<div class="meta">${new Date(m.created_at).toLocaleString()}${editedTag}${replyLink}${editLink}</div><span class="msg-reacts" onclick="event.stopPropagation();openMsgReactMenu_(this.closest('.msg'))" title="Reactions">${escapeHtml(reacts)}</span></div>`;
     }).join('') || '<div class="muted">No messages yet — say hi!</div>';
 }
 // Mirrors Code.gs's YOUTUBE_URL_RE — a shape check only (youtu.be/<id>,
