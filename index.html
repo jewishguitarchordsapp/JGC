@@ -443,7 +443,7 @@
   .home-tile-desc{color:var(--muted);font-size:13.5px;margin-top:2px;line-height:1.4;}
   .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
   .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;z-index:100;padding:16px;}
-  .modal-card{background:var(--card);border-radius:12px;padding:20px;max-width:420px;width:100%;box-shadow:0 10px 30px rgba(0,0,0,0.25);}
+  .modal-card{background:var(--card);border-radius:12px;padding:20px;max-width:420px;width:100%;box-shadow:0 10px 30px rgba(0,0,0,0.25);max-height:calc(100vh - 32px);max-height:calc(100dvh - 32px);overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;}
   .modal-card h2{margin-top:0;}
   /* Bottom-center, auto-dismissing confirmation toast (see showToast()).
      Fixed/centered regardless of scroll position; pointer-events:none so it
@@ -3134,7 +3134,7 @@ function saveSongText_(id, updatedAt, cl, lo) {
 // briefly unreachable database) is abandoned after SONG_TEXT_TIMEOUT_MS and
 // tried once more, instead of leaving the song stuck on "Loading chart…"
 // until it's closed and reopened.
-const SONG_TEXT_TIMEOUT_MS = 12000;
+const SONG_TEXT_TIMEOUT_MS = 7000;
 const _songTextInflight = {};
 function withTimeout_(promise, ms) {
   return new Promise((resolve, reject) => {
@@ -3164,12 +3164,13 @@ function loadSongContentFor(id) {
     return Promise.resolve();
   }
   if (_songTextInflight[id]) return _songTextInflight[id];
-  if (isOffline) return Promise.resolve();
+  if (isOffline && !navigator.onLine) return Promise.resolve();
   const askedAt = cachedSong && cachedSong.updated_at;
   const run = (async () => {
     let lastErr = null;
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt < 3; attempt++) {
       try {
+        if (attempt) await new Promise(z => setTimeout(z, 600));
         const data = await withTimeout_(api('songContent', { id }), SONG_TEXT_TIMEOUT_MS);
         // false = edited meanwhile; the re-render below then fetches the new version.
         applySongText_(id, askedAt, data.chords_lyrics, data.lyrics_only);
@@ -3185,6 +3186,24 @@ function loadSongContentFor(id) {
   _songTextInflight[id] = run;
   return run;
 }
+let _chartWatchdog = null;
+function ensureChartWatchdog_() {
+  if (_chartWatchdog) return;
+  _chartWatchdog = setInterval(() => {
+    const song = view.name === 'detail' ? songs.find(s => s.id === view.id) : null;
+    if (!song || song.chords_lyrics !== undefined || song._contentError) { clearInterval(_chartWatchdog); _chartWatchdog = null; return; }
+    if (!_songTextInflight[song.id]) loadSongContentFor(song.id);
+  }, 3000);
+}
+['online', 'focus'].forEach(ev => window.addEventListener(ev, () => {
+  const song = view.name === 'detail' ? songs.find(s => s.id === view.id) : null;
+  if (song && song.chords_lyrics === undefined) { delete song._contentError; loadSongContentFor(song.id); }
+}));
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  const song = view.name === 'detail' ? songs.find(s => s.id === view.id) : null;
+  if (song && song.chords_lyrics === undefined && !_songTextInflight[song.id]) loadSongContentFor(song.id);
+});
 function retrySongText_(id) {
   const sg = songs.find(s => s.id === id);
   if (sg) delete sg._contentError;
@@ -5958,7 +5977,7 @@ function renderDetail() {
   const song = songs.find(s => s.id === view.id);
   if (!song) { document.getElementById('app').innerHTML = '<div class="empty">Song not found.</div>'; return; }
   const contentReady = song.chords_lyrics !== undefined;
-  if (!contentReady && !song._contentError) loadSongContentFor(song.id);
+  if (!contentReady && !song._contentError) { loadSongContentFor(song.id); ensureChartWatchdog_(); }
   const isSameSongAsBefore = playerState.songId === song.id;
   playerState.capo = isSameSongAsBefore ? playerState.capo : song.capo;
   if (!isSameSongAsBefore) { const saved = effectiveMyCapos()[song.id]; playerState.myCapo = (saved === undefined || saved === null) ? null : Number(saved); }
@@ -6325,16 +6344,45 @@ function updatePlayFloatBarPauseBtn() {
 // drop the lock whenever the app goes to the background, so it's taken
 // again when the app comes back while still playing.
 let screenWakeLock = null;
+// Backup for phones where the Wake Lock above isn't available or doesn't
+// hold (older iPhones, and the iPhone home-screen app before iOS 18.4): a
+// tiny, silent, invisible looping video - phones don't dim the screen while
+// a video is playing. It has to be started from a tap (the Play button).
+const KEEP_AWAKE_MP4 = 'data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAMzbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAD6AAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAl10cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAD6AAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAABAAAAAQAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAA+gAAAAAAABAAAAAAHVbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAABAAAABAABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABgG1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAUBzdGJsAAAAuHN0c2QAAAAAAAAAAQAAAKhhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAABAAEABIAAAASAAAAAAAAAABFUxhdmM2MC4zMS4xMDIgbGlieDI2NAAAAAAAAAAAAAAAGP//AAAALmF2Y0MBQsAe/+EAFmdCwB7ZHsBEAAADAAQAAAMACDxYuSABAAVoy4PEyAAAABBwYXNwAAAAAQAAAAEAAAAUYnRydAAAAAAAAAVSAAAFUgAAABhzdHRzAAAAAAAAAAEAAAAEAABAAAAAABRzdHNzAAAAAAAAAAEAAAABAAAAHHN0c2MAAAAAAAAAAQAAAAEAAAAEAAAAAQAAACRzdHN6AAAAAAAAAAAAAAAEAAACiQAAAAsAAAALAAAACgAAABRzdGNvAAAAAAAAAAEAAANjAAAAYnVkdGEAAABabWV0YQAAAAAAAAAhaGRscgAAAAAAAAAAbWRpcmFwcGwAAAAAAAAAAAAAAAAtaWxzdAAAACWpdG9vAAAAHWRhdGEAAAABAAAAAExhdmY2MC4xNi4xMDAAAAAIZnJlZQAAArFtZGF0AAACcgYF//9u3EXpvebZSLeWLNgg2SPu73gyNjQgLSBjb3JlIDE2NCByMzEwOCAzMWUxOWY5IC0gSC4yNjQvTVBFRy00IEFWQyBjb2RlYyAtIENvcHlsZWZ0IDIwMDMtMjAyMyAtIGh0dHA6Ly93d3cudmlkZW9sYW4ub3JnL3gyNjQuaHRtbCAtIG9wdGlvbnM6IGNhYmFjPTAgcmVmPTMgZGVibG9jaz0xOi0zOi0zIGFuYWx5c2U9MHgxOjB4MTExIG1lPWhleCBzdWJtZT03IHBzeT0xIHBzeV9yZD0yLjAwOjAuNzAgbWl4ZWRfcmVmPTEgbWVfcmFuZ2U9MTYgY2hyb21hX21lPTEgdHJlbGxpcz0xIDh4OGRjdD0wIGNxbT0wIGRlYWR6b25lPTIxLDExIGZhc3RfcHNraXA9MSBjaHJvbWFfcXBfb2Zmc2V0PS00IHRocmVhZHM9MSBsb29rYWhlYWRfdGhyZWFkcz0xIHNsaWNlZF90aHJlYWRzPTAgbnI9MCBkZWNpbWF0ZT0xIGludGVybGFjZWQ9MCBibHVyYXlfY29tcGF0PTAgY29uc3RyYWluZWRfaW50cmE9MCBiZnJhbWVzPTAgd2VpZ2h0cD0wIGtleWludD0yNTAga2V5aW50X21pbj0xIHNjZW5lY3V0PTQwIGludHJhX3JlZnJlc2g9MCByY19sb29rYWhlYWQ9NDAgcmM9Y3JmIG1idHJlZT0xIGNyZj0yMy4wIHFjb21wPTAuNjAgcXBtaW49MCBxcG1heD02OSBxcHN0ZXA9NCBpcF9yYXRpbz0xLjQwIGFxPTE6MS4yMACAAAAAD2WIhAXzn///D0UAAVefgAAAAAdBmjgL5zqAAAAAB0GaVAL5zqAAAAAGQZpgF851';
+const KEEP_AWAKE_WEBM = 'data:video/webm;base64,GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQJChYECGFOAZwEAAAAAAAIzEU2bdLpNu4tTq4QVSalmU6yBoU27i1OrhBZUrmtTrIHYTbuMU6uEElTDZ1OsggEeTbuMU6uEHFO7a1OsggId7AEAAAAAAABZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVSalmsirXsYMPQkBNgI1MYXZmNjAuMTYuMTAwV0GNTGF2ZjYwLjE2LjEwMESJiECvQAAAAAAAFlSua8GuAQAAAAAAADjXgQFzxYhni2kitTnjWpyBACK1nIN1bmSIgQCGhVZfVlA4g4EBI+ODhDuaygDgibCBELqBEJqBAhJUw2f8c3OgY8CAZ8iaRaOHRU5DT0RFUkSHjUxhdmY2MC4xNi4xMDBzc9ZjwItjxYhni2kitTnjWmfIoUWjh0VOQ09ERVJEh5RMYXZjNjAuMzEuMTAyIGxpYnZweGfIoUWjiERVUkFUSU9ORIeTMDA6MDA6MDQuMDAwMDAwMDAwAB9DtnX554EAo6OBAACAEAIAnQEqEAAQAABHCIWFiJmEiAICAAwNYAD+/6tQgKOZgQPoALEBAAEQEAAYADA/9AwAAAD+/6tQgKOZgQfQALEBAAEQEAAYADA/9AwAAAD+/6tQgKOZgQu4ALEBAAEQEAAYADA/9AwAAAD+/6tQgBxTu2uRu4+zgQC3iveBAfGCAZ/wgQM=';
+let keepAwakeVideo = null;
+function isIosLike_() { return /iphone|ipad|ipod/i.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1); }
+function startKeepAwakeVideo_() {
+  try {
+    if (!keepAwakeVideo) {
+      const v = document.createElement('video');
+      v.setAttribute('playsinline', ''); v.setAttribute('muted', ''); v.setAttribute('loop', '');
+      v.setAttribute('aria-hidden', 'true'); v.setAttribute('title', '');
+      v.muted = true; v.loop = true; v.playsInline = true;
+      v.style.cssText = 'position:fixed;left:-10px;top:-10px;width:1px;height:1px;opacity:0.01;pointer-events:none;';
+      const s1 = document.createElement('source'); s1.src = KEEP_AWAKE_WEBM; s1.type = 'video/webm';
+      const s2 = document.createElement('source'); s2.src = KEEP_AWAKE_MP4; s2.type = 'video/mp4';
+      v.appendChild(s2); v.appendChild(s1); // MP4 first (iPhones), WebM as a backup
+      document.body.appendChild(v);
+      keepAwakeVideo = v;
+    }
+    const pr = keepAwakeVideo.play(); if (pr && pr.catch) pr.catch(() => {});
+  } catch (e) {}
+}
+function stopKeepAwakeVideo_() { try { if (keepAwakeVideo) keepAwakeVideo.pause(); } catch (e) {} }
 async function acquireWakeLock_() {
+  // iPhones: always run the video too - the Wake Lock alone isn't reliable there.
+  if (isIosLike_() || !('wakeLock' in navigator)) startKeepAwakeVideo_();
   try {
     if (!('wakeLock' in navigator) || screenWakeLock) return;
     screenWakeLock = await navigator.wakeLock.request('screen');
     screenWakeLock.addEventListener('release', () => { screenWakeLock = null; });
-  } catch (e) { screenWakeLock = null; }
+  } catch (e) { screenWakeLock = null; startKeepAwakeVideo_(); }
 }
 function releaseWakeLock_() {
   try { if (screenWakeLock) screenWakeLock.release(); } catch (e) {}
   screenWakeLock = null;
+  stopKeepAwakeVideo_();
 }
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && playerState.playing) acquireWakeLock_();
