@@ -1,0 +1,52 @@
+# Publishes the app's song list as songs.json on GitHub Pages, every night
+# (and whenever you press "Run workflow" on the Actions tab). The app loads
+# the song list from this file for free, then asks Supabase only for songs
+# added or changed since - which keeps the app inside Supabase's free plan.
+#
+# Needs no secrets: it uses the same public ("publishable") key that's
+# already inside index.html, and the export_song_catalog() database function
+# (add_song_catalog_export.sql), which returns titles/artists/categories
+# only - never chords or lyrics.
+name: Export song list
+
+on:
+  schedule:
+    - cron: '17 7 * * *'   # every day at 07:17 UTC (about 3:17 AM New York time)
+  workflow_dispatch:        # adds a "Run workflow" button on the Actions tab
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download song list from Supabase
+        env:
+          SUPABASE_URL: https://elzjljcwpjlixirajcrj.supabase.co
+          SUPABASE_PUBLISHABLE_KEY: sb_publishable_Mt9Z4G2GlVLxDN8JkFiukQ_Kx9kAHYr
+        run: |
+          curl -sSf -X POST "$SUPABASE_URL/rest/v1/rpc/export_song_catalog" \
+            -H "apikey: $SUPABASE_PUBLISHABLE_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{}' -o raw.json
+          count=$(jq 'length' raw.json)
+          echo "Songs exported: $count"
+          # Safety check: never replace a good file with an empty/broken one.
+          if [ "$count" -lt 100 ]; then echo "Too few songs - not updating songs.json"; exit 1; fi
+          jq -c '{songs: .}' raw.json > songs.json
+          rm raw.json
+
+      - name: Save songs.json if anything changed
+        run: |
+          git config user.name "song-list-export"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add songs.json
+          if git diff --cached --quiet; then
+            echo "No song changes since last export."
+          else
+            git commit -m "Update songs.json"
+            git push
+          fi
