@@ -2276,8 +2276,14 @@ async function supaApi(action, fields) {
     // an incomplete roster rather than failing loudly. If the user count
     // ever approaches 20,000, or Max Rows ever gets lowered, this number
     // needs to go up (or come back down) to match.
-    const rosterRes = await supaCached_(() => _supaUsersCache, c => _supaUsersCache = c, () =>
-      supaSelectAll_((from, to) => getSupa_().from('admin_user_roster').select('*').order('id').range(from, to), 20000));
+    // Preferred: admin_user_roster_fast() (fix_admin_timeouts.sql) - one
+    // admin check instead of one per row, so it stays well under the
+    // database's time limit. Falls back to the old view until that's run.
+    const rosterRes = await supaCached_(() => _supaUsersCache, c => _supaUsersCache = c, async () => {
+      const fast = await getSupa_().rpc('admin_user_roster_fast');
+      if (!fast.error && Array.isArray(fast.data)) return { data: fast.data, error: null };
+      return supaSelectAll_((from, to) => getSupa_().from('admin_user_roster').select('*').order('id').range(from, to), 20000);
+    });
     throwIfErr_(rosterRes.error);
     const users = (rosterRes.data || []).map(u => ({
       email: u.email, name: u.name || u.email, photo: u.photo || '', level: u.level || '', language: u.language || '',
@@ -9008,12 +9014,11 @@ function loadAdminStatsOverview() {
   // first admin tab opened this visit) rather than keeping two separate
   // user-activity readings - see renderUsersSummary_() below, now rendered
   // here instead of at the top of the Users tab.
-  const usersPromise = usersLoaded ? Promise.resolve({ users: usersCache }) : api('getUsers', {});
+  const usersPromise = usersLoaded ? Promise.resolve({ users: usersCache }) : api('getUsers', {}).catch(err => { console.warn('Users list failed', err && err.message); return { users: null }; });
   api('getAppModeStats', {}).then(d => { appModeStats = d.stats || null; if (adminTab === 'overview' && statsOverviewCache) renderAdminStatsOverview(); }).catch(() => {});
   Promise.all([visitsPromise, usersPromise]).then(([visitData, usersData]) => {
     statsOverviewCache = visitData;
-    usersCache = usersData.users || usersCache;
-    usersLoaded = true;
+    if (usersData.users) { usersCache = usersData.users; usersLoaded = true; }
     if (adminTab === 'overview') renderAdminStatsOverview();
   }).catch(err => { if (adminTab === 'overview') document.getElementById('adminBody').innerHTML = `<div class="error">${err.message}</div>`; });
 }
