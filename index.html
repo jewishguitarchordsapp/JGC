@@ -1961,6 +1961,30 @@ async function supaSelectAllByIdChunks_(buildQuery, ids, chunkSize) {
 // playlist_shares, and has owner_id (a profile id) instead of owner_email/
 // owner_name directly - this reassembles the old shape so nothing else in
 // this file has to change.
+// Other people's public playlists, without their songs: title, owner (unless
+// anonymous) and a song count from playlist_song_counts()
+// (add_playlist_counts.sql - without it the count is just left off).
+async function supaLightPlaylists_(rows, meP) {
+  if (!rows.length) return [];
+  const showOwner = r => !r.anonymous || (meP && (r.owner_id === meP.id || meP.is_admin));
+  const ownerIds = Array.from(new Set(rows.filter(showOwner).map(r => r.owner_id)));
+  const [ownersRes, countsRes] = await Promise.all([
+    ownerIds.length ? supaSelectAllByIdChunks_((chunk, from, to) => getSupa_().from('profiles').select('id,email,name').in('id', chunk).order('id').range(from, to), ownerIds) : Promise.resolve({ data: [] }),
+    getSupa_().rpc('playlist_song_counts', { p_ids: rows.map(r => r.id) }),
+  ]);
+  const ownerById = {};
+  ((ownersRes && ownersRes.data) || []).forEach(o => { ownerById[o.id] = o; });
+  const counts = (!countsRes.error && countsRes.data && typeof countsRes.data === 'object') ? countsRes.data : null;
+  return rows.map(p => {
+    const owner = showOwner(p) ? (ownerById[p.owner_id] || {}) : {};
+    return {
+      anonymous: !!p.anonymous, _lazy: true,
+      id: p.id, owner_email: owner.email || '', owner_name: showOwner(p) ? (owner.name || owner.email || '') : 'Anonymous',
+      title: p.title, song_ids: null, song_count: counts ? (counts[p.id] || 0) : null, visibility: p.visibility,
+      shared_with: [], updated_at: p.updated_at, icon: p.icon || '',
+    };
+  });
+}
 async function supaHydratePlaylists_(rows) {
   if (!rows.length) return [];
   const ids = rows.map(r => r.id);
@@ -2147,12 +2171,56 @@ async function supaApi(action, fields) {
     // already restricts which rows come back (public, or yours, or shared
     // with you, or all of them if you're an admin), including for a signed-
     // out caller (who then only ever sees the public ones).
+    // Data saving: this ran on every app open and used to download EVERY
+    // visible playlist with all of its songs - for public playlists that's
+    // thousands of song links (~250 KB) per open, the biggest single use of
+    // the monthly data allowance. Now only YOUR playlists and ones shared
+    // with you come in full; other people's public playlists come as a
+    // light list (title, owner, song count) and their songs are loaded only
+    // when someone actually opens one (getPlaylistSongs).
     const playlists = await supaCached_(() => _supaPlaylistsCache, c => _supaPlaylistsCache = c, async () => {
-      const { data, error } = await getSupa_().from('playlists').select('*');
-      throwIfErr_(error);
-      return await supaHydratePlaylists_(data);
+      let meP = null;
+      try { meP = await supaCurrentProfile_(); } catch (e) {}
+      if (!meP) {
+        const { data, error } = await getSupa_().from('playlists').select('*').eq('visibility', 'public');
+        throwIfErr_(error);
+        return await supaLightPlaylists_(data || [], meP);
+      }
+      const [ownRes, pubRes, shRes] = await Promise.all([
+        getSupa_().from('playlists').select('*').eq('owner_id', meP.id),
+        getSupa_().from('playlists').select('*').eq('visibility', 'public').neq('owner_id', meP.id),
+        getSupa_().from('playlist_shares').select('playlist_id').eq('email', String(meP.email || '').toLowerCase()),
+      ]);
+      throwIfErr_(ownRes.error); throwIfErr_(pubRes.error); throwIfErr_(shRes.error);
+      const own = ownRes.data || [];
+      const sharedIds = new Set((shRes.data || []).map(r => r.playlist_id));
+      const pubAll = pubRes.data || [];
+      const pubShared = pubAll.filter(r => sharedIds.has(r.id));
+      const pubLight = pubAll.filter(r => !sharedIds.has(r.id));
+      const have = new Set(own.concat(pubAll).map(r => r.id));
+      const missingShared = Array.from(sharedIds).filter(id => !have.has(id));
+      let sharedRows = [];
+      if (missingShared.length) {
+        const r = await supaSelectAllByIdChunks_((chunk, from, to) => getSupa_().from('playlists').select('*').in('id', chunk).order('id').range(from, to), missingShared);
+        throwIfErr_(r.error);
+        sharedRows = r.data || [];
+      }
+      const [full, light] = await Promise.all([
+        supaHydratePlaylists_(own.concat(sharedRows, pubShared)),
+        supaLightPlaylists_(pubLight, meP),
+      ]);
+      return full.concat(light);
     });
     return { success: true, playlists };
+  }
+  if (action === 'getPlaylistSongs') {
+    const { data, error } = await supaSelectAll_((from, to) => getSupa_().from('playlist_songs').select('song_id,position')
+      .eq('playlist_id', fields.id).order('position').order('song_id').range(from, to));
+    throwIfErr_(error);
+    // Shares too (only visible to the owner/admins anyway), so an admin
+    // editing this playlist's settings never saves over them.
+    const sh = await getSupa_().from('playlist_shares').select('email,can_edit').eq('playlist_id', fields.id);
+    return { success: true, song_ids: (data || []).map(r => r.song_id), shared_with: sh.error ? null : (sh.data || []).map(r => ({ email: r.email, canEdit: !!r.can_edit })) };
   }
 
   if (action === 'getMyData') {
@@ -7291,7 +7359,7 @@ function renderPlaylistCards(list, size) {
   return `<div class="playlist-grid size-${size || 'lg'}">` + list.map(p => `<div class="playlist-card" onclick="goTo('playlistDetail',{id:'${p.id}'})">
     ${playlistIconHtml(p.icon, badgeSize)}
     <div class="title">${escapeHtml(p.title)}</div>
-    <div class="muted">${(p.song_ids||[]).length} songs · ${p.visibility === 'public' ? 'Public' : p.visibility === 'shared' ? 'Shared' : 'Private'} · by ${escapeHtml(playlistByLabel_(p))}</div>
+    <div class="muted">${p.song_ids ? p.song_ids.length + ' songs · ' : (typeof p.song_count === 'number' ? p.song_count + ' songs · ' : '')}${p.visibility === 'public' ? 'Public' : p.visibility === 'shared' ? 'Shared' : 'Private'} · by ${escapeHtml(playlistByLabel_(p))}</div>
   </div>`).join('') + `</div>`;
 }
 async function createPlaylistPrompt() {
@@ -7301,9 +7369,38 @@ async function createPlaylistPrompt() {
     .then(r => { applyPlaylistPatch_(r.playlist); goTo('playlists'); })
     .catch(err => alert(err.message));
 }
+// Songs of a public playlist that came as a light list (see getPlaylists):
+// fetched the first time it's opened, then remembered for 30 minutes so a
+// background refresh doesn't make it download again.
+const _playlistSongsCache = {};
+function ensurePlaylistSongs_(p) {
+  if (!p || p.song_ids) return Promise.resolve(p);
+  const hit = _playlistSongsCache[p.id];
+  if (hit && Date.now() - hit.at < 30 * 60 * 1000) { p.song_ids = hit.ids.slice(); if (hit.shares) p.shared_with = hit.shares; delete p._lazy; return Promise.resolve(p); }
+  if (p._loading) return p._loading;
+  p._loading = api('getPlaylistSongs', { id: p.id }).then(d => {
+    p.song_ids = d.song_ids || [];
+    p.song_count = p.song_ids.length;
+    if (Array.isArray(d.shared_with)) p.shared_with = d.shared_with;
+    delete p._lazy;
+    _playlistSongsCache[p.id] = { ids: p.song_ids.slice(), shares: Array.isArray(d.shared_with) ? d.shared_with : null, at: Date.now() };
+    return p;
+  }).finally(() => { delete p._loading; });
+  return p._loading;
+}
 function renderPlaylistDetail() {
   const p = playlists.find(pl => pl.id === view.id) || (viewAsUser && (viewAsData.playlists||[]).find(pl => pl.id === view.id));
   if (!p) { document.getElementById('app').innerHTML = '<div class="empty">Playlist not found.</div>'; return; }
+  if (!p.song_ids) {
+    const hit = _playlistSongsCache[p.id];
+    if (hit && Date.now() - hit.at < 30 * 60 * 1000) { p.song_ids = hit.ids.slice(); if (hit.shares) p.shared_with = hit.shares; delete p._lazy; }
+    else {
+      document.getElementById('app').innerHTML = `<h2 dir="auto">${escapeHtml(p.title || '')}</h2><div class="muted" style="padding:16px 4px;">Loading songs…</div>`;
+      ensurePlaylistSongs_(p).then(() => { if (view.name === 'playlistDetail' && view.id === p.id) renderPlaylistDetail(); })
+        .catch(err => { if (view.name === 'playlistDetail' && view.id === p.id) document.getElementById('app').innerHTML = `<div class="error">Couldn’t load this playlist: ${escapeHtml(err.message)}</div>`; });
+      return;
+    }
+  }
   // The "owning" identity is the impersonated user during View As, or the
   // signed-in account otherwise — an admin can always edit/delete either way.
   const actingEmail = viewAsUser ? viewAsUser.email : (currentUser && currentUser.email);
