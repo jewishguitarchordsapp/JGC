@@ -222,6 +222,16 @@
   html[data-theme="dark"] .req-checks{background:#33393b;}
   .transpose-lock{margin-left:6px;display:inline-flex;align-items:center;justify-content:center;}
   .transpose-lock.on{background:var(--teal);color:#fff;border-color:var(--teal);}
+  .contact-choices{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 0 18px;}
+  @media (max-width:560px){ .contact-choices{grid-template-columns:1fr;} }
+  .contact-choice{display:flex;gap:12px;align-items:flex-start;border:1px solid var(--border);border-radius:12px;padding:12px 14px;cursor:pointer;background:var(--card);}
+  .contact-choice.primary{border:2px solid var(--teal);background:#eaf6f4;}
+  .contact-choice-icon{font-size:26px;line-height:1;}
+  .contact-choice-title{font-weight:700;font-size:15px;margin-bottom:2px;}
+  .contact-choice-desc{font-size:12.5px;color:var(--muted);line-height:1.4;}
+  html[data-theme="dark"] .contact-choice.primary{background:#1f3b38;}
+  .request-cta{display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap;margin:16px 0 6px;padding:12px;border:1px dashed var(--border);border-radius:10px;font-size:14px;color:var(--muted);}
+  .request-cta.strong{border:2px dashed var(--teal);color:var(--text);font-weight:600;}
   .fr-panel{border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin:4px 0 8px;background:#f7fafa;}
   .fr-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px;}
   .fr-row input[type=text]{flex:1;min-width:140px;padding:6px 8px;}
@@ -368,6 +378,7 @@
   .chat-card-arrow{color:var(--muted);font-size:18px;flex:0 0 auto;}
   .chat-thread{display:flex;flex-direction:column;gap:8px;max-height:340px;overflow-y:auto;padding:6px;margin-bottom:10px;}
   .msg{max-width:75%;padding:8px 12px;border-radius:12px;font-size:14px;}
+  .msg-text{white-space:pre-wrap;overflow-wrap:anywhere;}
   .msg.user{align-self:flex-start;background:#eef2f2;}
   .msg.admin{align-self:flex-end;background:var(--teal);color:#fff;}
   .msg .meta{font-size:11px;opacity:0.7;margin-top:3px;}
@@ -1090,6 +1101,7 @@ const I18N = {
     home_desc_categories: 'Explore songs by language and other content tags.',
     home_desc_playlists: 'Create, share, and view your favorite playlists.',
     home_desc_contact: 'Request songs, report issues, or reach out to your teacher.',
+    home_request_title: 'Request a Song', home_request_desc: 'Can’t find a song? Ask for it to be added.',
     home_desc_known: 'Set your known chords and jump to your favorite songs.',
     home_share_title: 'Share App',
     home_share_desc: 'Share this app with others and spread the love to fellow guitar players.',
@@ -1137,6 +1149,7 @@ const I18N = {
     home_desc_categories: 'עיינו בשירים לפי שפה ותגיות תוכן נוספות.',
     home_desc_playlists: 'צרו, שתפו וצפו בפלייליסטים המועדפים עליכם.',
     home_desc_contact: 'בקשו שירים, דווחו על תקלות, או פנו למורה שלכם.',
+    home_request_title: 'בקשת שיר', home_request_desc: 'לא מצאתם שיר? בקשו שיוסיפו אותו.',
     home_desc_known: 'הגדירו את האקורדים שאתם כבר יודעים וקפצו לשירים המועדפים עליכם.',
     home_share_title: 'שיתוף האפליקציה',
     home_share_desc: 'שתפו את האפליקציה עם אחרים והפיצו את האהבה לחברים נגני גיטרה.',
@@ -1561,7 +1574,38 @@ async function initGoogleSignIn() {
   google.accounts.id.initialize({ client_id: CONFIG.CLIENT_ID, callback: handleCredentialResponse, auto_select: true, use_fedcm_for_prompt: true, nonce: hashed });
   renderUserArea();
   if (!currentUser) mountGateSignInButton();
+  // Stay signed in: if this device still has a valid app session for this
+  // person, there's no need to ask Google again - that's what showed the
+  // "Signing you in…" pop-up on every open. Google is only asked when
+  // there's no session (first sign-in, signed out, or a very long break).
+  if (await hasAppSession_()) return;
   google.accounts.id.prompt(); // silent attempt; no-op if not eligible
+}
+// True when supabase-js still holds a session (it renews itself) for the
+// signed-in person. Also restores who's signed in if only the session is left.
+let appSessionOk = false;
+let signedOutForInactivity = false; // set at startup after a 60+ day break - don't quietly restore the old session
+async function hasAppSession_() {
+  if (!CONFIG.USE_SUPABASE || signedOutForInactivity) return false;
+  try {
+    await ensureSupabaseLib_();
+    const { data } = await getSupa_().auth.getSession();
+    const u = data && data.session && data.session.user;
+    if (!u || !u.email) { appSessionOk = false; return false; }
+    const email = String(u.email).toLowerCase();
+    if (currentUser && currentUser.email !== email) { appSessionOk = false; return false; }
+    if (!currentUser) {
+      const md = u.user_metadata || {};
+      currentUser = { idToken: '', email, name: md.full_name || md.name || email, picture: md.avatar_url || md.picture || '', googlePicture: md.avatar_url || md.picture || '', isAdmin: false };
+      saveAuthCache(currentUser);
+      renderUserArea();
+      if (!myDataReady) loadMyData();
+      startAfterSignIn();
+      render();
+    }
+    appSessionOk = true;
+    return true;
+  } catch (e) { appSessionOk = false; return false; }
 }
 
 function signOut() {
@@ -5251,6 +5295,7 @@ const HOME_TILES = [
   { name: 'categories', icon: 'categories', titleKey: 'nav_categories', descKey: 'home_desc_categories' },
   { name: 'playlists', icon: 'playlists', titleKey: 'nav_playlists', descKey: 'home_desc_playlists' },
   { name: 'contact', icon: 'contact', titleKey: 'nav_contact', descKey: 'home_desc_contact' },
+  { name: 'requestSong', emoji: '🎵', titleKey: 'home_request_title', descKey: 'home_request_desc', onclick: "startSongRequest_('')" },
   { name: 'knownChords', icon: 'knownChords', titleKey: 'header_known', descKey: 'home_desc_known' },
 ];
 function tileIconHtml(t) {
@@ -5264,7 +5309,7 @@ function renderHome() {
   // (named `tile`, not `t` — `t` is the global translate function, and
   // shadowing it inside this callback would break every t(...) call below)
   let html = tiles.map(tile => `
-    <div class="home-tile" onclick="goTo('${tile.name}')">
+    <div class="home-tile" onclick="${tile.onclick || `goTo('${tile.name}')`}">
       <div class="home-tile-icon">${tileIconHtml(tile)}</div>
       <div><div class="home-tile-title">${t(tile.titleKey)}</div><div class="home-tile-desc">${t(tile.descKey)}</div></div>
     </div>`).join('');
@@ -5648,6 +5693,15 @@ function otherTabMatchesHtml_(list) {
       ${extra.length > cap ? `<div style="margin-top:8px;"><button class="btn secondary" onclick="songTab='all';songListPage=0;render()">See all ${extra.length} in ${escapeHtml(t('songtab_all'))}</button></div>` : ''}
     </div>`;
 }
+// Under a search: offer to request the song (prefilled with what was typed).
+function requestFromSearchHtml_(list) {
+  const q = (filters.q || '').trim();
+  if (!q || q.length < 3 || !currentUser || effectiveIsAdmin()) return '';
+  return `<div class="request-cta${list.length ? '' : ' strong'}">
+      <span>${list.length ? 'Not the song you were looking for?' : 'Can’t find this song?'}</span>
+      <button class="btn${list.length ? ' secondary' : ''}" data-q="${escapeHtml(q)}" onclick="startSongRequest_(this.dataset.q)">🎵 Request it</button>
+    </div>`;
+}
 function renderSongListBody() {
   const body = document.getElementById('songListBody');
   if (!body) return;
@@ -5675,7 +5729,7 @@ function renderSongListBody() {
     const queueIds = list.map(s => s.id);
     html = pageSlice(list, songListPage).map(s => songRowHtml(s, queueIds)).join('') + pagerHtml(list.length, songListPage, 'changeSongPage');
   }
-  body.innerHTML = html + otherTabMatchesHtml_(list);
+  body.innerHTML = html + otherTabMatchesHtml_(list) + requestFromSearchHtml_(list);
   if (favoritesReorderable() && list.length > 1) {
     makeReorderable(document.getElementById('favoritesSongList'), (newIds) => {
       // Optimistic local reorder — the drag already shows the new order in
@@ -7852,6 +7906,7 @@ function renderContact() {
     contactRequestsCache = reqData.requests || []; contactMessagesCache = msgData ? (msgData.messages || []) : [];
     userBadgeData = { requests: contactRequestsCache, messages: contactMessagesCache };
     renderContactBody();
+    if (pendingRequestOpen && view.name === 'contact') { const pr = pendingRequestOpen; pendingRequestOpen = null; openRequestSongModal(pr.title); }
     updateBadges_();
   }).catch(err => { document.getElementById('app').innerHTML = `<div class="error">${err.message}</div>`; });
 }
@@ -7869,7 +7924,19 @@ function renderContactBody() {
   // and to an admin's View As preview, but not on the admin's own Contact
   // tab (effectiveIsAdmin() is false while viewAsUser is set, so this still
   // shows there too - see its definition above).
-  let html = !effectiveIsAdmin() ? `<div class="card" style="font-size:14px;line-height:1.5;">This app is built and kept running by a volunteer, in whatever spare time is available — so song requests, fixes, and new features may take a little while to show up. Thank you for your patience! If something isn't working right, or you just want to say hi, please reach out below — your notes and requests are genuinely appreciated. Messages written with warmth and politeness are always easier (and nicer) to respond to.</div>` : '';
+  const volunteerNoteHtml = !effectiveIsAdmin() ? `<div class="card" style="font-size:14px;line-height:1.5;">This app is built and kept running by a volunteer, in whatever spare time is available — so song requests, fixes, and new features may take a little while to show up. Thank you for your patience! If something isn't working right, or you just want to say hi, please reach out below — your notes and requests are genuinely appreciated. Messages written with warmth and politeness are always easier (and nicer) to respond to.</div>` : '';
+  let html = '';
+  if (!effectiveIsAdmin()) html += `<div class="contact-choices">
+      <div class="contact-choice primary" role="button" tabindex="0" onclick="openRequestSongModal()">
+        <div class="contact-choice-icon">🎵</div>
+        <div><div class="contact-choice-title">Request a Song</div><div class="contact-choice-desc">Looking for a song that isn't in the app? Request it here — you can follow its status below.</div></div>
+      </div>
+      <div class="contact-choice" role="button" tabindex="0" onclick="contactChatOpen=true;renderContactBody();setTimeout(()=>{const c=document.getElementById('chatInput'); if(c){c.scrollIntoView({behavior:'smooth',block:'center'}); c.focus();}},50)">
+        <div class="contact-choice-icon">💬</div>
+        <div><div class="contact-choice-title">Send a Message</div><div class="contact-choice-desc">For everything else: questions, ideas, or something not working. Found a mistake in a song? Use <b>⚠ Report</b> on that song's page.</div></div>
+      </div>
+    </div>`;
+  html += volunteerNoteHtml;
   html += `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h2 style="margin:0">${requestsHeading}</h2><button class="btn${requestQuota_().left ? '' : ' secondary'}" onclick="openRequestSongModal()">+ Request a Song</button></div>
       ${requestQuotaHtml_()}`;
   html += `<div class="table-wrap"><table><tr><th>Status</th><th>Song</th><th>Artist</th></tr>
@@ -7899,7 +7966,7 @@ function renderContactBody() {
     if (isOpen) {
       html += `<div class="chat-thread" id="chatThread">${renderChatMessages(myMessages)}</div>
         <div id="quoteDraft-user">${quoteDraftHtml_('user')}</div>
-        <div style="display:flex;gap:8px;align-items:flex-end;"><textarea id="chatInput" placeholder="Type a message…" style="flex:1;min-height:64px;max-height:200px;font-family:inherit;font-size:14px;resize:vertical;" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage();}"></textarea><button class="btn" onclick="sendChatMessage()">Send</button></div>`;
+        <div style="display:flex;gap:8px;align-items:flex-end;"><textarea id="chatInput" placeholder="Questions, ideas, problems… (for a new song, please use Request a Song above)" style="flex:1;min-height:64px;max-height:200px;font-family:inherit;font-size:14px;resize:vertical;"></textarea><button class="btn" onclick="sendChatMessage()">Send</button></div>`;
     }
   }
   document.getElementById('app').innerHTML = html;
@@ -8158,7 +8225,7 @@ function renderChatMessages(list, opts) {
         : '';
       const replyLink = m.id ? ` · <span class="msg-reply" onclick="startMsgQuote_('${ctx}','${escapeHtml(m.id)}')">↩ Reply</span>` : '';
       const reacts = msgReactsText_(m);
-      return `<div class="msg ${m.sender}${reacts ? ' has-react' : ''}" data-msg-id="${escapeHtml(m.id || '')}" data-ctx="${ctx}">${m.reply_to_type ? replyRefBoxHtml_(m, ctx) : ''}${msgQuoteBoxHtml_(m, ctx)}${escapeHtml(m.text)}<div class="meta">${new Date(m.created_at).toLocaleString()}${editedTag}${replyLink}${editLink}</div><span class="msg-reacts" onclick="event.stopPropagation();openMsgReactMenu_(this.closest('.msg'))" title="Reactions">${escapeHtml(reacts)}</span></div>`;
+      return `<div class="msg ${m.sender}${reacts ? ' has-react' : ''}" data-msg-id="${escapeHtml(m.id || '')}" data-ctx="${ctx}">${m.reply_to_type ? replyRefBoxHtml_(m, ctx) : ''}${msgQuoteBoxHtml_(m, ctx)}<span class="msg-text">${escapeHtml(m.text)}</span><div class="meta">${new Date(m.created_at).toLocaleString()}${editedTag}${replyLink}${editLink}</div><span class="msg-reacts" onclick="event.stopPropagation();openMsgReactMenu_(this.closest('.msg'))" title="Reactions">${escapeHtml(reacts)}</span></div>`;
     }).join('') || '<div class="muted">No messages yet — say hi!</div>';
 }
 // Mirrors Code.gs's YOUTUBE_URL_RE — a shape check only (youtu.be/<id>,
@@ -8189,7 +8256,16 @@ function requestQuotaHtml_() {
   if (q.left) return `<p class="muted">Up to 2 requests per week — you have <b>${q.left}</b> left this week.</p>`;
   return `<p class="muted">Up to 2 requests per week. You've used both — your next request is available <b>${escapeHtml(requestNextLabel_(q.nextAt))}</b>.</p>`;
 }
-function openRequestSongModal() {
+// From anywhere (Home tile, "can't find it?" under a search): go to Contact
+// and open Request a Song there once the user's own requests have loaded
+// (so the "requests left this week" count is right), optionally prefilled.
+let pendingRequestOpen = null; // { title } or null
+function startSongRequest_(title) {
+  pendingRequestOpen = { title: String(title || '').trim() };
+  if (view.name === 'contact' && !viewAsUser) { const pr = pendingRequestOpen; pendingRequestOpen = null; openRequestSongModal(pr.title); return; }
+  goTo('contact');
+}
+function openRequestSongModal(prefillTitle) {
   const quota = requestQuota_();
   if (!quota.left) {
     openModal(`<h2 style="margin-top:0">Request a Song</h2>
@@ -8218,6 +8294,7 @@ function openRequestSongModal() {
     <div class="modal-actions"><span id="reqStatus" class="status"></span><button class="btn secondary" onclick="closeModal()">Cancel</button><button class="btn" id="reqSubmitBtn" onclick="submitRequest()" disabled>Request Song</button></div>
     <div id="reqChecksHint" class="muted" style="font-size:12px;text-align:right;margin-top:4px;">Please tick all four boxes to send your request.</div>
   `);
+  if (prefillTitle) { const el = document.getElementById('req_title'); if (el) el.value = prefillTitle; }
 }
 // Required checkboxes in the Request a Song form.
 const REQUEST_CHECKS = [
@@ -8250,9 +8327,22 @@ function submitRequest() {
   statusEl.textContent = 'Sending…';
   api('createRequest', Object.assign({ song_title, artist, youtube_url, categories, lyrics, note }, viewAsFields())).then(() => refreshAfterWrite()).then(() => { closeModal(); renderContact(); }).catch(err => { statusEl.textContent = 'Error: '+err.message; statusEl.className='error'; });
 }
+// Looks like "please add <song>" / "can you put up the chords for..." etc.
+const SONG_REQUEST_HINT_RE = /\b(please\s+add|can\s+you\s+(please\s+)?(add|upload|put\s+up|do|make)|could\s+you\s+(please\s+)?(add|upload|put\s+up|do|make)|request(ing)?\b.*\bsong|song\s+request|add\s+(the\s+)?(song|chords)|chords\s+(for|to)\b|would\s+love\s+(if\s+you\s+(could\s+)?add|the\s+chords))/i;
+let skipRequestNudgeOnce = false;
 function sendChatMessage() {
   const input = document.getElementById('chatInput');
   const text = input.value.trim(); if (!text) return;
+  if (!viewAsUser && !skipRequestNudgeOnce && SONG_REQUEST_HINT_RE.test(text)) {
+    openModal(`<h2 style="margin-top:0">Is this a song request?</h2>
+      <p>Song requests go through <b>Request a Song</b>, so they're kept in one list and you can see when your song is added.</p>
+      <div class="modal-actions">
+        <button class="btn secondary" onclick="closeModal();skipRequestNudgeOnce=true;sendChatMessage();">Send as a message anyway</button>
+        <button class="btn" onclick="closeModal();openRequestSongModal();">Request a Song</button>
+      </div>`);
+    return;
+  }
+  skipRequestNudgeOnce = false;
   input.value = '';
   const quote = msgQuote.user; msgQuote.user = null;
   api('sendMessage', Object.assign({ text, quote }, viewAsFields())).then(() => refreshAfterWrite()).then(() => renderContact()).catch(err => alert(err.message));
@@ -8814,7 +8904,7 @@ function threadModalHtml() {
     ${editingMessageId ? `<div class="muted" style="font-size:12px;margin-bottom:6px;">Editing your message below — <span class="adv-link" onclick="cancelEditAdminMessage_()">Cancel</span></div>` : ''}
     ${!editingMessageId && chatTarget.replyTo ? `<div class="reply-ref-draft"><span class="muted" style="font-size:12px;">Replying about:</span>${replyRefBoxHtml_({ reply_to_type: chatTarget.replyTo.type, reply_to_id: chatTarget.replyTo.id, reply_to_label: chatTarget.replyTo.label, reply_to_song_id: chatTarget.replyTo.song_id }, 'admin')}<span class="adv-link" style="font-size:12px;" onclick="clearReplyTo_()">Remove</span></div>` : ''}
     <div id="quoteDraft-admin">${editingMessageId ? '' : quoteDraftHtml_('admin')}</div>
-    <div style="display:flex;gap:8px;margin-bottom:14px;align-items:flex-end;"><textarea id="adminChatInput" placeholder="Reply…" style="flex:1;min-height:64px;max-height:200px;font-family:inherit;font-size:14px;resize:vertical;" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAdminReply();}">${escapeHtml(prefillVal)}</textarea><button class="btn" onclick="sendAdminReply()">${editingMessageId ? 'Save' : 'Send'}</button></div>
+    <div style="display:flex;gap:8px;margin-bottom:14px;align-items:flex-end;"><textarea id="adminChatInput" placeholder="Reply…" style="flex:1;min-height:64px;max-height:200px;font-family:inherit;font-size:14px;resize:vertical;">${escapeHtml(prefillVal)}</textarea><button class="btn" onclick="sendAdminReply()">${editingMessageId ? 'Save' : 'Send'}</button></div>
     <div class="modal-actions"><button class="btn secondary" onclick='setThreadArchived(${escapeHtml(JSON.stringify(chatTarget.email))},${active && active.archived ? 'false' : 'true'})'>${active && active.archived ? 'Unarchive' : 'Archive'} conversation</button><button class="btn secondary" onclick="closeModal()">Close</button></div>`;
 }
 // prefill (optional) - opening text for the reply box, e.g. "Re: Song
@@ -10008,7 +10098,14 @@ document.getElementById('shareBtn').onclick = shareApp;
 // a fresh token (via handleCredentialResponse, which re-saves the cache)
 // well before that ever surfaces to the user.
 const cachedAuth = loadAuthCache();
-if (cachedAuth && cachedAuth.idToken) currentUser = cachedAuth;
+if (cachedAuth && cachedAuth.email) currentUser = cachedAuth;
+// Signed out automatically after a very long break (60 days without opening
+// the app on this device) - otherwise you stay signed in.
+const SIGN_OUT_AFTER_DAYS = 60;
+try {
+  const lastActive = parseInt(localStorage.getItem('jgc_last_active_at'), 10) || 0;
+  if (currentUser && lastActive && Date.now() - lastActive > SIGN_OUT_AFTER_DAYS * 24 * 60 * 60 * 1000) { signedOutForInactivity = true; signOut(); }
+} catch (e) {}
 // Paint the last-known favorites/knownChords immediately too (see
 // saveMyDataCache above) instead of starting from a blank array on every
 // reload — without this, the Favorites/Known Chords pages always looked
@@ -10078,8 +10175,8 @@ window.addEventListener('load', initGoogleSignIn);
 // initGoogleSignIn above — so calling it more often than strictly needed
 // is harmless).
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && currentUser && window.google) {
-    try { google.accounts.id.prompt(); } catch (e) {}
+  if (document.visibilityState === 'visible' && currentUser && window.google && !appSessionOk) {
+    hasAppSession_().then(ok => { if (!ok) { try { google.accounts.id.prompt(); } catch (e) {} } });
   }
 });
 </script>
