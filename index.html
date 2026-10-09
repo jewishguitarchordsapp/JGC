@@ -853,7 +853,7 @@ const CONFIG = {
   // song/playlist someone else just added still shows up within a few
   // minutes, and any of your OWN edits already refresh immediately anyway
   // (see refreshPlaylistsOnly()/refreshAfterWrite() elsewhere in this file).
-  AUTO_REFRESH_SECONDS: 300,
+  AUTO_REFRESH_SECONDS: 600,
   // --- Supabase backend (task #72) — see the SUPABASE BACKEND ADAPTER
   // section below for everything this actually drives. ---
   SUPABASE_URL: 'https://elzjljcwpjlixirajcrj.supabase.co',
@@ -1787,7 +1787,9 @@ async function supaSelectAll_(buildQuery, pageSize) {
   const MAX_PAGES = 200;
   let all = [];
   let nextPage = 0;      // index of the next page not yet requested
-  let batchSize = 2;     // pages fired in parallel this round, doubling each
+  let batchSize = 1;     // pages fired in parallel this round, doubling each
+                          // (starts at 1: most lists fit in one page, and a
+                          // speculative 2nd page was a wasted request every time)
                           // round that comes back entirely full - this was
                           // one sequential awaited round-trip PER PAGE before
                           // (6 of them back-to-back just for admin_user_roster's
@@ -2070,14 +2072,16 @@ async function supaApi(action, fields) {
     // this was a large share of the project's monthly data-transfer quota.
     await supaRequireUser_();
     const base = 'id,title,title_hebrew,artist,artist_hebrew,categories,capo,youtube_url,date_added,updated_at,chords_used';
+    // The total count (to notice a deleted song) is only asked for about once
+    // an hour (fields.withCount) - songs are rarely deleted.
     const run = cols => Promise.all([
       getSupa_().from('songs').select(cols).gte('updated_at', fields.since).order('id').limit(1000),
-      getSupa_().from('songs').select('id', { count: 'exact', head: true }),
+      fields.withCount === false ? Promise.resolve({ count: null, error: null }) : getSupa_().from('songs').select('id', { count: 'exact', head: true }),
     ]);
     let [{ data, error }, { count, error: cErr }] = await run(base + ',published');
     if (error && /published/.test(error.message || '')) [{ data, error }, { count, error: cErr }] = await run(base); // add_song_drafts.sql not run yet
     throwIfErr_(error); throwIfErr_(cErr);
-    return { success: true, delta: true, total: count, songs: (data || []).map(s => ({
+    return { success: true, delta: true, total: (typeof count === 'number' ? count : undefined), songs: (data || []).map(s => ({
       id: s.id, title: s.title, title_hebrew: s.title_hebrew || '', artist: s.artist || '', artist_hebrew: s.artist_hebrew || '',
       categories: s.categories || [], capo: s.capo || 0, youtube_url: s.youtube_url || '',
       date_added: s.date_added, updated_at: s.updated_at, chords_used: s.chords_used || [],
@@ -2385,6 +2389,19 @@ async function supaApi(action, fields) {
     }
     throwIfErr_(res.error);
     return { success: true, counts: res.data || [] };
+  }
+  if (action === 'incrementSongViews') {
+    await supaRequireUser_();
+    const ids = (fields.ids || []).filter(Boolean).slice(0, 50);
+    if (!ids.length) return { success: true };
+    const { error } = await getSupa_().rpc('increment_song_views', { p_ids: ids });
+    if (error && /increment_song_views/.test(error.message || '')) {
+      // add_batched_song_views.sql not run yet - send them one by one.
+      for (const id of ids) { await getSupa_().rpc('increment_song_view', { p_song_id: id }); }
+      return { success: true };
+    }
+    throwIfErr_(error);
+    return { success: true };
   }
   if (action === 'incrementSongView') {
     await supaRequireUser_();
@@ -2977,6 +2994,7 @@ function expireSession_() {
 // just waits for the one already in progress instead of starting a
 // redundant twin.
 let loadSongsInFlight = null;
+let lastSongCountAt = 0; // when the delta refresh last also checked the total song count
 function loadSongs(showSpinner) {
   if (loadSongsInFlight) return loadSongsInFlight;
   loadSongsInFlight = loadSongsInner_(showSpinner).finally(() => { loadSongsInFlight = null; });
@@ -3048,7 +3066,9 @@ async function loadSongsInner_(showSpinner) {
     let delta = null;
     if (CONFIG.USE_SUPABASE && songsCompleteFromServer && songs.length) {
       const since = songsSyncSince_();
-      if (since) delta = await api('list', { since });
+      const withCount = !lastSongCountAt || Date.now() - lastSongCountAt > 60 * 60 * 1000;
+      if (since) delta = await api('list', { since, withCount });
+      if (delta && withCount && typeof delta.total === 'number') lastSongCountAt = Date.now();
     }
     let prefetchIds = [];
     if (delta && applySongsDelta_(delta)) {
@@ -3135,14 +3155,25 @@ function scheduleLyricSearch_() {
   if (!CONFIG.USE_SUPABASE) { ensureSongContentLoaded(); return; }
   clearTimeout(lyricSearchTimer);
   const q = (filters.q || '').trim();
-  if (q.length < 2 || isOffline) return;
+  if (q.length < 3 || isOffline) return;
+  // Already searched this exact text in this visit - no need to ask again.
+  const key = q.toLowerCase();
+  if (_lyricSearchMemo[key]) {
+    lyricHits = { q, ids: _lyricSearchMemo[key] };
+    if (view.name === 'list') renderSongListBody();
+    return;
+  }
+  // Waits for a pause in typing (each keystroke used to send its own search).
   lyricSearchTimer = setTimeout(() => {
     api('searchLyrics', { q }).then(d => {
-      lyricHits = { q, ids: new Set(d.ids || []) };
+      const ids = new Set(d.ids || []);
+      _lyricSearchMemo[key] = ids;
+      lyricHits = { q, ids };
       if ((filters.q || '').trim() === q && view.name === 'list') renderSongListBody();
     }).catch(err => { console.warn('Lyric search failed', err && err.message); });
-  }, 350);
+  }, 700);
 }
+const _lyricSearchMemo = {};
 let songContentLoading = false;
 function ensureSongContentLoaded() {
   if (songContentLoaded || songContentLoading || isOffline) return;
@@ -3163,7 +3194,14 @@ function startAfterSignIn() {
   dataStarted = true;
   loadSongs(true);
   loadLanguages_();
-  refreshTimer = setInterval(() => loadSongs(false), CONFIG.AUTO_REFRESH_SECONDS * 1000);
+  // Background refresh only while the app is actually on screen - a tab or
+  // phone left open in the background used to keep checking every few
+  // minutes all day, which adds up across hundreds of users (data + logs).
+  refreshTimer = setInterval(() => { if (!document.hidden) loadSongs(false); }, CONFIG.AUTO_REFRESH_SECONDS * 1000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden || !currentUser) return;
+    if (!lastSynced || Date.now() - lastSynced.getTime() > CONFIG.AUTO_REFRESH_SECONDS * 1000) loadSongs(false);
+  });
   // Once per page load/session (the dataStarted guard above), not on every
   // periodic refresh - feeds Admin > Stats > Overview's daily-visitors
   // chart (see getVisitStats). Same fire-and-forget pattern as
@@ -4930,9 +4968,30 @@ function loadViewCache() {
 // never from renderDetail() itself, since that re-renders many times per
 // visit (transposing, changing capo, favoriting...) and would wildly
 // over-count views if it fired there instead.
+// Song opens (for Admin › Top Songs) are collected and sent together - every
+// few minutes, when 10 have piled up, or when the app goes to the
+// background - instead of one request per song opened. Kept on the device
+// until sent, so none are lost if the app is closed.
+const SONG_VIEW_QUEUE_KEY = 'jgc_song_view_queue_v1';
+let songViewQueue = [];
+try { songViewQueue = JSON.parse(localStorage.getItem(SONG_VIEW_QUEUE_KEY) || '[]') || []; } catch (e) { songViewQueue = []; }
+let songViewFlushing = false;
+function saveSongViewQueue_() { try { localStorage.setItem(SONG_VIEW_QUEUE_KEY, JSON.stringify(songViewQueue.slice(-200))); } catch (e) {} }
+function flushSongViews_() {
+  if (songViewFlushing || !songViewQueue.length || !currentUser || isOffline) return;
+  songViewFlushing = true;
+  const batch = songViewQueue.slice(0, 50);
+  api('incrementSongViews', { ids: batch }).then(() => {
+    songViewQueue = songViewQueue.slice(batch.length);
+    saveSongViewQueue_();
+  }).catch(() => {}).finally(() => { songViewFlushing = false; });
+}
+setInterval(flushSongViews_, 3 * 60 * 1000);
+document.addEventListener('visibilitychange', () => { if (document.hidden) flushSongViews_(); });
 function recordSongView_(id) {
   if (!id) return;
-  api('incrementSongView', { id }).catch(() => {}); // best-effort - never blocks navigation or surfaces an error to the user
+  songViewQueue.push(id); saveSongViewQueue_();
+  if (songViewQueue.length >= 10) flushSongViews_();
   // Optimistic bump of the admin's already-loaded Top Songs numbers (total
   // opens only - whether this was a first-time viewer is only known server-side).
   if (topSongCounts) { const c = topSongCounts[id] || (topSongCounts[id] = { view_count: 0, unique_view_count: 0 }); c.view_count++; }
