@@ -5695,7 +5695,7 @@ function otherTabMatchesHtml_(list) {
 // Under a search: offer to request the song (prefilled with what was typed).
 function requestFromSearchHtml_(list) {
   const q = (filters.q || '').trim();
-  if (!q || q.length < 3 || !currentUser || effectiveIsAdmin()) return '';
+  if (!q || q.length < 3 || !currentUser) return '';
   return `<div class="request-cta${list.length ? '' : ' strong'}">
       <span>${list.length ? 'Not the song you were looking for?' : 'Can’t find this song?'}</span>
       <button class="btn${list.length ? ' secondary' : ''}" data-q="${escapeHtml(q)}" onclick="startSongRequest_(this.dataset.q)">🎵 Request it</button>
@@ -7923,9 +7923,9 @@ function renderContactBody() {
   // and to an admin's View As preview, but not on the admin's own Contact
   // tab (effectiveIsAdmin() is false while viewAsUser is set, so this still
   // shows there too - see its definition above).
-  const volunteerNoteHtml = !effectiveIsAdmin() ? `<div class="card" style="font-size:14px;line-height:1.5;">This app is built and kept running by a volunteer, in whatever spare time is available — so song requests, fixes, and new features may take a little while to show up. Thank you for your patience! If something isn't working right, or you just want to say hi, please reach out below — your notes and requests are genuinely appreciated. Messages written with warmth and politeness are always easier (and nicer) to respond to.</div>` : '';
+  const volunteerNoteHtml = true ? `<div class="card" style="font-size:14px;line-height:1.5;">This app is built and kept running by a volunteer, in whatever spare time is available — so song requests, fixes, and new features may take a little while to show up. Thank you for your patience! If something isn't working right, or you just want to say hi, please reach out below — your notes and requests are genuinely appreciated. Messages written with warmth and politeness are always easier (and nicer) to respond to.</div>` : '';
   let html = '';
-  if (!effectiveIsAdmin()) html += `<div class="contact-choices">
+  html += `<div class="contact-choices">
       <div class="contact-choice primary" role="button" tabindex="0" onclick="openRequestSongModal()">
         <div class="contact-choice-icon">🎵</div>
         <div><div class="contact-choice-title">Request a Song</div><div class="contact-choice-desc">Looking for a song that isn't in the app? Request it here — you can follow its status below.</div></div>
@@ -7951,7 +7951,7 @@ function renderContactBody() {
   // As) — "Message Admin" would just mean messaging themselves, which isn't
   // a real conversation; the Admin tab's Messages sub-tab is where they
   // handle everyone else's threads.
-  if (!effectiveIsAdmin()) {
+  {
     const chatTitle = viewAsUser ? `${escapeHtml(viewAsUser.name)}'s Messages` : 'Message Admin';
     const sortedMsgs = myMessages.slice().sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
     const lastMsg = sortedMsgs[0];
