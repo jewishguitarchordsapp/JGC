@@ -267,6 +267,7 @@
   .stat-chart-col.selected .stat-bar{filter:brightness(.85);outline:2px solid var(--accent);}
   .stat-detail{margin-top:12px;font-size:13px;min-height:20px;}
   @font-face{font-family:"Twemoji Country Flags";unicode-range:U+1F1E6-1F1FF,U+1F3F4,U+E0062-E0063,U+E0065,U+E0067,U+E006C,U+E006E,U+E0073-E0074,U+E0077,U+E007F;src:url('https://cdn.jsdelivr.net/npm/country-flag-emoji-polyfill@0.1.10/dist/TwemojiCountryFlags.woff2') format('woff2');font-display:swap;}
+  .user-flag{font-size:16px;line-height:1;font-family:"Twemoji Country Flags",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
   .country-pill,.stat-detail{font-family:"Twemoji Country Flags",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
   .detail-tile.stat-hero{background:#e6f4f2;border-color:#9fd3cb;padding:14px 8px;}
   .detail-tile.stat-hero .tile-value{font-size:38px;font-weight:800;line-height:1.05;color:var(--teal-dark);}
@@ -2362,6 +2363,7 @@ async function supaApi(action, fields) {
       favorites: u.favorites_count || 0, knownChords: !!u.known_chords, playlists: u.playlists_count || 0,
       requests: u.requests_count || 0, messages: u.messages_count || 0, errors: u.errors_count || 0,
       lastActivity: u.last_activity || '',
+      country: (u.country && /^[A-Z]{2}$/.test(u.country)) ? u.country : '',
     }));
     return { success: true, users };
   }
@@ -9347,6 +9349,7 @@ function renderUsersList() {
             </div>
           </div>
           <div style="display:flex;align-items:center;gap:10px;flex:none;">
+            ${u.country ? `<span class="user-flag" title="${escapeHtml(countryName_(u.country))}" aria-label="${escapeHtml(countryName_(u.country))}">${countryFlag_(u.country)}</span>` : ''}
             <span class="muted" style="white-space:nowrap;">${u.lastActivity ? new Date(u.lastActivity).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'never active'}</span>
             <span class="adv-chevron${expanded?' open':''}">›</span>
           </div>
