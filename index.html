@@ -370,6 +370,10 @@
      page rather than blending into the requests table above it. */
   .chat-card{display:flex;align-items:center;gap:12px;background:#f2f4f5;border:1.5px solid var(--teal);border-radius:12px;padding:14px 16px;margin-top:24px;cursor:pointer;transition:background .15s ease;}
   .chat-card:hover{background:#e9edee;}
+  .chat-card.contact-card{margin-top:12px;}
+  .chat-card.contact-card:first-child{margin-top:0;}
+  .contact-panel{padding:12px 2px 4px;}
+  .contact-note{font-size:12.5px;line-height:1.5;color:var(--muted);margin:22px 4px 0;}
   .chat-card-icon{flex:none;width:34px;height:34px;border-radius:50%;background:var(--teal);color:#fff;display:flex;align-items:center;justify-content:center;}
   .chat-card-icon svg{width:18px;height:18px;display:block;}
   .chat-card-text{flex:1;min-width:0;}
@@ -1431,6 +1435,7 @@ function loadMyDataCache(email) {
 }
 let songListPage = 0;
 let contactRequestsPage = 0; // paginates the Contact page's "My Song Requests" list, 10/page
+let contactRequestsOpen = false; // Contact page's Song Requests card
 let contactChatOpen = false; // Contact page's "Message Admin" card starts collapsed; clicking it reveals the thread
 let adminRequestsPage = 0;
 let adminErrorsPage = 0;
@@ -7898,9 +7903,7 @@ function renderContact() {
   // An admin viewing their own Contact tab has no "Message Admin" card to
   // fill (see renderContactBody) — that'd just be messaging themselves —
   // so skip the getMessages round-trip entirely for that case.
-  const fetches = currentUser.isAdmin
-    ? [api('getRequests', {scope:'mine'})]
-    : [api('getRequests', {scope:'mine'}), api('getMessages', {scope:'mine'})];
+  const fetches = [api('getRequests', {scope:'mine'}), api('getMessages', {scope:'mine'})];
   Promise.all(fetches).then(([reqData, msgData]) => {
     contactRequestsCache = reqData.requests || []; contactMessagesCache = msgData ? (msgData.messages || []) : [];
     userBadgeData = { requests: contactRequestsCache, messages: contactMessagesCache };
@@ -7923,51 +7926,52 @@ function renderContactBody() {
   // and to an admin's View As preview, but not on the admin's own Contact
   // tab (effectiveIsAdmin() is false while viewAsUser is set, so this still
   // shows there too - see its definition above).
-  const volunteerNoteHtml = true ? `<div class="card" style="font-size:14px;line-height:1.5;">This app is built and kept running by a volunteer, in whatever spare time is available — so song requests, fixes, and new features may take a little while to show up. Thank you for your patience! If something isn't working right, or you just want to say hi, please reach out below — your notes and requests are genuinely appreciated. Messages written with warmth and politeness are always easier (and nicer) to respond to.</div>` : '';
-  let html = '';
-  html += `<div class="contact-choices">
-      <div class="contact-choice primary" role="button" tabindex="0" onclick="openRequestSongModal()">
-        <div class="contact-choice-icon">🎵</div>
-        <div><div class="contact-choice-title">Request a Song</div><div class="contact-choice-desc">Looking for a song that isn't in the app? Request it here — you can follow its status below.</div></div>
-      </div>
-      <div class="contact-choice" role="button" tabindex="0" onclick="contactChatOpen=true;renderContactBody();setTimeout(()=>{const c=document.getElementById('chatInput'); if(c){c.scrollIntoView({behavior:'smooth',block:'center'}); c.focus();}},50)">
-        <div class="contact-choice-icon">💬</div>
-        <div><div class="contact-choice-title">Send a Message</div><div class="contact-choice-desc">For everything else: questions, ideas, or something not working. Found a mistake in a song? Use <b>⚠ Report</b> on that song's page.</div></div>
-      </div>
+  // Two collapsible cards (same look as the old "Message Admin" card):
+  // Song Requests and Messages. Each starts closed and shows a one-line
+  // summary; tapping opens it. The volunteer note sits quietly underneath.
+  const reqTitle = viewAsUser ? `${escapeHtml(viewAsUser.name)}'s Song Requests` : 'Song Requests';
+  const quotaNow = requestQuota_();
+  const needLyrics = myRequests.filter(r => r.status === 'needs_lyrics').length;
+  const reqPreview = needLyrics
+    ? `<span style="color:var(--teal);font-weight:600;">${needLyrics} request${needLyrics>1?'s need':' needs'} lyrics from you</span>`
+    : myRequests.length
+      ? `${myRequests.length} request${myRequests.length>1?'s':''} · ${quotaNow.left} of 2 left this week`
+      : `Looking for a song that isn't in the app? Request it here.`;
+  let html = `<div class="chat-card contact-card" onclick="toggleContactRequests_()">
+      <span class="chat-card-icon">${SVG_ICONS.list}</span>
+      <div class="chat-card-text"><div class="chat-card-title">${reqTitle}</div><div class="chat-card-preview">${reqPreview}</div></div>
+      <span class="chat-card-arrow">${contactRequestsOpen ? '▾' : '▸'}</span>
     </div>`;
-  html += volunteerNoteHtml;
-  html += `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h2 style="margin:0">${requestsHeading}</h2><button class="btn${requestQuota_().left ? '' : ' secondary'}" onclick="openRequestSongModal()">+ Request a Song</button></div>
-      ${requestQuotaHtml_()}`;
-  html += `<div class="table-wrap"><table><tr><th>Status</th><th>Song</th><th>Artist</th></tr>
+  if (contactRequestsOpen) {
+    html += `<div class="contact-panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">${requestQuotaHtml_().replace('<p class="muted">', '<p class="muted" style="margin:0;flex:1;min-width:180px;">')}<button class="btn${quotaNow.left ? '' : ' secondary'}" onclick="openRequestSongModal()">+ Request a Song</button></div>
+      <div class="table-wrap" style="margin-top:10px;"><table><tr><th>Status</th><th>Song</th><th>Artist</th></tr>
       ${pageSlice(myRequests, contactRequestsPage, 10).map(r => `<tr data-req-id="${escapeHtml(r.id)}"><td><span class="badge badge-explain ${r.status}" role="button" tabindex="0" title="${escapeHtml(requestStatusMeaning_(r.status))}" onclick="showToast(this.title)">${requestStatusSymbol(r.status)}</span>${r.status==='declined' && r.decline_reason ? `<br><span class="muted" style="font-size:11.5px;">${escapeHtml(r.decline_reason)}</span>` : ''}${r.status==='needs_lyrics' ? ` <button class="btn add-lyrics-btn" onclick="openAddRequestLyrics_('${r.id}')">Add lyrics</button>` : ''}</td><td dir="auto">${escapeHtml(r.song_title)}</td><td dir="auto">${escapeHtml(fmtArtists_(r.artist))}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No requests yet.</td></tr>'}
       </table></div>
-      ${pagerHtml(myRequests.length, contactRequestsPage, 'changeContactRequestsPage', 10)}`;
-  // The chat card is a clickable preview that expands into the full thread —
-  // starts open on entering View As (enterViewAs sets contactChatOpen=true,
-  // since the admin is there to inspect this user's conversation), but can
-  // still be collapsed/reopened from there like any other thread, see
-  // isOpen below. Skipped entirely when an admin is looking at their own
-  // Contact tab (not View
-  // As) — "Message Admin" would just mean messaging themselves, which isn't
-  // a real conversation; the Admin tab's Messages sub-tab is where they
-  // handle everyone else's threads.
+      ${pagerHtml(myRequests.length, contactRequestsPage, 'changeContactRequestsPage', 10)}
+    </div>`;
+  }
   {
-    const chatTitle = viewAsUser ? `${escapeHtml(viewAsUser.name)}'s Messages` : 'Message Admin';
+    const chatTitle = viewAsUser ? `${escapeHtml(viewAsUser.name)}'s Messages` : 'Send a Message';
     const sortedMsgs = myMessages.slice().sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
     const lastMsg = sortedMsgs[0];
-    const preview = lastMsg ? (escapeHtml(lastMsg.text).slice(0, 60) + (lastMsg.text.length > 60 ? '…' : '')) : 'No messages yet — tap to say hi!';
+    const preview = lastMsg ? (escapeHtml(lastMsg.text).slice(0, 60) + (lastMsg.text.length > 60 ? '…' : '')) : 'Questions, ideas, or something not working';
     const isOpen = contactChatOpen;
-    html += `<div class="chat-card" onclick="toggleContactChat()">
+    html += `<div class="chat-card contact-card" onclick="toggleContactChat()">
         <span class="chat-card-icon">${SVG_ICONS.message}</span>
         <div class="chat-card-text"><div class="chat-card-title">${ALERTS_ENABLED && !viewAsUser && alertPrefs.messages && myMessages.some(m => m.sender === 'admin' && Date.parse(m.created_at) > badgeSeen.messagesAt) ? '<span class="tab-dot"></span>' : ''}${chatTitle}</div><div class="chat-card-preview">${preview}</div></div>
         <span class="chat-card-arrow">${isOpen ? '▾' : '▸'}</span>
       </div>`;
     if (isOpen) {
-      html += `<div class="chat-thread" id="chatThread">${renderChatMessages(myMessages)}</div>
+      html += `<div class="contact-panel">
+        <p class="muted" style="margin:0 0 8px;font-size:13px;">For anything that isn't a song request. Found a mistake in a song? Use <b>⚠ Report</b> on that song's page.</p>
+        <div class="chat-thread" id="chatThread">${renderChatMessages(myMessages)}</div>
         <div id="quoteDraft-user">${quoteDraftHtml_('user')}</div>
-        <div style="display:flex;gap:8px;align-items:flex-end;"><textarea id="chatInput" placeholder="Questions, ideas, problems… (for a new song, please use Request a Song above)" style="flex:1;min-height:64px;max-height:200px;font-family:inherit;font-size:14px;resize:vertical;"></textarea><button class="btn" onclick="sendChatMessage()">Send</button></div>`;
+        <div style="display:flex;gap:8px;align-items:flex-end;"><textarea id="chatInput" placeholder="Questions, ideas, problems… (for a new song, please use Song Requests above)" style="flex:1;min-height:64px;max-height:200px;font-family:inherit;font-size:14px;resize:vertical;"></textarea><button class="btn" onclick="sendChatMessage()">Send</button></div>
+      </div>`;
     }
   }
+  html += `<p class="contact-note">This app is built and kept running by a volunteer, in whatever spare time is available — so song requests, fixes, and new features may take a little while to show up. Thank you for your patience! Messages written with warmth and politeness are always easier (and nicer) to respond to.</p>`;
   document.getElementById('app').innerHTML = html;
   const thread = document.getElementById('chatThread'); if (thread) thread.scrollTop = thread.scrollHeight;
 }
@@ -7995,6 +7999,7 @@ function submitRequestLyrics_(id) {
   }).catch(err => { st.textContent = 'Error: ' + err.message; st.className = 'error'; });
 }
 function changeContactRequestsPage(p) { contactRequestsPage = p; renderContactBody(); }
+function toggleContactRequests_() { contactRequestsOpen = !contactRequestsOpen; renderContactBody(); }
 function toggleContactChat() { contactChatOpen = !contactChatOpen; renderContactBody(); if (contactChatOpen) { badgeSeen.messagesAt = Date.now(); saveBadgeSeen_(); updateBadges_(); } }
 // The "Re: Song Request / Error Report" reference on a message, drawn as its
 // own small box with a link, separate from the message text itself.
@@ -8034,6 +8039,7 @@ function focusContactRequest_(id) {
   const idx = mine.findIndex(r => r.id === id);
   if (idx < 0) { alert('That request isn’t in the list anymore.'); return; }
   contactRequestsPage = Math.floor(idx / 10);
+  contactRequestsOpen = true;
   renderContactBody();
   const row = document.querySelector('tr[data-req-id="' + id + '"]');
   if (row) { row.classList.add('row-flash'); row.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => row.classList.remove('row-flash'), 2500); }
@@ -8261,6 +8267,7 @@ function requestQuotaHtml_() {
 let pendingRequestOpen = null; // { title } or null
 function startSongRequest_(title) {
   pendingRequestOpen = { title: String(title || '').trim() };
+  contactRequestsOpen = true;
   if (view.name === 'contact' && !viewAsUser) { const pr = pendingRequestOpen; pendingRequestOpen = null; openRequestSongModal(pr.title); return; }
   goTo('contact');
 }
@@ -8324,7 +8331,7 @@ function submitRequest() {
   if (!artist) { statusEl.textContent = 'Please enter an artist.'; statusEl.className='error'; return; }
   if (!youtube_url || !YOUTUBE_URL_RE.test(youtube_url)) { statusEl.textContent = 'Please enter a valid YouTube link.'; statusEl.className='error'; return; }
   statusEl.textContent = 'Sending…';
-  api('createRequest', Object.assign({ song_title, artist, youtube_url, categories, lyrics, note }, viewAsFields())).then(() => refreshAfterWrite()).then(() => { closeModal(); renderContact(); }).catch(err => { statusEl.textContent = 'Error: '+err.message; statusEl.className='error'; });
+  api('createRequest', Object.assign({ song_title, artist, youtube_url, categories, lyrics, note }, viewAsFields())).then(() => refreshAfterWrite()).then(() => { closeModal(); contactRequestsOpen = true; renderContact(); }).catch(err => { statusEl.textContent = 'Error: '+err.message; statusEl.className='error'; });
 }
 // Looks like "please add <song>" / "can you put up the chords for..." etc.
 const SONG_REQUEST_HINT_RE = /\b(please\s+add|can\s+you\s+(please\s+)?(add|upload|put\s+up|do|make)|could\s+you\s+(please\s+)?(add|upload|put\s+up|do|make)|request(ing)?\b.*\bsong|song\s+request|add\s+(the\s+)?(song|chords)|chords\s+(for|to)\b|would\s+love\s+(if\s+you\s+(could\s+)?add|the\s+chords))/i;
@@ -9527,12 +9534,12 @@ function enterViewAs(email, name) {
     viewAsUser = { email: data.email, name: name || data.email };
     viewAsData = { favorites: data.favorites || [], knownChords: data.knownChords || [], playlists: data.playlists || [], requests: data.requests || [], messages: data.messages || [], myCapos: data.myCapos || {}, myTransposes: data.myTransposes || {} };
     songTab = 'all';
-    contactChatOpen = true; // starts open on entering View As (see isOpen in renderContactBody) - but, unlike before, can now be collapsed
+    contactRequestsOpen = true; contactChatOpen = true; // starts open on entering View As (see isOpen in renderContactBody) - but, unlike before, can now be collapsed
     goTo('list');
   }).catch(err => alert(err.message));
 }
 function exitViewAs() {
-  viewAsUser = null; viewAsData = null; contactChatOpen = false;
+  viewAsUser = null; viewAsData = null; contactChatOpen = false; contactRequestsOpen = false;
   goTo('admin');
 }
 
