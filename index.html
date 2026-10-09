@@ -1586,7 +1586,7 @@ function signOut() {
   // memory, no network call needed at all. Signing out is exactly the moment
   // that content should stop being available, so clear both copies here.
   songs = []; playlists = []; songContentById = {}; songContentLoaded = false;
-  try { localStorage.removeItem(CATALOG_CACHE_KEY); localStorage.removeItem('jgc_song_text_v1'); _songTextCache = null; } catch (e) {}
+  try { localStorage.removeItem(CATALOG_CACHE_KEY); localStorage.removeItem('jgc_song_text_v1'); localStorage.removeItem('jgc_admin_roster_v1'); _songTextCache = null; } catch (e) {}
   if (view.name === 'edit' || view.name === 'admin' || view.name === 'playlistDetail') goTo('list');
   renderUserArea(); render();
 }
@@ -2245,9 +2245,24 @@ async function supaApi(action, fields) {
     };
   }
 
+  if (action === 'getRequestLyrics') {
+    await supaRequireUser_();
+    const { data, error } = await getSupa_().from('requests').select('lyrics').eq('id', fields.id).maybeSingle();
+    throwIfErr_(error);
+    return { success: true, lyrics: (data && data.lyrics) || '' };
+  }
   if (action === 'getRequests') {
     const me = await supaRequireUser_();
     const scoped = !(me.is_admin && fields.scope !== 'mine');
+    if (!scoped) {
+      // Admin list: admin_requests_light() (reduce_admin_egress.sql) sends
+      // only the first part of each request's pasted lyrics.
+      const light = await getSupa_().rpc('admin_requests_light');
+      if (!light.error && Array.isArray(light.data)) {
+        const emailMap = await supaProfileMapByIds_(light.data.map(r => r.user_id));
+        return { success: true, requests: light.data.map(r => Object.assign(supaRequestToOld_(r, emailMap), { lyrics_len: r.lyrics_len || 0 })) };
+      }
+    }
     const { data, error } = await supaSelectAll_((from, to) => {
       let q = getSupa_().from('requests').select('*').order('id').range(from, to);
       if (scoped) q = q.eq('user_id', me.id);
@@ -2353,6 +2368,21 @@ async function supaApi(action, fields) {
     // admin check instead of one per row, so it stays well under the
     // database's time limit. Falls back to the old view until that's run.
     const rosterRes = await supaCached_(() => _supaUsersCache, c => _supaUsersCache = c, async () => {
+      // Smallest: admin_user_roster_compact() (reduce_admin_egress.sql) -
+      // column names sent once, dates as numbers, Google photo links shortened.
+      const compact = await getSupa_().rpc('admin_user_roster_compact');
+      if (!compact.error && compact.data && Array.isArray(compact.data.r)) {
+        const c = compact.data.c, idx = {}; c.forEach((k, i) => { idx[k] = i; });
+        const rows = compact.data.r.map(a => {
+          let photo = a[idx.photo] || '';
+          if (photo.charAt(0) === '~') photo = 'https://lh3.googleusercontent.com/' + photo.slice(1);
+          return { email: a[idx.email], name: a[idx.name], photo, level: a[idx.level] || '', language: a[idx.language] || '',
+            favorites_count: a[idx.fav], known_chords: a[idx.kc], playlists_count: a[idx.pl], requests_count: a[idx.req],
+            messages_count: a[idx.msg], errors_count: a[idx.err],
+            last_activity: a[idx.last] ? new Date(a[idx.last] * 1000).toISOString() : '', country: a[idx.cc] || '' };
+        });
+        return { data: rows, error: null };
+      }
       const fast = await getSupa_().rpc('admin_user_roster_fast');
       if (!fast.error && Array.isArray(fast.data)) return { data: fast.data, error: null };
       return supaSelectAll_((from, to) => getSupa_().from('admin_user_roster').select('*').order('id').range(from, to), 20000);
@@ -2984,7 +3014,7 @@ function expireSession_() {
   // in — nothing left over from the cached song/chord/lyric text (see
   // saveCatalogCache) either in memory or in localStorage.
   songs = []; playlists = []; songContentById = {}; songContentLoaded = false;
-  try { localStorage.removeItem(CATALOG_CACHE_KEY); localStorage.removeItem('jgc_song_text_v1'); _songTextCache = null; } catch (e) {}
+  try { localStorage.removeItem(CATALOG_CACHE_KEY); localStorage.removeItem('jgc_song_text_v1'); localStorage.removeItem('jgc_admin_roster_v1'); _songTextCache = null; } catch (e) {}
   renderUserArea();
   render();
 }
@@ -8592,6 +8622,13 @@ function adminDraftsSectionHtml_() {
 function viewRequestDetails(id) {
   const r = requestsCache.find(rq => rq.id === id);
   if (!r) return;
+  // The list only has the start of long lyrics - get the rest first.
+  if (r.lyrics_len && (r.lyrics || '').length < r.lyrics_len) {
+    openModal('<div class="muted">Loading lyrics…</div>');
+    api('getRequestLyrics', { id }).then(d => { r.lyrics = d.lyrics || r.lyrics; r.lyrics_len = (r.lyrics || '').length; viewRequestDetails(id); })
+      .catch(err => { closeModal(); alert(err.message); });
+    return;
+  }
   openModal(`
     <h2 style="margin-top:0" dir="auto">${escapeHtml(r.song_title)}</h2>
     <p class="muted" style="margin-top:-8px;" dir="auto">${escapeHtml(fmtArtists_(r.artist))}${r.youtube_url ? ` · <a href="${escapeHtml(r.youtube_url)}" target="_blank" rel="noopener">YouTube</a>` : ''}</p>
@@ -9164,7 +9201,7 @@ function appModeCardHtml_() {
     </div>`;
 }
 function loadAdminStatsOverview() {
-  if (statsOverviewCache && usersLoaded) { renderAdminStatsOverview(); return; }
+  if (statsOverviewCache) { renderAdminStatsOverview(); return; }
   const body = document.getElementById('adminBody');
   if (body) body.innerHTML = '<div class="muted">Loading stats…</div>';
   const visitsPromise = statsOverviewCache ? Promise.resolve(statsOverviewCache) : api('getVisitStats', {});
@@ -9172,7 +9209,7 @@ function loadAdminStatsOverview() {
   // first admin tab opened this visit) rather than keeping two separate
   // user-activity readings - see renderUsersSummary_() below, now rendered
   // here instead of at the top of the Users tab.
-  const usersPromise = usersLoaded ? Promise.resolve({ users: usersCache }) : api('getUsers', {}).catch(err => { console.warn('Users list failed', err && err.message); return { users: null }; });
+  const usersPromise = Promise.resolve({ users: null }); // (the Stats page doesn't use the users list - not downloaded here any more)
   api('getAppModeStats', {}).then(d => { appModeStats = d.stats || null; if (adminTab === 'overview' && statsOverviewCache) renderAdminStatsOverview(); }).catch(() => {});
   Promise.all([visitsPromise, usersPromise]).then(([visitData, usersData]) => {
     statsOverviewCache = visitData;
@@ -9265,11 +9302,38 @@ function renderAdminStatsOverview() {
 /* ============================================================
    USERS (admin) + "View As" read-only impersonation
    ============================================================ */
+// The full users list (~5,000 people, about 1 MB) is remembered on this
+// device for a few hours instead of downloaded every time the tab opens -
+// "Refresh" on the tab gets a fresh copy any time.
+const ROSTER_CACHE_KEY = 'jgc_admin_roster_v1';
+const ROSTER_CACHE_MS = 6 * 60 * 60 * 1000;
+let usersFetchedAt = 0;
+function loadRosterCache_() {
+  try {
+    const c = JSON.parse(localStorage.getItem(ROSTER_CACHE_KEY) || 'null');
+    if (c && c.email === (currentUser && currentUser.email) && Array.isArray(c.users) && Date.now() - c.at < ROSTER_CACHE_MS) return c;
+  } catch (e) {}
+  return null;
+}
+function saveRosterCache_(users) {
+  try { localStorage.setItem(ROSTER_CACHE_KEY, JSON.stringify({ email: currentUser && currentUser.email, at: Date.now(), users })); }
+  catch (e) { try { localStorage.removeItem(ROSTER_CACHE_KEY); } catch (e2) {} }
+}
+function refreshAdminUsers_() {
+  usersLoaded = false; usersFetchedAt = 0; _supaUsersCache = null;
+  try { localStorage.removeItem(ROSTER_CACHE_KEY); } catch (e) {}
+  const body = document.getElementById('adminBody'); if (body) body.innerHTML = '<div class="muted">Loading users…</div>';
+  loadAdminUsers();
+}
 function loadAdminUsers() {
   if (usersLoaded) { renderUsersTable(); return; }
+  const cached = loadRosterCache_();
+  if (cached) { usersCache = cached.users; usersFetchedAt = cached.at; usersLoaded = true; renderUsersTable(); return; }
   api('getUsers', {}).then(data => {
     usersCache = data.users || [];
     usersLoaded = true;
+    usersFetchedAt = Date.now();
+    saveRosterCache_(usersCache);
     // Per-user message COUNT comes pre-aggregated from admin_user_roster
     // (see u.messages column below); the per-row unread DOT comes from the
     // lightweight unreadInfo cache (see renderAdmin()/userHasUnreadMessage())
@@ -9366,7 +9430,7 @@ function renderUsersList() {
       </div>`;
     }).join('')}
     ${pagerHtml(list.length, usersPage, 'changeUsersPage')}
-    <div class="muted" style="margin-top:8px">${list.length} user${list.length===1?'':'s'}${userSearch? ' matching "'+escapeHtml(userSearch)+'"':''} · ${usersCache.length} total</div>`;
+    <div class="muted" style="margin-top:8px">${list.length} user${list.length===1?'':'s'}${userSearch? ' matching "'+escapeHtml(userSearch)+'"':''} · ${usersCache.length} total${usersFetchedAt ? ` · updated ${escapeHtml(new Date(usersFetchedAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }))}` : ''} · <span class="adv-link" onclick="refreshAdminUsers_()">Refresh</span></div>`;
 }
 function changeUsersPage(p) { usersPage = p; renderUsersList(); }
 function enterViewAs(email, name) {
@@ -9987,7 +10051,7 @@ try { history.replaceState({ jgcView: view }, ''); } catch (e) {}
 // A device that already had this cache saved from BEFORE that clearing
 // existed won't have had it wiped by either of those, so also sweep it
 // away right here, once, for a visitor who's (still, or already) signed out.
-if (!currentUser) { try { localStorage.removeItem(CATALOG_CACHE_KEY); localStorage.removeItem('jgc_song_text_v1'); _songTextCache = null; } catch (e) {} }
+if (!currentUser) { try { localStorage.removeItem(CATALOG_CACHE_KEY); localStorage.removeItem('jgc_song_text_v1'); localStorage.removeItem('jgc_admin_roster_v1'); _songTextCache = null; } catch (e) {} }
 const cachedCatalog = currentUser ? loadCatalogCache() : null;
 if (cachedCatalog) {
   songs = cachedCatalog.songs || [];
