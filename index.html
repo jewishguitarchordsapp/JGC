@@ -1171,7 +1171,7 @@ function t(key) {
 // marked dir="auto"), the song editor and the Admin area are left alone.
 const HE_UI = {};        // 'English text' -> 'Hebrew text' (filled below)
 const HE_UI_PATTERNS = []; // [RegExp, (m) => 'Hebrew'] tried when no exact match
-const TR_SKIP_SEL = '#chartScroll, .chat-thread, .chat-card-preview, textarea, script, style, svg, .no-tr, [dir="auto"]:not(.backlink), .print-sheet, .print-measure, .chord-tap, [data-chord], .print-pages, .chord-diagram-name, .playlist-title, .userbox .name, .playlist-card .title, #adminBody';
+const TR_SKIP_SEL = '#chartScroll, .chat-thread, textarea, script, style, svg, .no-tr, [dir="auto"]:not(.backlink), .print-sheet, .print-measure, .chord-tap, [data-chord], .print-pages, .chord-diagram-name, .playlist-title, .userbox .name, .playlist-card .title, #adminBody';
 const TR_ATTRS = ['placeholder', 'title', 'aria-label'];
 // Chord names, single letters (A–Z index), speeds, emails etc. never change.
 const TR_NEVER_RE = /^(?:[A-Z]|[A-G](?:#|♭|b)?(?:m|maj|min|dim|aug|sus|add|M)?\d*(?:sus\d|add\d|maj\d|b\d|#\d)*(?:\/[A-G](?:#|♭|b)?)?|[\d.]+x|A[↓↑]|jgcapp\.org|JGC App|\S+@\S+\.\S+|https?:\/\/\S+)$/;
@@ -1496,6 +1496,7 @@ Object.assign(HE_UI, {
   const be = (x) => { x = T(x); return /^[֐-׿]/.test(x) ? 'ב' + (x[0] === 'ה' && x.length > 2 ? x.slice(1) : x) : 'ב־' + x; };
   const VIS = { private: 'פרטי', shared: 'משותף', public: 'ציבורי' };
   const reqWord = (n) => n === 1 ? 'בקשה אחת' : n + ' בקשות';
+  Object.assign(HE_UI, {"Ahavas Yisroel": "אהבת ישראל", "Ahavas Yisrael": "אהבת ישראל", "Chabad": "חב\"ד", "Chabad Niggunim": "ניגוני חב\"ד", "Children's": "ילדים", "Chinuch": "חינוך", "Hallel": "הלל", "Motzei Shabbos": "מוצאי שבת", "Sephardic": "ספרדי", "Tehillim": "תהילים", "Teshuva": "תשובה", "The Rebbe": "הרבי", "Tishrei": "תשרי", "Torah": "תורה", "Yerushalayim": "ירושלים"});
   Object.assign(HE_UI, { 'Songs': 'שירים', 'Home': 'דף הבית', 'Search': 'חיפוש', 'Known Chords': 'האקורדים שלי', 'Tuner': 'טיונר', 'Playlist': 'פלייליסט', 'Admin': 'ניהול', 'Add Songs': 'הוספת שירים' });
   HE_UI_PATTERNS.push(
     [/^‹ Back to (.+)$/, m => '‹ חזרה ' + le(m[1])],
@@ -8398,7 +8399,7 @@ function renderContactBody() {
     const chatTitle = viewAsUser ? `${escapeHtml(viewAsUser.name)}'s Messages` : 'Send a Message';
     const sortedMsgs = myMessages.slice().sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
     const lastMsg = sortedMsgs[0];
-    const preview = lastMsg ? (escapeHtml(lastMsg.text).slice(0, 60) + (lastMsg.text.length > 60 ? '…' : '')) : 'Questions, ideas, or something not working';
+    const preview = lastMsg ? ('<span dir="auto">' + escapeHtml(lastMsg.text).slice(0, 60) + (lastMsg.text.length > 60 ? '…' : '') + '</span>') : 'Questions, ideas, or something not working';
     const isOpen = contactChatOpen;
     html += `<div class="chat-card contact-card" onclick="toggleContactChat()">
         <span class="chat-card-icon">${SVG_ICONS.message}</span>
