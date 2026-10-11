@@ -838,9 +838,9 @@
     <button class="mobile-drawer-close" onclick="closeMobileDrawer()" aria-label="Close menu">✕</button>
     <div id="userAreaMobile" class="userbox"></div>
     <nav class="mobile-drawer-nav">
-      <button onclick="closeMobileDrawer();goTo('tuner')"><span class="mobile-drawer-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 1 1 9-9"/><line x1="12" y1="12" x2="12" y2="5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg></span><span>Tuner</span></button>
-      <button onclick="closeMobileDrawer();goTo('profile')"><span class="mobile-drawer-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span><span>Profile</span></button>
-      <button onclick="closeMobileDrawer();goTo('settings')"><span class="mobile-drawer-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span><span>Settings</span></button>
+      <button onclick="closeMobileDrawer();goTo('tuner')"><span class="mobile-drawer-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 1 1 9-9"/><line x1="12" y1="12" x2="12" y2="5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg></span><span class="drawer-label" data-en="Tuner" data-he="טיונר">Tuner</span></button>
+      <button onclick="closeMobileDrawer();goTo('profile')"><span class="mobile-drawer-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span><span class="drawer-label" data-en="Profile" data-he="פרופיל">Profile</span></button>
+      <button onclick="closeMobileDrawer();goTo('settings')"><span class="mobile-drawer-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span><span class="drawer-label" data-en="Settings" data-he="הגדרות">Settings</span></button>
     </nav>
   </div>
 </div>
@@ -1184,7 +1184,7 @@ function renderMenuDrawerSettings_() {
   if (ex) {
     const inst = displayPrefs.instrument || 'guitar';
     ex.hidden = inst === 'guitar';
-    const nm = document.getElementById('prefInstrName'); if (nm) nm.textContent = inst === 'piano' ? 'piano' : 'ukulele';
+    const nm = document.getElementById('prefInstrName'); if (nm) nm.textContent = uiLang === 'he' ? (inst === 'piano' ? 'פסנתר' : 'יוקלילי') : (inst === 'piano' ? 'piano' : 'ukulele');
   }
   const chordsEl = document.getElementById('prefShowChordsToggle');
   if (chordsEl) { chordsEl.classList.toggle('on', displayPrefs.showChords); chordsEl.setAttribute('aria-pressed', String(displayPrefs.showChords)); }
@@ -1224,6 +1224,7 @@ function toggleDisplayShowChords() {
   applyDisplayPrefsToOpenSong_();
 }
 function updateLangToggleButtons_() {
+  document.querySelectorAll('.drawer-label').forEach(el => { el.textContent = uiLang === 'he' ? el.dataset.he : el.dataset.en; });
   document.querySelectorAll('.lang-toggle-btn').forEach(btn => { btn.textContent = uiLang === 'he' ? 'EN' : 'עברית'; });
 }
 function toggleUiLang() {
@@ -2500,7 +2501,8 @@ async function supaApi(action, fields) {
   // way to pass any other user id or date through it.
   if (action === 'logVisit') {
     await supaRequireUser_();
-    let { error } = await getSupa_().rpc('log_app_visit', { p_country: fields.country || null, p_mode: fields.mode || null, p_platform: fields.platform || null });
+    let { error } = await getSupa_().rpc('log_app_visit', { p_country: fields.country || null, p_mode: fields.mode || null, p_platform: fields.platform || null, p_lang: fields.lang || null });
+    if (error) ({ error } = await getSupa_().rpc('log_app_visit', { p_country: fields.country || null, p_mode: fields.mode || null, p_platform: fields.platform || null })); // add_language_stats.sql not run yet
     if (error) ({ error } = await getSupa_().rpc('log_app_visit', { p_country: fields.country || null })); // add_home_screen_stats.sql not run yet
     if (error) ({ error } = await getSupa_().rpc('log_app_visit')); // add_visit_countries.sql not run yet
     throwIfErr_(error);
@@ -3288,7 +3290,7 @@ function startAfterSignIn() {
   // chart (see getVisitStats). Same fire-and-forget pattern as
   // recordSongView_'s incrementSongView call - never blocks anything or
   // surfaces an error to the person using the app.
-  api('logVisit', { country: detectVisitorCountry_(), mode: isStandaloneDisplay() ? 'home' : 'browser', platform: devicePlatform_() }).catch(() => {});
+  api('logVisit', { country: detectVisitorCountry_(), mode: isStandaloneDisplay() ? 'home' : 'browser', platform: devicePlatform_(), lang: uiLang }).catch(() => {});
 }
 
 // Fetches one song's full text on demand — used when its detail page is
@@ -5115,8 +5117,8 @@ function backLabel_(f) {
   }
   if (v.name === 'artists') return t('nav_artists');
   if (v.name === 'browse') return t('nav_browse');
-  if (v.name === 'profile') return 'Profile';
-  if (v.name === 'settings') return 'Settings';
+  if (v.name === 'profile') return uiLang === 'he' ? 'פרופיל' : 'Profile';
+  if (v.name === 'settings') return uiLang === 'he' ? 'הגדרות' : 'Settings';
   if (v.name === 'categories') return t('nav_categories');
   if (v.name === 'playlists') return t('nav_playlists');
   if (v.name === 'playlistDetail') {
@@ -6002,14 +6004,15 @@ function settingsSwitch_(on, onclick) {
 }
 function renderSettings_() {
   const app = document.getElementById('app');
+  const L = (en, he) => uiLang === 'he' ? he : en;
   const sw = (k) => settingsSwitch_(!!alertPrefs[k], `setAlertPref_('${k}', ${!alertPrefs[k]})`);
   const iconSupported = 'setAppBadge' in navigator;
   app.innerHTML = `<div class="settings-page" style="max-width:560px;">
-    <h2>Settings</h2>
+    <h2>${L('Settings', 'הגדרות')}</h2>
     <div class="card">
-      <h3>Display</h3><div class="settings-sub" style="margin:-4px 0 6px;">Defaults for every song you open. You can still change them on any song.</div>
+      <h3>${L('Display', 'תצוגה')}</h3><div class="settings-sub" style="margin:-4px 0 6px;">${L('Defaults for every song you open. You can still change them on any song.', 'ברירת המחדל לכל שיר שתפתחו. תמיד אפשר לשנות בתוך השיר עצמו.')}</div>
       <div class="adv-row">
-        <span class="adv-label">Font size</span>
+        <span class="adv-label">${L('Font size', 'גודל גופן')}</span>
         <span class="adv-controls">
           <button class="stepper-btn" onclick="changeDisplayFontSize(-1)">A&#8595;</button>
           <span class="ppt-val" id="prefFontSizeVal">17</span>
@@ -6017,36 +6020,36 @@ function renderSettings_() {
         </span>
       </div>
       <div class="adv-row">
-        <span class="adv-label">Bold chart text</span>
+        <span class="adv-label">${L('Bold chart text', 'טקסט מודגש')}</span>
         <span class="adv-controls"><div class="switch-toggle" id="prefBoldToggle" onclick="toggleDisplayBold()" role="button" aria-pressed="false"><span class="knob"></span></div></span>
       </div>
       <div class="adv-row">
-        <span class="adv-label">Show chords</span>
+        <span class="adv-label">${L('Show chords', 'הצגת אקורדים')}</span>
         <span class="adv-controls"><div class="switch-toggle" id="prefShowChordsToggle" onclick="toggleDisplayShowChords()" role="button" aria-pressed="true"><span class="knob"></span></div></span>
       </div>
       <div class="adv-row instr-row">
-        <span class="adv-label">Theme</span>
+        <span class="adv-label">${L('Theme', 'מראה')}</span>
         <span class="adv-controls instr-pills">
-          <button type="button" class="chip" id="prefTheme_light" onclick="setThemePref('light')">☀ Light</button>
-          <button type="button" class="chip" id="prefTheme_dark" onclick="setThemePref('dark')">☾ Dark</button>
-          <button type="button" class="chip" id="prefTheme_auto" onclick="setThemePref('auto')" title="Follow your phone or computer's setting">Auto</button>
+          <button type="button" class="chip" id="prefTheme_light" onclick="setThemePref('light')">☀ ${L('Light', 'בהיר')}</button>
+          <button type="button" class="chip" id="prefTheme_dark" onclick="setThemePref('dark')">☾ ${L('Dark', 'כהה')}</button>
+          <button type="button" class="chip" id="prefTheme_auto" onclick="setThemePref('auto')" title="${L('Follow your phone or computer\'s setting', 'לפי ההגדרה של הטלפון או המחשב')}">${L('Auto', 'אוטומטי')}</button>
         </span>
       </div>
       <div class="adv-row instr-row">
-        <span class="adv-label">Chord pictures</span>
+        <span class="adv-label">${L('Chord pictures', 'תרשימי אקורדים')}</span>
         <span class="adv-controls instr-pills">
-          <button type="button" class="chip" id="prefInstr_guitar" onclick="setChordInstrument('guitar')">Guitar</button>
-          <button type="button" class="chip" id="prefInstr_ukulele" onclick="setChordInstrument('ukulele')">Ukulele</button>
-          <button type="button" class="chip" id="prefInstr_piano" onclick="setChordInstrument('piano')">Piano</button>
+          <button type="button" class="chip" id="prefInstr_guitar" onclick="setChordInstrument('guitar')">${L('Guitar', 'גיטרה')}</button>
+          <button type="button" class="chip" id="prefInstr_ukulele" onclick="setChordInstrument('ukulele')">${L('Ukulele', 'יוקלילי')}</button>
+          <button type="button" class="chip" id="prefInstr_piano" onclick="setChordInstrument('piano')">${L('Piano', 'פסנתר')}</button>
         </span>
       </div>
-      <div class="instr-explain muted" id="prefInstrExplain" hidden>Tap any chord in a song to see how to play it on <span id="prefInstrName">ukulele</span>. It shows exactly the chord that's written — if the song says <b>F</b>, you'll see an F chord.</div>
+      <div class="instr-explain muted" id="prefInstrExplain" hidden>${L(`Tap any chord in a song to see how to play it on <span id="prefInstrName">ukulele</span>. It shows exactly the chord that's written — if the song says <b>F</b>, you'll see an F chord.`, `הקישו על אקורד בשיר כדי לראות איך מנגנים אותו ב<span id="prefInstrName">יוקלילי</span>. מוצג בדיוק האקורד שכתוב — אם בשיר כתוב <b>F</b>, תראו אקורד F.`)}</div>
     
     </div>
     <div class="card">
-      <h3>Language</h3>
+      <h3>${L('Language', 'שפה')}</h3>
       <div class="adv-row instr-row" style="border:none;">
-        <span class="adv-label">App language</span>
+        <span class="adv-label">${L('App language', 'שפת האפליקציה')}</span>
         <span class="adv-controls instr-pills">
           <button type="button" class="chip${uiLang !== 'he' ? ' active' : ''}" onclick="if(uiLang==='he')toggleUiLang()">English</button>
           <button type="button" class="chip${uiLang === 'he' ? ' active' : ''}" onclick="if(uiLang!=='he')toggleUiLang()">עברית</button>
@@ -9296,6 +9299,28 @@ function appModeCardHtml_() {
       <div class="muted" style="font-size:11.5px;margin-top:8px;">People, not visits. Someone who used both counts as home screen.${since ? ` Counting since ${escapeHtml(since)}.` : ''}${older ? ` ${older} visitor${older === 1 ? '' : 's'} still on an older copy of the app aren't included yet.` : ''}</div>
     </div>`;
 }
+// "App language": Hebrew vs English, by each person's most recent visit.
+function appLangCardHtml_() {
+  if (!appModeStats || !('lang30' in appModeStats)) return '';
+  const L = appModeStats[appModePeriod === 'days7' ? 'lang7' : 'lang30'] || {};
+  const he = L.he || 0, en = L.en || 0, tot = he + en;
+  const pct = n => tot ? Math.round(n * 100 / tot) + '%' : '—';
+  const since = appModeStats.langSince ? new Date(appModeStats.langSince + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
+  return `<div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+        <div class="muted">App language</div>
+        <div class="subtabs" style="margin:0;">
+          <button class="${appModePeriod === 'days7' ? 'active' : ''}" onclick="appModePeriod='days7';renderAdminStatsOverview()">7 days</button>
+          <button class="${appModePeriod === 'days30' ? 'active' : ''}" onclick="appModePeriod='days30';renderAdminStatsOverview()">30 days</button>
+        </div>
+      </div>
+      ${tot ? `<div style="display:flex;gap:10px;">
+          <div class="detail-tile stat-hero"><div class="tile-value">${pct(he)}</div><div class="tile-label">Hebrew (${he})</div></div>
+          <div class="detail-tile stat-plain"><div class="tile-value">${pct(en)}</div><div class="tile-label">English (${en})</div></div>
+        </div>` : `<div class="muted" style="font-size:13px;">No data yet — it starts counting from the first visits on the updated app.</div>`}
+      <div class="muted" style="font-size:11.5px;margin-top:8px;">People, not visits — by the language on their most recent visit.${since ? ` Counting since ${escapeHtml(since)}.` : ''}</div>
+    </div>`;
+}
 function loadAdminStatsOverview() {
   if (statsOverviewCache) { renderAdminStatsOverview(); return; }
   const body = document.getElementById('adminBody');
@@ -9392,7 +9417,8 @@ function renderAdminStatsOverview() {
       if (!obj) return '';
       return `<div class="card"><div class="muted" style="margin-bottom:8px;">${title}</div>${countryBreakdownHtml_(obj)}<div class="muted" style="font-size:11.5px;margin-top:8px;">Based on each device's time-zone setting.</div></div>`;
     })()}
-    ${appModeCardHtml_()}`;
+    ${appModeCardHtml_()}
+    ${appLangCardHtml_()}`;
 }
 
 /* ============================================================
