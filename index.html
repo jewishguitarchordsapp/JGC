@@ -1163,6 +1163,444 @@ function t(key) {
   const dict = I18N[uiLang] || I18N.en;
   return (key in dict) ? dict[key] : (I18N.en[key] || key);
 }
+// ---- Hebrew for the rest of the app (DOM translation layer) ----------------
+// Most screens were written in English only. Rather than rewriting every
+// template, in Hebrew mode we swap known English UI text for Hebrew right
+// after it's put on the screen (exact-text dictionary + a few patterns).
+// User content (song titles, lyrics, chords, messages, names - anything
+// marked dir="auto"), the song editor and the Admin area are left alone.
+const HE_UI = {};        // 'English text' -> 'Hebrew text' (filled below)
+const HE_UI_PATTERNS = []; // [RegExp, (m) => 'Hebrew'] tried when no exact match
+const TR_SKIP_SEL = '#chartScroll, .chat-thread, .chat-card-preview, textarea, script, style, svg, .no-tr, [dir="auto"]:not(.backlink), .print-sheet, .print-measure, .chord-tap, [data-chord], .print-pages, .chord-diagram-name, .playlist-title, .userbox .name, .playlist-card .title, #adminBody';
+const TR_ATTRS = ['placeholder', 'title', 'aria-label'];
+// Chord names, single letters (A–Z index), speeds, emails etc. never change.
+const TR_NEVER_RE = /^(?:[A-Z]|[A-G](?:#|♭|b)?(?:m|maj|min|dim|aug|sus|add|M)?\d*(?:sus\d|add\d|maj\d|b\d|#\d)*(?:\/[A-G](?:#|♭|b)?)?|[\d.]+x|A[↓↑]|jgcapp\.org|JGC App|\S+@\S+\.\S+|https?:\/\/\S+)$/;
+let trMissing_ = null;
+Object.assign(HE_UI, {
+  "Menu": "תפריט",
+  "Go to Welcome": "לדף הפתיחה",
+  "Guitar Tuner": "טיונר לגיטרה",
+  "Share this app": "שיתוף האפליקציה",
+  "Close menu": "סגירת התפריט",
+  "Sign out": "התנתקות",
+  "Sign out of this device": "התנתקות במכשיר הזה",
+  "Dismiss": "סגירה",
+  "Install App": "התקנת האפליקציה",
+  "Install this app: tap": "להתקנת האפליקציה: הקישו על",
+  "Share": "שיתוף",
+  ", then": ", ואז על",
+  "Add to Home Screen": "הוספה למסך הבית",
+  "Install this app on your device for quick, full-screen access.": "התקינו את האפליקציה במכשיר לגישה מהירה במסך מלא.",
+  "Copy this link:": "העתיקו את הקישור:",
+  "Done": "סיום",
+  "Copied": "הועתק",
+  "Link copied — paste it to share the app!": "הקישור הועתק — הדביקו אותו כדי לשתף את האפליקציה!",
+  "Refresh now": "רענון עכשיו",
+  "Synced at — ·": "סונכרן — ·",
+  "📡 You're offline — showing saved content. Changes can't be made until you're back online.": "📡 אין חיבור לאינטרנט — מוצג תוכן שמור. אי אפשר לשמור שינויים עד שהחיבור יחזור.",
+  "Save": "שמירה",
+  "Cancel": "ביטול",
+  "OK": "אישור",
+  "Close": "סגירה",
+  "Delete": "מחיקה",
+  "Edit": "עריכה",
+  "Remove": "הסרה",
+  "Add": "הוספה",
+  "Create": "יצירה",
+  "Clear": "ניקוי",
+  "Try again": "נסו שוב",
+  "Settings": "הגדרות",
+  "Send": "שליחה",
+  "Set": "קביעה",
+  "Loading…": "טוען…",
+  "‹ Prev": "‹ הקודם",
+  "Next ›": "הבא ›",
+  "NEW": "חדש",
+  "today": "היום",
+  "1 day ago": "לפני יום",
+  "Sort: A–Z": "מיון: א–ת",
+  "Available Offline": "זמין ללא אינטרנט",
+  "No favorites yet — tap the heart on a song.": "עדיין אין מועדפים — הקישו על הלב ליד שיר.",
+  "Sign in to save favorites.": "התחברו כדי לשמור מועדפים.",
+  "Edit Known Chords": "עריכת האקורדים שלי",
+  "No songs match your known chords yet.": "עדיין אין שירים שמתאימים לאקורדים שלכם.",
+  "No new songs in the last 30 days.": "לא נוספו שירים חדשים ב-30 הימים האחרונים.",
+  "No songs match your search/filter.": "לא נמצאו שירים מתאימים.",
+  "No matches yet — lyric search is still loading the full song text.": "עדיין אין תוצאות — החיפוש במילים עוד טוען את טקסט השירים.",
+  "Can’t find this song?": "לא מוצאים את השיר?",
+  "Not the song you were looking for?": "זה לא השיר שחיפשתם?",
+  "🎵 Request it": "🎵 בקשו אותו",
+  "Remove your favorites from offline storage on this device?": "להסיר את המועדפים מהשמירה ללא אינטרנט במכשיר הזה?",
+  "Remove offline copy": "הסרת העותק השמור",
+  "Make favorites available offline on this device?": "לשמור את המועדפים לשימוש ללא אינטרנט במכשיר הזה?",
+  "Make Available": "שמירה",
+  "Favorite a few songs first.": "קודם הוסיפו כמה שירים למועדפים.",
+  "No songs to pick from yet.": "עדיין אין שירים לבחירה.",
+  "Sign in with Google first to save favorites.": "כדי לשמור מועדפים צריך קודם להתחבר עם Google.",
+  "Drag to reorder": "גררו כדי לשנות סדר",
+  "Artists": "זמרים",
+  "Language": "שפה",
+  "Tags": "קטגוריות",
+  "None yet": "עדיין אין",
+  "None yet.": "עדיין אין.",
+  "No artists found.": "לא נמצאו זמרים.",
+  "Chords you know": "אקורדים שאתם יודעים",
+  "Tap the chords you can already play. \"Known Songs\" will show songs that only use these.": "הקישו על האקורדים שאתם כבר יודעים לנגן. ב\"שירים שאני יודע\" יופיעו שירים שמשתמשים רק בהם.",
+  "Sign in to set your known chords.": "התחברו כדי לבחור את האקורדים שלכם.",
+  "‹ Previous Song": "‹ השיר הקודם",
+  "Next Song ›": "השיר הבא ›",
+  "Capo": "קאפו",
+  "Set your capo": "הקאפו שלי",
+  "My capo": "הקאפו שלי",
+  "Favorite": "מועדף",
+  "Favorited": "במועדפים",
+  "+ Playlist": "+ פלייליסט",
+  "Report": "דיווח",
+  "Print": "הדפסה",
+  "Chords in song:": "אקורדים בשיר:",
+  "none tagged": "אין",
+  "Loading chords…": "טוען אקורדים…",
+  "Loading chart…": "טוען את השיר…",
+  "Couldn’t load this chart — the connection is slow right now.": "לא הצלחנו לטעון את השיר — החיבור איטי כרגע.",
+  "5s delay": "השהיה של 5 שניות",
+  "Advanced": "מתקדם",
+  "Bold": "מודגש",
+  "Hide chords": "הסתרת אקורדים",
+  "Show chords": "הצגת אקורדים",
+  "No capo": "בלי קאפו",
+  "Transpose": "טרנספוזיציה",
+  "Shuffle again": "שיר אקראי נוסף",
+  "Song not found.": "השיר לא נמצא.",
+  "Lock: remember this transpose for this song": "נעילה: לזכור את הטרנספוזיציה הזו לשיר הזה",
+  "Lock transpose for this song": "נעילת הטרנספוזיציה לשיר הזה",
+  "Locked: this song opens at this transpose. Tap to unlock.": "נעול: השיר ייפתח בטרנספוזיציה הזו. הקישו כדי לבטל.",
+  "Unlocked — this song will open at its normal key next time.": "הנעילה בוטלה — בפעם הבאה השיר ייפתח בסולם הרגיל.",
+  "Transpose the song first, then tap the lock to keep it.": "קודם שנו את הטרנספוזיציה, ואז הקישו על המנעול כדי לשמור אותה.",
+  "What's wrong with this chart?": "מה לא תקין בשיר?",
+  "Submit report": "שליחת דיווח",
+  "Thanks — your report was sent.": "תודה — הדיווח נשלח.",
+  "Sign in with Google to report an issue with this song.": "התחברו עם Google כדי לדווח על בעיה בשיר.",
+  "e.g. the chords in verse 2 are off by one word": "למשל: האקורדים בבית 2 זזו במילה אחת",
+  "Pick the capo fret that's most comfortable for you on this song. This won't change how the chords are displayed.": "בחרו את שריג הקאפו שהכי נוח לכם בשיר הזה. זה לא משנה את האקורדים שמוצגים.",
+  "Drag to move": "גררו להזזה",
+  "Pause": "השהיה",
+  "Resume": "המשך",
+  "Stop": "עצירה",
+  "Faster": "מהר יותר",
+  "Slower": "לאט יותר",
+  "No diagram available": "אין תרשים לאקורד הזה",
+  "closest simple chord shown": "מוצג האקורד הפשוט הקרוב ביותר",
+  "Still loading this song’s chart — try Print again in a moment.": "השיר עדיין נטען — נסו להדפיס שוב בעוד רגע.",
+  "Font": "גופן",
+  "Columns": "עמודות",
+  "Hebrew: right-to-left columns": "עברית: עמודות מימין לשמאל",
+  "Paper": "נייר",
+  "1 page": "עמוד אחד",
+  "+ New Playlist": "+ פלייליסט חדש",
+  "My Playlists": "הפלייליסטים שלי",
+  "Shared with me": "שותפו איתי",
+  "Public Playlists": "פלייליסטים ציבוריים",
+  "Search public playlists…": "חיפוש בפלייליסטים ציבוריים…",
+  "‹ Back to Playlists": "‹ חזרה לפלייליסטים",
+  "+ Add Songs": "+ הוספת שירים",
+  "Remove from playlist": "הסרה מהפלייליסט",
+  "No songs in this playlist yet.": "עדיין אין שירים בפלייליסט הזה.",
+  "Loading songs…": "טוען שירים…",
+  "Playlist not found.": "הפלייליסט לא נמצא.",
+  "Sign in with Google to make your own playlists.": "התחברו עם Google כדי ליצור פלייליסטים משלכם.",
+  "New Playlist": "פלייליסט חדש",
+  "Playlist name": "שם הפלייליסט",
+  "Delete playlist": "מחיקת פלייליסט",
+  "Delete this playlist? This cannot be undone.": "למחוק את הפלייליסט? אי אפשר לבטל את זה.",
+  "This playlist has no songs yet.": "עדיין אין שירים בפלייליסט הזה.",
+  "Enter a playlist name.": "הקלידו שם לפלייליסט.",
+  "Enter a valid email address.": "הקלידו כתובת אימייל תקינה.",
+  "Sign in with Google first to use playlists.": "כדי להשתמש בפלייליסטים צריך קודם להתחבר עם Google.",
+  "Playlist Settings": "הגדרות פלייליסט",
+  "Icon": "סמל",
+  "Visibility": "מי יכול לראות",
+  "Private": "פרטי",
+  "Shared": "משותף",
+  "Public": "ציבורי",
+  "Shared with": "משותף עם",
+  "Can edit": "יכולים לערוך",
+  "No one yet.": "עדיין אף אחד.",
+  "Email address": "כתובת אימייל",
+  "Everyone can find and open this playlist; it will say \"by Anonymous\".": "כולם יכולים למצוא ולפתוח את הפלייליסט; יופיע \"מאת: אנונימי\".",
+  "You have no playlists yet — create one below.": "עדיין אין לכם פלייליסטים — צרו אחד למטה.",
+  "Search by title or artist — English or Hebrew…": "חיפוש לפי שם שיר או זמר — באנגלית או בעברית…",
+  "Type to search the song database…": "הקלידו כדי לחפש שירים…",
+  "Added ✓": "נוסף ✓",
+  "No matching songs.": "לא נמצאו שירים.",
+  "Song Requests": "בקשות שירים",
+  "Send a Message": "שליחת הודעה",
+  "+ Request a Song": "+ בקשת שיר",
+  "Request a Song": "בקשת שיר",
+  "Looking for a song that isn't in the app? Request it here.": "מחפשים שיר שאין באפליקציה? בקשו אותו כאן.",
+  "Questions, ideas, or something not working": "שאלות, רעיונות, או משהו שלא עובד",
+  "This app is built and kept running by a volunteer, in whatever spare time is available — so song requests, fixes, and new features may take a little while to show up. Thank you for your patience! Messages written with warmth and politeness are always easier (and nicer) to respond to.": "האפליקציה נבנית ומתוחזקת בהתנדבות, בזמן הפנוי — לכן בקשות שירים, תיקונים ותכונות חדשות עשויים לקחת קצת זמן. תודה על הסבלנות! הודעות שנכתבות בחום ובנימוס תמיד קל (ונעים) יותר לענות עליהן.",
+  "Status": "סטטוס",
+  "Song": "שיר",
+  "Artist": "זמר",
+  "No requests yet.": "עדיין אין בקשות.",
+  "Add lyrics": "הוספת מילים",
+  "Added — this song is now in the app!": "נוסף — השיר כבר באפליקציה!",
+  "Waiting — your request has been received and hasn’t been reviewed yet.": "ממתין — הבקשה התקבלה ועדיין לא נבדקה.",
+  "Looking for lyrics — we’d like to add this song but need the lyrics. Tap “Add lyrics” to send them.": "מחפשים מילים — נשמח להוסיף את השיר אבל צריך את המילים. הקישו על \"הוספת מילים\" כדי לשלוח אותן.",
+  "Not added — this request was declined. Any note from the admin is shown underneath.": "לא נוסף — הבקשה נדחתה. הערה מהמנהל, אם יש, מופיעה מתחת.",
+  "Up to 2 requests per week — you have": "עד 2 בקשות בשבוע — נשארו לכם",
+  "left this week.": "השבוע.",
+  "Up to 2 requests per week. You've used both — your next request is available": "עד 2 בקשות בשבוע. השתמשתם בשתיהן — הבקשה הבאה תתאפשר",
+  "You've already made 2 song requests this week.": "כבר שלחתם 2 בקשות שירים השבוע.",
+  "Your next request will be available": "הבקשה הבאה תתאפשר",
+  "Meanwhile, you can check on your requests on this page, or send a message below.": "בינתיים אפשר לעקוב אחרי הבקשות בעמוד הזה, או לשלוח הודעה למטה.",
+  "For anything that isn't a song request. Found a mistake in a song? Use": "לכל דבר שאינו בקשת שיר. מצאתם טעות בשיר? השתמשו ב-",
+  "⚠ Report": "⚠ דיווח",
+  "on that song's page.": "בעמוד של השיר.",
+  "Questions, ideas, problems… (for a new song, please use Song Requests above)": "שאלות, רעיונות, בעיות… (לשיר חדש, השתמשו בבקשות שירים למעלה)",
+  "Send lyrics": "שליחת מילים",
+  "Paste or type the lyrics here": "הדביקו או הקלידו את המילים כאן",
+  "Thanks! Lyrics sent.": "תודה! המילים נשלחו.",
+  "Is this a song request?": "זו בקשת שיר?",
+  "Song requests go through": "בקשות שירים נשלחות דרך",
+  ", so they're kept in one list and you can see when your song is added.": ", כך שכולן נשמרות ברשימה אחת ותוכלו לראות מתי השיר נוסף.",
+  "Send as a message anyway": "לשלוח בכל זאת כהודעה",
+  "That request isn’t in the list anymore.": "הבקשה כבר לא ברשימה.",
+  "Song title *": "שם השיר *",
+  "Artist *": "זמר *",
+  "YouTube link *": "קישור ליוטיוב *",
+  "Categories (optional)": "קטגוריות (לא חובה)",
+  "e.g. Chanukah, Slow": "למשל: חנוכה, איטי",
+  "Lyrics (optional)": "מילים (לא חובה)",
+  "Note (optional)": "הערה (לא חובה)",
+  "Before you request, please check:": "לפני ששולחים בקשה, בדקו בבקשה:",
+  "(all required)": "(כל הסעיפים חובה)",
+  "The song has lyrics.": "לשיר יש מילים.",
+  "Without words, it’s very hard to follow where the chords change, so songs without lyrics (like most niggunim) can’t be added.": "בלי מילים קשה מאוד לעקוב מתי האקורדים מתחלפים, ולכן אי אפשר להוסיף שירים בלי מילים (כמו רוב הניגונים).",
+  "The YouTube video has at least 800 views.": "לסרטון ביוטיוב יש לפחות 800 צפיות.",
+  "We get a lot of requests, so more popular songs are added first.": "מגיעות הרבה בקשות, ולכן שירים פופולריים יותר נוספים קודם.",
+  "The YouTube link is for this exact song.": "הקישור ביוטיוב הוא בדיוק לשיר הזה.",
+  "The video is used to hear the song and work out the chords, so a different video means it can’t be added.": "הסרטון משמש כדי לשמוע את השיר ולמצוא את האקורדים, ולכן עם סרטון אחר אי אפשר להוסיף אותו.",
+  "The song fits the app’s religious standards.": "השיר מתאים לסטנדרטים הדתיים של האפליקציה.",
+  "If you’re not sure, it’s best to choose a different song.": "אם אתם לא בטוחים, עדיף לבחור שיר אחר.",
+  "Requests that don't meet these will be declined, and still count toward your 2 requests for the week.": "בקשות שלא עומדות בתנאים יידחו, ועדיין ייספרו מתוך 2 הבקשות של השבוע.",
+  "Request Song": "שליחת בקשה",
+  "Please tick all four boxes to send your request.": "סמנו את כל ארבע התיבות כדי לשלוח את הבקשה.",
+  "Sign in with Google to request a song or message your teacher.": "התחברו עם Google כדי לבקש שיר או לשלוח הודעה.",
+  "↩ Reply": "↩ תגובה",
+  "⧉ Copy": "⧉ העתקה",
+  "(edited)": "(נערך)",
+  "Reactions": "תגובות",
+  "No messages yet — say hi!": "עדיין אין הודעות — תגידו שלום!",
+  "Replying about:": "בתגובה ל:",
+  "Profile": "פרופיל",
+  "Change photo": "החלפת תמונה",
+  "Remove photo": "הסרת התמונה",
+  "Name": "שם",
+  "My known chords": "האקורדים שלי",
+  "Sign in to see your profile.": "התחברו כדי לראות את הפרופיל.",
+  "Please enter a name.": "הקלידו שם.",
+  "Saving…": "שומר…",
+  "Saved!": "נשמר!",
+  "Press Save to keep this photo.": "הקישו על שמירה כדי לשמור את התמונה.",
+  "That file isn’t a picture we can use.": "אי אפשר להשתמש בקובץ הזה כתמונה.",
+  "Uses your device's microphone to listen to the string you're playing and shows how close it is to standard guitar tuning. The first time, your browser will ask you to allow microphone access.": "הטיונר משתמש במיקרופון של המכשיר כדי לשמוע את המיתר שאתם מנגנים ולהראות כמה הוא קרוב לכיוון הסטנדרטי של הגיטרה. בפעם הראשונה הדפדפן יבקש אישור לשימוש במיקרופון.",
+  "Tap to start tuning": "הקישו כדי להתחיל לכוון",
+  "Stop Tuning": "עצירת הכיוון",
+  "Low E (6th string)": "E נמוך (מיתר 6)",
+  "A (5th string)": "A (מיתר 5)",
+  "D (4th string)": "D (מיתר 4)",
+  "G (3rd string)": "G (מיתר 3)",
+  "B (2nd string)": "B (מיתר 2)",
+  "High E (1st string)": "E גבוה (מיתר 1)",
+  "Lashon Hakodesh": "לשון הקודש",
+  "English": "אנגלית",
+  "Hebrew - General": "עברית - כללי",
+  "Hebrew": "עברית",
+  "Yiddish": "יידיש",
+  "Hebrew - Torah Theme": "עברית - נושא תורני",
+  "Aramaic": "ארמית",
+  "Russian": "רוסית",
+  "French": "צרפתית",
+  "Italian": "איטלקית",
+  "Spanish": "ספרדית",
+  "Ladino": "לדינו",
+  "Ukrainian": "אוקראינית",
+  "Shabbos": "שבת",
+  "Shabbat": "שבת",
+  "Wedding": "חתונה",
+  "Kid's": "ילדים",
+  "Kids": "ילדים",
+  "Children": "ילדים",
+  "Chanukah": "חנוכה",
+  "Purim": "פורים",
+  "Pesach": "פסח",
+  "Passover": "פסח",
+  "Sukkos": "סוכות",
+  "Sukkot": "סוכות",
+  "Shavuos": "שבועות",
+  "Shavuot": "שבועות",
+  "Rosh Hashana": "ראש השנה",
+  "Rosh Hashanah": "ראש השנה",
+  "Yom Kippur": "יום כיפור",
+  "Yomim Noraim": "ימים נוראים",
+  "High Holidays": "ימים נוראים",
+  "Tisha B'Av": "תשעה באב",
+  "Three Weeks": "בין המצרים",
+  "Sefira": "ספירה",
+  "Sefirah": "ספירה",
+  "Lag Baomer": "ל\"ג בעומר",
+  "Lag B'Omer": "ל\"ג בעומר",
+  "Yom Tov": "יום טוב",
+  "Holidays": "חגים",
+  "Tu B'Shvat": "ט\"ו בשבט",
+  "Elul": "אלול",
+  "Slow": "איטי",
+  "Upbeat": "קצבי",
+  "Fast": "מהיר",
+  "Kumzitz": "קומזיץ",
+  "Niggun": "ניגון",
+  "Niggunim": "ניגונים",
+  "Easy": "קל",
+  "Beginner": "למתחילים",
+  "Inspirational": "מרגש",
+  "Emotional": "מרגש",
+  "Happy": "שמח",
+  "Simcha": "שמחה",
+  "Dance": "ריקוד",
+  "Classic": "קלאסי",
+  "Classics": "קלאסיקות",
+  "Chassidish": "חסידי",
+  "Israeli": "ישראלי",
+  "Acapella": "אקפלה",
+  "Prayer": "תפילה",
+  "Tefillah": "תפילה",
+  "Love": "אהבה",
+  "Geula": "גאולה",
+  "Moshiach": "משיח",
+  "Bar Mitzvah": "בר מצווה",
+  "Bas Mitzvah": "בת מצווה",
+  "Shabbos Table": "שולחן שבת",
+  "Zemiros": "זמירות",
+  "Zemirot": "זמירות",
+  "Kids Songs": "שירי ילדים",
+  "Summer": "קיץ",
+  "Camp": "מחנה",
+  "Jerusalem": "ירושלים",
+  "Eretz Yisroel": "ארץ ישראל",
+  "Eretz Yisrael": "ארץ ישראל"
+});
+(function () {
+  const T = (s) => trLookup_(s) || s;
+  const le = (x) => { x = T(x); return /^[֐-׿]/.test(x) ? 'ל' + (x[0] === 'ה' && x.length > 2 ? x.slice(1) : x) : 'ל־' + x; };
+  const be = (x) => { x = T(x); return /^[֐-׿]/.test(x) ? 'ב' + (x[0] === 'ה' && x.length > 2 ? x.slice(1) : x) : 'ב־' + x; };
+  const VIS = { private: 'פרטי', shared: 'משותף', public: 'ציבורי' };
+  const reqWord = (n) => n === 1 ? 'בקשה אחת' : n + ' בקשות';
+  Object.assign(HE_UI, { 'Songs': 'שירים', 'Home': 'דף הבית', 'Search': 'חיפוש', 'Known Chords': 'האקורדים שלי', 'Tuner': 'טיונר', 'Playlist': 'פלייליסט', 'Admin': 'ניהול', 'Add Songs': 'הוספת שירים' });
+  HE_UI_PATTERNS.push(
+    [/^‹ Back to (.+)$/, m => '‹ חזרה ' + le(m[1])],
+    [/^Reset to (\d+)$/, m => 'איפוס ל-' + m[1]],
+    [/^(\d+) days ago$/, m => 'לפני ' + m[1] + ' ימים'],
+    [/^· (.+)$/, m => { const r = trLookup_(m[1]); return r == null ? null : '· ' + r; }],
+    [/^(?:(\d+) songs · )?(Private|Shared|Public) · by (.+)$/, m => (m[1] ? m[1] + ' שירים · ' : '') + VIS[m[2].toLowerCase()] + ' · מאת ' + m[3]],
+    [/^by (.+) · (private|shared|public)$/i, m => 'מאת ' + m[1] + ' · ' + VIS[m[2].toLowerCase()]],
+    [/^Page (\d+) of (\d+)$/, m => 'עמוד ' + m[1] + ' מתוך ' + m[2]],
+    [/^More matches in (.+)$/, m => 'תוצאות נוספות ' + be(m[1])],
+    [/^Matches in (.+)$/, m => 'תוצאות ' + be(m[1])],
+    [/^No matches in (.+)\.$/, m => 'אין תוצאות ' + be(m[1]) + '.'],
+    [/^See all (\d+) in (.+)$/, m => 'לכל ' + m[1] + ' התוצאות ' + be(m[2])],
+    [/^(Artist|Language|Tag): (.+) ✕$/, m => ({ Artist: 'זמר', Language: 'שפה', Tag: 'קטגוריה' })[m[1]] + ': ' + T(m[2]) + ' ✕'],
+    [/^(\d+) requests? · (\d+) of 2 left this week$/, m => reqWord(+m[1]) + ' · נשארו ' + m[2] + ' מתוך 2 השבוע'],
+    [/^(\d+) requests? needs? lyrics from you$/, m => (m[1] === '1' ? 'בקשה אחת מחכה' : m[1] + ' בקשות מחכות') + ' למילים ממכם'],
+    [/^Synced at (.+?) ·$/, m => 'סונכרן ב-' + m[1] + ' ·'],
+    [/^Locked — this song will open transposed (.+) next time\.$/, m => 'ננעל — בפעם הבאה השיר ייפתח בטרנספוזיציה ' + m[1] + '.'],
+    [/^Make "(.+)" available offline on this device\?$/, m => 'לשמור את "' + m[1] + '" לשימוש ללא אינטרנט במכשיר הזה?'],
+    [/^Remove "(.+)" from offline storage on this device\?$/, m => 'להסיר את "' + m[1] + '" מהשמירה ללא אינטרנט במכשיר הזה?'],
+    [/^Couldn’t load this playlist: (.+)$/, m => 'לא הצלחנו לטעון את הפלייליסט: ' + m[1]],
+    [/^Add Songs to "(.+)"$/, m => 'הוספת שירים ל"' + m[1] + '"'],
+    [/^chart shows (.+) \(capo (\d+)\)$/, m => 'בשיר כתוב ' + m[1] + ' (קאפו ' + m[2] + ')'],
+    [/^· bass (.+)$/, m => '· בס ' + m[1]],
+    [/^React (.+)$/, m => 'תגובה ' + m[1]],
+    [/^Could not save offline: (.+)$/, m => 'לא הצלחנו לשמור לשימוש ללא אינטרנט: ' + m[1]],
+    [/^(\d+) songs?$/, m => m[1] === '1' ? 'שיר אחד' : m[1] + ' שירים']
+  );
+})();
+ // set to a Set() in tests to collect untranslated text
+function trLookup_(s) {
+  if (Object.prototype.hasOwnProperty.call(HE_UI, s)) return HE_UI[s];
+  for (const [re, fn] of HE_UI_PATTERNS) { const m = s.match(re); if (m) { const r = fn(m); if (r != null) return r; } }
+  return null;
+}
+function trSkipView_() { return typeof view !== 'undefined' && (view.name === 'admin' || view.name === 'edit'); }
+function trText_(node) {
+  const raw = node.nodeValue;
+  if (!raw || !/[A-Za-z]/.test(raw)) return;
+  if (node.__he !== undefined && raw === node.__he) return; // already ours
+  const core = raw.replace(/\s+/g, ' ').trim();
+  if (!core) return;
+  if (TR_NEVER_RE.test(core)) return;
+  const he = trLookup_(core);
+  if (he == null) { if (trMissing_ && !/[\u0590-\u05FF]/.test(core)) trMissing_.add(core); return; }
+  const lead = /^\s/.test(raw) ? ' ' : '', trail = /\s$/.test(raw) ? ' ' : '';
+  node.__en = raw;
+  node.__he = lead + he + trail;
+  node.nodeValue = node.__he;
+}
+function trEl_(el) {
+  for (const a of TR_ATTRS) {
+    const v = el.getAttribute && el.getAttribute(a);
+    if (!v || !/[A-Za-z]/.test(v)) continue;
+    if (el.hasAttribute('data-en-' + a)) continue; // already ours
+    const core = v.replace(/\s+/g, ' ').trim();
+    if (TR_NEVER_RE.test(core)) continue;
+    const he = trLookup_(core);
+    if (he == null) { if (trMissing_ && !/[\u0590-\u05FF]/.test(core)) trMissing_.add('@' + a + ': ' + v); continue; }
+    el.setAttribute('data-en-' + a, v); el.setAttribute(a, he);
+  }
+}
+function translateDom_(root) {
+  if (uiLang !== 'he' || !root) return;
+  const appEl = document.getElementById('app');
+  const skipApp = trSkipView_();
+  const inSkip = (el) => (el.closest && el.closest(TR_SKIP_SEL)) || (skipApp && appEl && appEl.contains(el));
+  if (root.nodeType === 3) { if (root.parentElement && !inSkip(root.parentElement)) trText_(root); return; }
+  if (root.nodeType !== 1 || inSkip(root)) return;
+  trEl_(root);
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+    acceptNode(n) {
+      if (n.nodeType === 1) return n.matches(TR_SKIP_SEL) || (skipApp && n === appEl) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+      return NodeFilter.FILTER_ACCEPT;
+    }
+  });
+  let n;
+  while ((n = w.nextNode())) { if (n.nodeType === 3) trText_(n); else trEl_(n); }
+}
+// Back to English without a reload: put the original text back.
+function untranslateDom_() {
+  const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  let n; while ((n = w.nextNode())) if (n.__en !== undefined) { n.nodeValue = n.__en; delete n.__en; delete n.__he; }
+  TR_ATTRS.forEach(a => document.querySelectorAll('[data-en-' + a + ']').forEach(el => { el.setAttribute(a, el.getAttribute('data-en-' + a)); el.removeAttribute('data-en-' + a); }));
+}
+let trObserver_ = null;
+function startTranslateObserver_() {
+  if (trObserver_ || typeof MutationObserver === 'undefined') return;
+  trObserver_ = new MutationObserver(muts => {
+    if (uiLang !== 'he') return;
+    for (const m of muts) {
+      if (m.type === 'attributes') {
+        const el = m.target, a = m.attributeName, en = el.getAttribute('data-en-' + a);
+        if (en !== null && el.getAttribute(a) === trLookup_(en.replace(/\s+/g, ' ').trim())) continue;
+        el.removeAttribute('data-en-' + a);
+        if (!(el.closest && el.closest(TR_SKIP_SEL)) && !(trSkipView_() && el.closest && el.closest('#app'))) trEl_(el);
+        continue;
+      }
+      if (m.type === 'characterData') { const nd = m.target; if (nd.__en === undefined || nd.nodeValue.trim() !== String(trLookup_(nd.__en.replace(/\s+/g, ' ').trim()))) { delete nd.__en; translateDom_(nd); } continue; }
+      m.addedNodes.forEach(nd => translateDom_(nd));
+    }
+  });
+  trObserver_.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: TR_ATTRS });
+}
+
 function applyUiLangDir_() {
   document.documentElement.setAttribute('dir', uiLang === 'he' ? 'rtl' : 'ltr');
   document.documentElement.setAttribute('lang', uiLang === 'he' ? 'he' : 'en');
@@ -1230,9 +1668,11 @@ function updateLangToggleButtons_() {
 function toggleUiLang() {
   uiLang = uiLang === 'he' ? 'en' : 'he';
   try { localStorage.setItem(UI_LANG_KEY, uiLang); } catch (e) {}
+  if (uiLang !== 'he') untranslateDom_();
   applyUiLangDir_();
   updateLangToggleButtons_();
   render();
+  if (uiLang === 'he') { startTranslateObserver_(); translateDom_(document.body); }
 }
 // A fixed set of icon+color cover choices for playlists — no custom photo
 // upload (decided against earlier), just pick-a-preset, stored as
@@ -7568,7 +8008,7 @@ function renderPlaylistDetail() {
   const queueIds = list.map(s => s.id);
   let html = `<span class="backlink" onclick="goTo('playlists')">‹ Back to Playlists</span>
     <div class="song-header">
-      <div style="display:flex;align-items:center;gap:10px;">${playlistIconHtml(p.icon, 36)}<div><h2 style="margin-bottom:2px">${escapeHtml(p.title)}</h2><div class="meta">by ${escapeHtml(playlistByLabel_(p))} · ${p.visibility}</div></div></div>
+      <div style="display:flex;align-items:center;gap:10px;">${playlistIconHtml(p.icon, 36)}<div><h2 style="margin-bottom:2px" dir="auto">${escapeHtml(p.title)}</h2><div class="meta">by ${escapeHtml(playlistByLabel_(p))} · ${p.visibility}</div></div></div>
       ${canEdit ? `<div><button class="btn" onclick="openAddSongsToPlaylist('${p.id}')">+ Add Songs</button> <button class="btn secondary" onclick="editPlaylistSettings('${p.id}')">Settings</button> <button class="btn danger" onclick="deletePlaylistConfirm('${p.id}')">Delete</button></div>` : ''}
     </div>`;
   // Offline availability is a personal, on-this-device thing — not tied to
@@ -7760,7 +8200,7 @@ function renderAddToPlaylistModal(songId) {
   const mine = viewAsUser ? (viewAsData.playlists||[]) : playlists.filter(p => p.owner_email === currentUser.email);
   openModal(`
     <h2>${t('add_to_playlist_title')}</h2>
-    ${mine.length ? `<div class="grid-cats">${mine.map(p => `<span class="chip ${addToPlaylistSelection.has(p.id)?'toggle-on':''}" onclick="toggleAddToPlaylistSelection('${p.id}','${songId}')">${escapeHtml(p.title)}</span>`).join('')}</div>` : `<p class="muted">You have no playlists yet — create one below.</p>`}
+    ${mine.length ? `<div class="grid-cats">${mine.map(p => `<span class="chip ${addToPlaylistSelection.has(p.id)?'toggle-on':''}" onclick="toggleAddToPlaylistSelection('${p.id}','${songId}')" dir="auto">${escapeHtml(p.title)}</span>`).join('')}</div>` : `<p class="muted">You have no playlists yet — create one below.</p>`}
     <label>${t('new_playlist_label')}</label>
     <div style="display:flex;gap:8px;">
       <input type="text" id="newPlaylistName" placeholder="${t('playlist_name_placeholder')}" onkeydown="if(event.key==='Enter'){event.preventDefault();createPlaylistForAdd('${songId}')}">
@@ -7949,7 +8389,7 @@ function renderContactBody() {
     html += `<div class="contact-panel">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">${requestQuotaHtml_().replace('<p class="muted">', '<p class="muted" style="margin:0;flex:1;min-width:180px;">')}<button class="btn${quotaNow.left ? '' : ' secondary'}" onclick="openRequestSongModal()">+ Request a Song</button></div>
       <div class="table-wrap" style="margin-top:10px;"><table><tr><th>Status</th><th>Song</th><th>Artist</th></tr>
-      ${pageSlice(myRequests, contactRequestsPage, 10).map(r => `<tr data-req-id="${escapeHtml(r.id)}"><td><span class="badge badge-explain ${r.status}" role="button" tabindex="0" title="${escapeHtml(requestStatusMeaning_(r.status))}" onclick="showToast(this.title)">${requestStatusSymbol(r.status)}</span>${r.status==='declined' && r.decline_reason ? `<br><span class="muted" style="font-size:11.5px;">${escapeHtml(r.decline_reason)}</span>` : ''}${r.status==='needs_lyrics' ? ` <button class="btn add-lyrics-btn" onclick="openAddRequestLyrics_('${r.id}')">Add lyrics</button>` : ''}</td><td dir="auto">${escapeHtml(r.song_title)}</td><td dir="auto">${escapeHtml(fmtArtists_(r.artist))}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No requests yet.</td></tr>'}
+      ${pageSlice(myRequests, contactRequestsPage, 10).map(r => `<tr data-req-id="${escapeHtml(r.id)}"><td><span class="badge badge-explain ${r.status}" role="button" tabindex="0" title="${escapeHtml(requestStatusMeaning_(r.status))}" onclick="showToast(this.title)">${requestStatusSymbol(r.status)}</span>${r.status==='declined' && r.decline_reason ? `<br><span class="muted" dir="auto" style="font-size:11.5px;">${escapeHtml(r.decline_reason)}</span>` : ''}${r.status==='needs_lyrics' ? ` <button class="btn add-lyrics-btn" onclick="openAddRequestLyrics_('${r.id}')">Add lyrics</button>` : ''}</td><td dir="auto">${escapeHtml(r.song_title)}</td><td dir="auto">${escapeHtml(fmtArtists_(r.artist))}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No requests yet.</td></tr>'}
       </table></div>
       ${pagerHtml(myRequests.length, contactRequestsPage, 'changeContactRequestsPage', 10)}
     </div>`;
@@ -8256,8 +8696,9 @@ function requestQuota_() {
 }
 function requestNextLabel_(d) {
   const sameYear = d.getFullYear() === new Date().getFullYear();
-  return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: sameYear ? undefined : 'numeric' })
-    + ' at ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  const loc = uiLang === 'he' ? 'he-IL' : undefined;
+  return d.toLocaleDateString(loc, { weekday: 'short', month: 'short', day: 'numeric', year: sameYear ? undefined : 'numeric' })
+    + (uiLang === 'he' ? ' בשעה ' : ' at ') + d.toLocaleTimeString(loc, { hour: 'numeric', minute: '2-digit' });
 }
 function requestQuotaHtml_() {
   const q = requestQuota_();
@@ -10117,6 +10558,7 @@ function highlightClosestString_(freq) {
    ============================================================ */
 applyUiLangDir_();
 updateLangToggleButtons_();
+startTranslateObserver_(); translateDom_(document.body);
 renderMenuDrawerSettings_();
 document.getElementById('shareIcon').src = ICONS.share;
 document.getElementById('shareBtn').onclick = shareApp;
