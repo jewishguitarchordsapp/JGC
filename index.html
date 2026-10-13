@@ -370,6 +370,19 @@
      page rather than blending into the requests table above it. */
   .chat-card{display:flex;align-items:center;gap:12px;background:#f2f4f5;border:1.5px solid var(--teal);border-radius:12px;padding:14px 16px;margin-top:24px;cursor:pointer;transition:background .15s ease;}
   .chat-card:hover{background:#e9edee;}
+  .msg-img-box{margin-top:6px;padding:8px 10px;border:1px dashed var(--border);border-radius:10px;font-size:13px;cursor:pointer;background:rgba(127,127,127,.06);}
+  .msg-img-box.gone{cursor:default;color:var(--muted);}
+  .msg-img-why{font-size:11.5px;color:var(--muted);margin-top:3px;line-height:1.35;}
+  .msg-img{display:block;max-width:100%;max-height:320px;border-radius:8px;margin-top:6px;cursor:zoom-in;}
+  .img-attach-preview{display:flex;gap:10px;align-items:center;margin:0 0 8px;padding:8px;border:1px solid var(--border);border-radius:10px;font-size:12.5px;background:var(--card);}
+  .img-attach-preview img{width:56px;height:56px;object-fit:cover;border-radius:6px;flex:none;}
+  .chat-img-btn{flex:none;width:40px;height:40px;padding:0;display:inline-flex;align-items:center;justify-content:center;}
+  .btn.chat-img-btn svg{width:20px !important;height:20px !important;flex:none;display:block;}
+  .btn.chat-img-btn{padding:0 !important;min-width:40px;}
+  .msg.admin .msg-img-box{border-color:rgba(255,255,255,.55);background:rgba(255,255,255,.12);color:inherit;}
+  .msg.admin .msg-img-why, .msg.admin .msg-img-box.gone{color:inherit;opacity:.85;}
+  .img-viewer{position:fixed;inset:0;z-index:4000;background:rgba(0,0,0,.88);display:flex;align-items:center;justify-content:center;padding:16px;cursor:zoom-out;}
+  .img-viewer img{max-width:100%;max-height:100%;border-radius:6px;}
   .chat-card.contact-card{margin-top:12px;}
   .chat-card.contact-card:first-child{margin-top:0;}
   .contact-panel{padding:12px 2px 4px;}
@@ -1497,6 +1510,8 @@ Object.assign(HE_UI, {
   const VIS = { private: 'פרטי', shared: 'משותף', public: 'ציבורי' };
   const reqWord = (n) => n === 1 ? 'בקשה אחת' : n + ' בקשות';
   Object.assign(HE_UI, {"Ahavas Yisroel": "אהבת ישראל", "Ahavas Yisrael": "אהבת ישראל", "Chabad": "חב\"ד", "Chabad Niggunim": "ניגוני חב\"ד", "Children's": "ילדים", "Chinuch": "חינוך", "Hallel": "הלל", "Motzei Shabbos": "מוצאי שבת", "Sephardic": "ספרדי", "Tehillim": "תהילים", "Teshuva": "תשובה", "The Rebbe": "הרבי", "Tishrei": "תשרי", "Torah": "תורה", "Yerushalayim": "ירושלים"});
+  Object.assign(HE_UI, {"Install the app": "התקנת האפליקציה", "Open this site in": "פתחו את האתר ב-", "Google Chrome": "Google Chrome", ", tap the": ", הקישו על התפריט", "menu (top right), then tap": "(למעלה), ואז על", "Install app": "התקנת אפליקציה", "(or": "(או", "Add to Home screen": "הוספה למסך הבית", "→": "→", "Install": "התקנה", ").": ").", "If it only offers “Create shortcut”, the app will open like a normal web page. Using Chrome usually fixes this. If the app was installed before, remove the old icon first.": "אם מופיע רק \"יצירת קיצור דרך\", האפליקציה תיפתח כמו דף אינטרנט רגיל. בדרך כלל פתיחה ב-Chrome פותרת את זה. אם האפליקציה הותקנה בעבר, מחקו קודם את הסמל הישן."});
+  Object.assign(HE_UI, {"Add a picture": "הוספת תמונה", "Sending pictures needs add_message_images.sql to be run first.": "שליחת תמונות עדיין לא זמינה.", "You can send up to 5 pictures a day.": "אפשר לשלוח עד 5 תמונות ביום.", "That picture is too large.": "התמונה גדולה מדי.", "Picture not found.": "התמונה לא נמצאה."});
   Object.assign(HE_UI, { 'Songs': 'שירים', 'Home': 'דף הבית', 'Search': 'חיפוש', 'Known Chords': 'האקורדים שלי', 'Tuner': 'טיונר', 'Playlist': 'פלייליסט', 'Admin': 'ניהול', 'Add Songs': 'הוספת שירים' });
   HE_UI_PATTERNS.push(
     [/^‹ Back to (.+)$/, m => '‹ חזרה ' + le(m[1])],
@@ -3346,6 +3361,22 @@ async function supaApi(action, fields) {
     throwIfErr_(error);
     return { success: true };
   }
+  // Pictures in messages (add_message_images.sql). The picture is only
+  // downloaded when someone taps it; it's deleted 48 hours after the
+  // receiver first opens it.
+  if (action === 'sendImageMessage') {
+    await supaRequireUser_();
+    const { data, error } = await getSupa_().rpc('send_image_message', { p_target_email: fields.target_email || null, p_text: fields.text || '', p_data: fields.data });
+    if (error && /send_image_message|function .* does not exist|schema cache/i.test(error.message || '')) throw new Error('Sending pictures needs add_message_images.sql to be run first.');
+    throwIfErr_(error);
+    return { success: true, id: data };
+  }
+  if (action === 'getMessageImage') {
+    await supaRequireUser_();
+    const { data, error } = await getSupa_().rpc('get_message_image', { p_message_id: fields.id });
+    throwIfErr_(error);
+    return { success: true, image: data || { gone: true } };
+  }
   if (action === 'updateMessage') {
     await supaRequireAdmin_();
     if (!fields.id) return { success: false, error: 'Missing id' };
@@ -3470,6 +3501,7 @@ function supaMessageToOld_(m, emailMap) {
     reply_to_label: m.reply_to_label || '', reply_to_song_id: m.reply_to_song_id || null,
     quoted_message_id: m.quoted_message_id || null, quoted_text: m.quoted_text || '', quoted_sender: m.quoted_sender || '',
     reaction_admin: m.reaction_admin || '', reaction_user: m.reaction_user || '',
+    image_status: m.image_status || null,
   };
 }
 function supaErrorToOld_(e, emailMap) {
@@ -5706,10 +5738,25 @@ function hideInstallBanner() {
   const el = document.getElementById('installBanner');
   if (el) { el.classList.remove('show'); el.innerHTML = ''; }
 }
+// If the browser won't show its own install window (already dismissed once,
+// or a browser that only makes plain shortcuts), explain how to do it by hand.
+function showInstallHelp_() {
+  openModal(`<h2 style="margin-top:0">Install the app</h2>
+    <p>Open this site in <b>Google Chrome</b>, tap the <b>⋮</b> menu (top right), then tap <b>Install app</b> (or <b>Add to Home screen</b> → <b>Install</b>).</p>
+    <p class="muted" style="font-size:13px;">If it only offers “Create shortcut”, the app will open like a normal web page. Using Chrome usually fixes this. If the app was installed before, remove the old icon first.</p>
+    <div class="modal-actions"><button class="btn" onclick="closeModal()">OK</button></div>`);
+}
 function installAppClick() {
-  if (!deferredInstallPrompt) return;
-  deferredInstallPrompt.prompt();
-  deferredInstallPrompt.userChoice.finally(() => { deferredInstallPrompt = null; hideInstallBanner(); });
+  const p = deferredInstallPrompt;
+  if (!p) { showInstallHelp_(); return; }
+  deferredInstallPrompt = null;
+  let opened = false;
+  try {
+    const r = p.prompt();
+    opened = true;
+    Promise.resolve(r).catch(() => showInstallHelp_());
+    p.userChoice.then(c => { if (c && c.outcome === 'accepted') hideInstallBanner(); }).catch(() => {});
+  } catch (e) { if (!opened) showInstallHelp_(); }
 }
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
@@ -8411,7 +8458,8 @@ function renderContactBody() {
         <p class="muted" style="margin:0 0 8px;font-size:13px;">For anything that isn't a song request. Found a mistake in a song? Use <b>⚠ Report</b> on that song's page.</p>
         <div class="chat-thread" id="chatThread">${renderChatMessages(myMessages)}</div>
         <div id="quoteDraft-user">${quoteDraftHtml_('user')}</div>
-        <div style="display:flex;gap:8px;align-items:flex-end;"><textarea id="chatInput" placeholder="Questions, ideas, problems… (for a new song, please use Song Requests above)" style="flex:1;min-height:64px;max-height:200px;font-family:inherit;font-size:14px;resize:vertical;"></textarea><button class="btn" onclick="sendChatMessage()">Send</button></div>
+        <div id="imgDraft-user">${viewAsUser ? '' : imgDraftHtml_('user')}</div>
+        <div style="display:flex;gap:8px;align-items:flex-end;"><textarea id="chatInput" placeholder="Questions, ideas, problems… (for a new song, please use Song Requests above)" style="flex:1;min-height:64px;max-height:200px;font-family:inherit;font-size:14px;resize:vertical;"></textarea>${viewAsUser ? '' : `<button class="btn secondary chat-img-btn" onclick="pickChatImage_('user')" title="Add a picture" aria-label="Add a picture">${MSG_IMG_SVG}</button>`}<button class="btn" onclick="sendChatMessage()">Send</button></div>
       </div>`;
     }
   }
@@ -8662,6 +8710,98 @@ function setMsgReaction_(ctx, id, emoji) {
     if (s0.locked && s0.dx > 55) startMsgQuote_(s0.el.dataset.ctx, s0.el.dataset.msgId);
   });
 })();
+// ---- Pictures in messages ---------------------------------------------------
+const MSG_IMG_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>';
+const _msgImg = {}; // message id -> { data, expires_at } or { gone: true } (this visit only)
+let pendingImg = { user: null, admin: null }; // picked picture (data URL) waiting to be sent
+const LL_ = (en, he) => uiLang === 'he' ? he : en;
+function fmtWhen_(iso) {
+  const d = new Date(iso);
+  return d.toLocaleString(uiLang === 'he' ? 'he-IL' : undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+function msgImageHtml_(m, ctx) {
+  const isReceiver = ctx === 'admin' ? m.sender === 'user' : m.sender === 'admin';
+  const c = _msgImg[m.id];
+  if (m.image_status === 'gone' || (c && c.gone)) {
+    return `<div class="msg-img-box gone">📷 ${LL_('Picture deleted', 'התמונה נמחקה')}</div>`;
+  }
+  if (c && c.data) {
+    const note = c.expires_at
+      ? LL_('Will be deleted ', 'תימחק ') + fmtWhen_(c.expires_at)
+      : LL_('Not opened yet — deleted 48 hours after it’s opened.', 'עדיין לא נפתחה — תימחק 48 שעות אחרי שתיפתח.');
+    return `<img class="msg-img" src="${c.data}" alt="" onclick="event.stopPropagation();openImgViewer_(this.src)"><div class="msg-img-why">${escapeHtml(note)}</div>`;
+  }
+  const why = isReceiver
+    ? LL_('It will be deleted 48 hours after you open it.', 'התמונה תימחק 48 שעות אחרי שתפתחו אותה.')
+    : LL_('Deleted 48 hours after it’s opened.', 'תימחק 48 שעות אחרי שתיפתח.');
+  return `<div class="msg-img-box" role="button" tabindex="0" onclick="event.stopPropagation();openMsgImage_('${escapeHtml(m.id)}','${ctx}',this)">📷 ${LL_('Picture — tap to view', 'תמונה — הקישו לצפייה')}<div class="msg-img-why">${why}</div></div>`;
+}
+function openMsgImage_(id, ctx, el) {
+  const box = el && el.closest('.msg-img-wrap');
+  if (box) box.innerHTML = `<div class="msg-img-box">⏳ ${LL_('Loading picture…', 'טוען תמונה…')}</div>`;
+  api('getMessageImage', { id }).then(r => {
+    const img = r.image || { gone: true };
+    _msgImg[id] = img.gone ? { gone: true } : { data: img.data, expires_at: img.expires_at || null };
+    const m = _chatMsgIndex[id] || { id, sender: ctx === 'admin' ? 'user' : 'admin', image_status: 'yes' };
+    if (img.gone) m.image_status = 'gone';
+    if (box) box.innerHTML = msgImageHtml_(m, ctx);
+  }).catch(err => {
+    const m = _chatMsgIndex[id];
+    if (box && m) box.innerHTML = msgImageHtml_(m, ctx);
+    alert(err.message);
+  });
+}
+function openImgViewer_(src) {
+  const v = document.createElement('div');
+  v.className = 'img-viewer';
+  v.onclick = () => v.remove();
+  v.innerHTML = `<img src="${src}" alt="">`;
+  document.body.appendChild(v);
+}
+// Shrinks a picked picture on the phone (long side ≤ 1400px, JPEG) so it's
+// usually 100–300 KB.
+function shrinkImage_(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(LL_('Couldn’t read that picture.', 'לא הצלחנו לקרוא את התמונה.')));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error(LL_('That file isn’t a picture we can use.', 'אי אפשר להשתמש בקובץ הזה כתמונה.')));
+      img.onload = () => {
+        let max = 1400, url = '';
+        for (let tries = 0; tries < 6; tries++) {
+          const scale = Math.min(1, max / Math.max(img.width, img.height));
+          const c = document.createElement('canvas');
+          c.width = Math.max(1, Math.round(img.width * scale)); c.height = Math.max(1, Math.round(img.height * scale));
+          const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+          let q = 0.72; url = c.toDataURL('image/jpeg', q);
+          while (url.length > 400000 && q > 0.45) { q -= 0.09; url = c.toDataURL('image/jpeg', q); }
+          if (url.length <= 400000) break;
+          max = Math.round(max * 0.75);
+        }
+        if (url.length > 650000) { reject(new Error(LL_('That picture is too large.', 'התמונה גדולה מדי.'))); return; }
+        resolve(url);
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+function pickChatImage_(ctx) {
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = 'image/*';
+  inp.onchange = () => {
+    const f = inp.files && inp.files[0]; if (!f) return;
+    shrinkImage_(f).then(url => { pendingImg[ctx] = url; renderImgDraft_(ctx); }).catch(err => alert(err.message));
+  };
+  inp.click();
+}
+function imgDraftHtml_(ctx) {
+  const url = pendingImg[ctx];
+  if (!url) return '';
+  return `<div class="img-attach-preview"><img src="${url}" alt=""><div style="flex:1;min-width:0;"><b>${LL_('Picture attached', 'תמונה מצורפת')}</b><div class="msg-img-why">${LL_('⚠ Pictures are deleted automatically 48 hours after they’re opened. Please don’t send anything private.', '⚠ תמונות נמחקות אוטומטית 48 שעות אחרי שהן נפתחות. נא לא לשלוח שום דבר פרטי.')}</div></div><span class="adv-link" onclick="pendingImg['${ctx}']=null;renderImgDraft_('${ctx}')">${LL_('Remove', 'הסרה')}</span></div>`;
+}
+function renderImgDraft_(ctx) { const el = document.getElementById('imgDraft-' + ctx); if (el) el.innerHTML = imgDraftHtml_(ctx); }
 function renderChatMessages(list, opts) {
   const editable = !!(opts && opts.editable);
   const ctx = editable ? 'admin' : 'user';
@@ -8674,7 +8814,8 @@ function renderChatMessages(list, opts) {
         : '';
       const replyLink = m.id ? ` · <span class="msg-reply" onclick="startMsgQuote_('${ctx}','${escapeHtml(m.id)}')">↩ Reply</span>` : '';
       const reacts = msgReactsText_(m);
-      return `<div class="msg ${m.sender}${reacts ? ' has-react' : ''}" data-msg-id="${escapeHtml(m.id || '')}" data-ctx="${ctx}">${m.reply_to_type ? replyRefBoxHtml_(m, ctx) : ''}${msgQuoteBoxHtml_(m, ctx)}<span class="msg-text">${escapeHtml(m.text)}</span><div class="meta">${new Date(m.created_at).toLocaleString()}${editedTag}${replyLink}${editLink}</div><span class="msg-reacts" onclick="event.stopPropagation();openMsgReactMenu_(this.closest('.msg'))" title="Reactions">${escapeHtml(reacts)}</span></div>`;
+      const hideText = m.image_status && m.text === '📷';
+      return `<div class="msg ${m.sender}${reacts ? ' has-react' : ''}" data-msg-id="${escapeHtml(m.id || '')}" data-ctx="${ctx}">${m.reply_to_type ? replyRefBoxHtml_(m, ctx) : ''}${msgQuoteBoxHtml_(m, ctx)}${hideText ? '' : `<span class="msg-text">${escapeHtml(m.text)}</span>`}${m.image_status ? `<div class="msg-img-wrap">${msgImageHtml_(m, ctx)}</div>` : ''}<div class="meta">${new Date(m.created_at).toLocaleString()}${editedTag}${replyLink}${editLink}</div><span class="msg-reacts" onclick="event.stopPropagation();openMsgReactMenu_(this.closest('.msg'))" title="Reactions">${escapeHtml(reacts)}</span></div>`;
     }).join('') || '<div class="muted">No messages yet — say hi!</div>';
 }
 // Mirrors Code.gs's YOUTUBE_URL_RE — a shape check only (youtu.be/<id>,
@@ -8783,7 +8924,15 @@ const SONG_REQUEST_HINT_RE = /\b(please\s+add|can\s+you\s+(please\s+)?(add|uploa
 let skipRequestNudgeOnce = false;
 function sendChatMessage() {
   const input = document.getElementById('chatInput');
-  const text = input.value.trim(); if (!text) return;
+  const text = input.value.trim();
+  const img = viewAsUser ? null : pendingImg.user;
+  if (!text && !img) return;
+  if (img) {
+    input.value = ''; pendingImg.user = null; msgQuote.user = null; renderImgDraft_('user');
+    api('sendImageMessage', { text, data: img }).then(() => refreshAfterWrite()).then(() => renderContact())
+      .catch(err => { pendingImg.user = img; input.value = text; renderImgDraft_('user'); alert(err.message); });
+    return;
+  }
   if (!viewAsUser && !skipRequestNudgeOnce && SONG_REQUEST_HINT_RE.test(text)) {
     openModal(`<h2 style="margin-top:0">Is this a song request?</h2>
       <p>Song requests go through <b>Request a Song</b>, so they're kept in one list and you can see when your song is added.</p>
@@ -9355,7 +9504,8 @@ function threadModalHtml() {
     ${editingMessageId ? `<div class="muted" style="font-size:12px;margin-bottom:6px;">Editing your message below — <span class="adv-link" onclick="cancelEditAdminMessage_()">Cancel</span></div>` : ''}
     ${!editingMessageId && chatTarget.replyTo ? `<div class="reply-ref-draft"><span class="muted" style="font-size:12px;">Replying about:</span>${replyRefBoxHtml_({ reply_to_type: chatTarget.replyTo.type, reply_to_id: chatTarget.replyTo.id, reply_to_label: chatTarget.replyTo.label, reply_to_song_id: chatTarget.replyTo.song_id }, 'admin')}<span class="adv-link" style="font-size:12px;" onclick="clearReplyTo_()">Remove</span></div>` : ''}
     <div id="quoteDraft-admin">${editingMessageId ? '' : quoteDraftHtml_('admin')}</div>
-    <div style="display:flex;gap:8px;margin-bottom:14px;align-items:flex-end;"><textarea id="adminChatInput" placeholder="Reply…" style="flex:1;min-height:64px;max-height:200px;font-family:inherit;font-size:14px;resize:vertical;">${escapeHtml(prefillVal)}</textarea><button class="btn" onclick="sendAdminReply()">${editingMessageId ? 'Save' : 'Send'}</button></div>
+    <div id="imgDraft-admin">${editingMessageId ? '' : imgDraftHtml_('admin')}</div>
+    <div style="display:flex;gap:8px;margin-bottom:14px;align-items:flex-end;"><textarea id="adminChatInput" placeholder="Reply…" style="flex:1;min-height:64px;max-height:200px;font-family:inherit;font-size:14px;resize:vertical;">${escapeHtml(prefillVal)}</textarea>${editingMessageId ? '' : `<button class="btn secondary chat-img-btn" onclick="pickChatImage_('admin')" title="Add a picture" aria-label="Add a picture">${MSG_IMG_SVG}</button>`}<button class="btn" onclick="sendAdminReply()">${editingMessageId ? 'Save' : 'Send'}</button></div>
     <div class="modal-actions"><button class="btn secondary" onclick='setThreadArchived(${escapeHtml(JSON.stringify(chatTarget.email))},${active && active.archived ? 'false' : 'true'})'>${active && active.archived ? 'Unarchive' : 'Archive'} conversation</button><button class="btn secondary" onclick="closeModal()">Close</button></div>`;
 }
 // prefill (optional) - opening text for the reply box, e.g. "Re: Song
@@ -9424,8 +9574,18 @@ function setThreadArchived(email, archived) {
 }
 function sendAdminReply() {
   const input = document.getElementById('adminChatInput');
-  const text = input.value.trim(); if (!text || !chatTarget) return;
+  const text = input.value.trim();
+  const img = editingMessageId ? null : pendingImg.admin;
+  if ((!text && !img) || !chatTarget) return;
   input.value = '';
+  if (img) {
+    pendingImg.admin = null; msgQuote.admin = null; chatTarget.replyTo = null; renderImgDraft_('admin');
+    api('sendImageMessage', { text, data: img, target_email: chatTarget.email }).then(() => api('getMessages', {})).then(data => {
+      messagesCache = data.messages || []; messagesLoaded = true;
+      refreshThreadModalIfOpen(); renderAdminSectionNav(); renderAdminNav();
+    }).catch(err => { pendingImg.admin = img; input.value = text; renderImgDraft_('admin'); alert(err.message); });
+    return;
+  }
   if (editingMessageId) {
     const id = editingMessageId;
     editingMessageId = null;
