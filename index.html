@@ -2075,6 +2075,7 @@ async function hasAppSession_() {
 }
 
 function signOut() {
+  try { dropStartBundle_(); _startBundleTried = false; } catch (e) {}
   if (window.google) google.accounts.id.disableAutoSelect();
   // Fire-and-forget: signOut() itself isn't async and nothing below depends
   // on waiting for this network round trip - the local UI resets immediately
@@ -2366,8 +2367,17 @@ function supaCached_(getCache, setCache, loader) {
 // ---- identity -------------------------------------------------------
 let supaProfileCache = null; // this browser session's own profile row, or null if signed out
 
+// Several startup actions ask for the profile at the same moment - share one
+// request instead of each sending its own.
+let _supaProfileInFlight = null;
 async function supaCurrentProfile_(forceRefresh) {
   if (supaProfileCache && !forceRefresh) return supaProfileCache;
+  if (!forceRefresh && _supaProfileInFlight) return _supaProfileInFlight;
+  const p = supaLoadProfile_();
+  if (!forceRefresh) { _supaProfileInFlight = p; p.finally(() => { if (_supaProfileInFlight === p) _supaProfileInFlight = null; }).catch(() => {}); }
+  return p;
+}
+async function supaLoadProfile_() {
   const { data: sessionData } = await getSupa_().auth.getSession();
   const authUser = sessionData && sessionData.session && sessionData.session.user;
   if (!authUser) { supaProfileCache = null; return null; }
@@ -2570,9 +2580,81 @@ async function supaProfileMapByIds_(ids) {
   return map;
 }
 
+// ---- One request when the app opens (add_app_start.sql) ---------------------
+// app_start() returns everything the app loads at startup (profile,
+// favorites, chords, capos, transposes, languages, your requests and
+// messages, playlists) and logs the visit - one request instead of ~15,
+// which matters for the free plan's log limit. The answer is reused by the
+// usual actions for the first minute, until anything is changed. If the SQL
+// hasn't been run (or anything goes wrong) every action just asks the
+// server the normal way.
+let _startBundleP = null, _startBundleAt = 0, _startBundleTried = false;
+const START_BUNDLE_READS = { getMyData: 1, getLanguages: 1, getRequests: 1, getMessages: 1, getPlaylists: 1, logVisit: 1 };
+function startBundle_() {
+  if (!_startBundleTried) {
+    _startBundleTried = true;
+    _startBundleAt = Date.now();
+    _startBundleP = (async () => {
+      try {
+        const { data, error } = await getSupa_().rpc('app_start', {
+          p_country: detectVisitorCountry_() || null, p_mode: isStandaloneDisplay() ? 'home' : 'browser',
+          p_platform: devicePlatform_(), p_lang: uiLang,
+        });
+        if (error || !data || !data.signed_in || !data.profile) return null;
+        if (!supaProfileCache) supaProfileCache = data.profile;
+        return data;
+      } catch (e) { return null; }
+    })();
+  }
+  if (!_startBundleP || Date.now() - _startBundleAt > 60000) return Promise.resolve(null);
+  return _startBundleP;
+}
+function dropStartBundle_() { _startBundleP = null; }
+function bundlePairs_(rows, key) { const out = {}; (rows || []).forEach(r => { out[r.song_id] = r[key]; }); return out; }
+function bundlePlaylists_(P, meP) {
+  const owners = {}; (P.owners || []).forEach(o => { owners[o.id] = o; });
+  const songsBy = {}; (P.songs || []).forEach(r => { (songsBy[r.playlist_id] = songsBy[r.playlist_id] || []).push(r.song_id); });
+  const sharesBy = {}; (P.shares || []).forEach(r => { (sharesBy[r.playlist_id] = sharesBy[r.playlist_id] || []).push({ email: r.email, canEdit: !!r.can_edit }); });
+  const showOwner = r => !r.anonymous || r.owner_id === meP.id || meP.is_admin;
+  const sharedIds = new Set(P.share_ids || []);
+  const pubAll = P.pub || [];
+  const fullRows = (P.own || []).concat(P.shared || [], pubAll.filter(r => sharedIds.has(r.id)));
+  const lightRows = pubAll.filter(r => !sharedIds.has(r.id));
+  const counts = P.counts || {};
+  const base = (p) => { const o = showOwner(p) ? (owners[p.owner_id] || {}) : {};
+    return { anonymous: !!p.anonymous, id: p.id, owner_email: o.email || '', owner_name: showOwner(p) ? (o.name || o.email || '') : 'Anonymous',
+      title: p.title, visibility: p.visibility, updated_at: p.updated_at, icon: p.icon || '' }; };
+  return fullRows.map(p => Object.assign(base(p), { song_ids: songsBy[p.id] || [], shared_with: sharesBy[p.id] || [] }))
+    .concat(lightRows.map(p => Object.assign(base(p), { _lazy: true, song_ids: null, song_count: counts[p.id] || 0, shared_with: [] })));
+}
+
 async function supaApi(action, fields) {
   fields = fields || {};
   await ensureSupabaseLib_();
+  // Anything that changes data makes the startup answer out of date.
+  if (!START_BUNDLE_READS[action] && !/^(get|list|search|incrementSongView)/.test(action)) dropStartBundle_();
+  if (START_BUNDLE_READS[action] && currentUser && !viewAsUser) {
+    const B = await startBundle_();
+    const me = B && B.profile;
+    if (me && (!supaProfileCache || supaProfileCache.id === me.id)) {
+      const selfMap = { [me.id]: { id: me.id, email: me.email, name: me.name } };
+      const mine = !(me.is_admin && fields.scope !== 'mine');
+      if (action === 'getMyData') {
+        return { success: true, favorites: B.favorites || [], knownChords: B.known_chords || [],
+          myCapos: bundlePairs_(B.capos, 'capo'), myTransposes: bundlePairs_(B.transposes, 'transpose'),
+          user: { email: me.email, name: me.name, photo: me.photo || '', isAdmin: !!me.is_admin } };
+      }
+      if (action === 'getLanguages' && Array.isArray(B.languages)) return { success: true, languages: B.languages };
+      if (action === 'getRequests' && mine) return { success: true, requests: (B.requests || []).map(r => supaRequestToOld_(r, selfMap)) };
+      if (action === 'getMessages' && mine) return { success: true, messages: (B.messages || []).map(m => supaMessageToOld_(m, selfMap)) };
+      if (action === 'getPlaylists' && B.playlists && !_supaPlaylistsCache) {
+        const pls = bundlePlaylists_(B.playlists, me);
+        _supaPlaylistsCache = { at: Date.now(), promise: Promise.resolve(pls) };
+        return { success: true, playlists: pls };
+      }
+      if (action === 'logVisit' && B.visit_logged) return { success: true };
+    }
+  }
 
   // ================= reads =================
   if (action === 'list' && fields.since) {
