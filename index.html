@@ -883,7 +883,7 @@ const CONFIG = {
   // song/playlist someone else just added still shows up within a few
   // minutes, and any of your OWN edits already refresh immediately anyway
   // (see refreshPlaylistsOnly()/refreshAfterWrite() elsewhere in this file).
-  AUTO_REFRESH_SECONDS: 600,
+  AUTO_REFRESH_SECONDS: 1800,
   // --- Supabase backend (task #72) — see the SUPABASE BACKEND ADAPTER
   // section below for everything this actually drives. ---
   SUPABASE_URL: 'https://elzjljcwpjlixirajcrj.supabase.co',
@@ -1514,6 +1514,7 @@ Object.assign(HE_UI, {
   Object.assign(HE_UI, {"Install the app": "התקנת האפליקציה", "Open this site in": "פתחו את האתר ב-", "Google Chrome": "Google Chrome", ", tap the": ", הקישו על התפריט", "menu (top right), then tap": "(למעלה), ואז על", "Install app": "התקנת אפליקציה", "(or": "(או", "Add to Home screen": "הוספה למסך הבית", "→": "→", "Install": "התקנה", ").": ").", "If it only offers “Create shortcut”, the app will open like a normal web page. Using Chrome usually fixes this. If the app was installed before, remove the old icon first.": "אם מופיע רק \"יצירת קיצור דרך\", האפליקציה תיפתח כמו דף אינטרנט רגיל. בדרך כלל פתיחה ב-Chrome פותרת את זה. אם האפליקציה הותקנה בעבר, מחקו קודם את הסמל הישן."});
   Object.assign(HE_UI, {"Add a picture": "הוספת תמונה", "Sending pictures needs add_message_images.sql to be run first.": "שליחת תמונות עדיין לא זמינה.", "You can send up to 5 pictures a day.": "אפשר לשלוח עד 5 תמונות ביום.", "That picture is too large.": "התמונה גדולה מדי.", "Picture not found.": "התמונה לא נמצאה."});
   Object.assign(HE_UI, {"Save as PDF": "שמירה כ-PDF", "In the window that opens, choose": "בחלון שייפתח, בחרו", "as the printer (on iPhone: tap": "בתור המדפסת (באייפון: הקישו על", "then": "ואז על", "Save to Files": "שמירה בקבצים", "Continue": "המשך"});
+  Object.assign(HE_UI, {"🔎 Also search song lyrics": "🔎 חיפוש גם במילות השירים", "🔎 Searching song lyrics…": "🔎 מחפש במילות השירים…"});
   Object.assign(HE_UI, { 'Songs': 'שירים', 'Home': 'דף הבית', 'Search': 'חיפוש', 'Known Chords': 'האקורדים שלי', 'Tuner': 'טיונר', 'Playlist': 'פלייליסט', 'Admin': 'ניהול', 'Add Songs': 'הוספת שירים' });
   HE_UI_PATTERNS.push(
     [/^The file will be named “(.+)”\.$/, m => 'שם הקובץ יהיה “' + m[1] + '”.'],
@@ -3553,7 +3554,10 @@ function expireSession_() {
 // just waits for the one already in progress instead of starting a
 // redundant twin.
 let loadSongsInFlight = null;
-let lastSongCountAt = 0; // when the delta refresh last also checked the total song count
+// When the delta refresh last also checked the total song count (only there
+// to notice deleted songs) - remembered across visits, checked every 6 hours.
+let lastSongCountAt = 0;
+try { lastSongCountAt = parseInt(localStorage.getItem('jgc_song_count_at'), 10) || 0; } catch (e) {}
 function loadSongs(showSpinner) {
   if (loadSongsInFlight) return loadSongsInFlight;
   loadSongsInFlight = loadSongsInner_(showSpinner).finally(() => { loadSongsInFlight = null; });
@@ -3625,9 +3629,9 @@ async function loadSongsInner_(showSpinner) {
     let delta = null;
     if (CONFIG.USE_SUPABASE && songsCompleteFromServer && songs.length) {
       const since = songsSyncSince_();
-      const withCount = !lastSongCountAt || Date.now() - lastSongCountAt > 60 * 60 * 1000;
+      const withCount = !lastSongCountAt || Date.now() - lastSongCountAt > 6 * 60 * 60 * 1000;
       if (since) delta = await api('list', { since, withCount });
-      if (delta && withCount && typeof delta.total === 'number') lastSongCountAt = Date.now();
+      if (delta && withCount && typeof delta.total === 'number') { lastSongCountAt = Date.now(); try { localStorage.setItem('jgc_song_count_at', String(lastSongCountAt)); } catch (e) {} }
     }
     let prefetchIds = [];
     if (delta && applySongsDelta_(delta)) {
@@ -3710,7 +3714,23 @@ async function loadSongContentAll() {
 // matches are added as soon as the database answers.
 let lyricHits = null; // { q, ids: Set }
 let lyricSearchTimer = null;
-function scheduleLyricSearch_() {
+let lyricSearchPending = ''; // the query being searched right now
+// Each lyric search is a server request (and log lines), so it no longer
+// runs on every pause in typing:
+//  - 'typing': only when nothing matches by title/artist, after a longer pause;
+//  - 'now': on Enter / leaving the box, or the "Also search song lyrics" button.
+function titleArtistMatchCount_(qRaw) {
+  const q = qRaw.toLowerCase();
+  const he = englishArtistsMatchingHebrew_(qRaw);
+  let n = 0;
+  for (const s of songs) {
+    if (isDraft_(s)) continue;
+    if ((s.title || '').toLowerCase().includes(q) || (s.title_hebrew || '').includes(qRaw) || (s.artist || '').toLowerCase().includes(q) || (s.artist_hebrew || '').includes(qRaw) || (he.size && splitArtists(s.artist).some(a => he.has(a)))) { if (++n > 0) break; }
+  }
+  return n;
+}
+function lyricSearchDone_(q) { return !!(lyricHits && lyricHits.q === q) || !!_lyricSearchMemo[q.toLowerCase()]; }
+function scheduleLyricSearch_(mode) {
   if (!CONFIG.USE_SUPABASE) { ensureSongContentLoaded(); return; }
   clearTimeout(lyricSearchTimer);
   const q = (filters.q || '').trim();
@@ -3722,15 +3742,26 @@ function scheduleLyricSearch_() {
     if (view.name === 'list') renderSongListBody();
     return;
   }
-  // Waits for a pause in typing (each keystroke used to send its own search).
-  lyricSearchTimer = setTimeout(() => {
+  const run = () => {
+    if ((filters.q || '').trim() !== q || lyricSearchPending === q) return;
+    lyricSearchPending = q;
+    if (view.name === 'list') renderSongListBody();
     api('searchLyrics', { q }).then(d => {
       const ids = new Set(d.ids || []);
       _lyricSearchMemo[key] = ids;
       lyricHits = { q, ids };
-      if ((filters.q || '').trim() === q && view.name === 'list') renderSongListBody();
-    }).catch(err => { console.warn('Lyric search failed', err && err.message); });
-  }, 700);
+    }).catch(err => { console.warn('Lyric search failed', err && err.message); })
+      .finally(() => { if (lyricSearchPending === q) lyricSearchPending = ''; if (view.name === 'list') renderSongListBody(); });
+  };
+  if (mode === 'now') { run(); return; }
+  if (titleArtistMatchCount_(q) > 0) return; // offered as a button instead
+  lyricSearchTimer = setTimeout(run, 1500);
+}
+function lyricSearchCtaHtml_() {
+  const q = (filters.q || '').trim();
+  if (!CONFIG.USE_SUPABASE || q.length < 3 || isOffline || lyricSearchDone_(q)) return '';
+  if (lyricSearchPending === q) return `<div class="muted" style="padding:10px 4px;font-size:13.5px;">🔎 Searching song lyrics…</div>`;
+  return `<div style="padding:10px 0 2px;"><button class="btn secondary" onclick="scheduleLyricSearch_('now')">🔎 Also search song lyrics</button></div>`;
 }
 const _lyricSearchMemo = {};
 let songContentLoading = false;
@@ -6105,8 +6136,12 @@ function renderList() {
   }
   html += `<div id="songListBody"></div>` + alphabetSidebarHtml_();
   document.getElementById('app').innerHTML = html;
-  document.getElementById('searchBox').addEventListener('input', e => { filters.q = e.target.value; songListPage = 0; if (filters.q) scheduleLyricSearch_(); renderSongListBody(); });
-  if (filters.q && !(lyricHits && lyricHits.q === filters.q.trim())) scheduleLyricSearch_();
+  const sb = document.getElementById('searchBox');
+  sb.addEventListener('input', e => { filters.q = e.target.value; songListPage = 0; if (filters.q) scheduleLyricSearch_('typing'); renderSongListBody(); });
+  // Enter / "Search" on the phone keyboard, or leaving the box: search lyrics now.
+  sb.addEventListener('change', () => { if (filters.q) scheduleLyricSearch_('now'); });
+  sb.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); sb.blur(); } });
+  if (filters.q && !lyricSearchDone_(filters.q.trim())) scheduleLyricSearch_('typing');
   renderSongListBody();
   if (songTab === 'favorites' && currentUser && !isOffline) refreshFavOfflineButton();
 }
@@ -6246,7 +6281,7 @@ function renderSongListBody() {
     const queueIds = list.map(s => s.id);
     html = pageSlice(list, songListPage).map(s => songRowHtml(s, queueIds)).join('') + pagerHtml(list.length, songListPage, 'changeSongPage');
   }
-  body.innerHTML = html + otherTabMatchesHtml_(list) + requestFromSearchHtml_(list);
+  body.innerHTML = html + lyricSearchCtaHtml_() + otherTabMatchesHtml_(list) + requestFromSearchHtml_(list);
   if (favoritesReorderable() && list.length > 1) {
     makeReorderable(document.getElementById('favoritesSongList'), (newIds) => {
       // Optimistic local reorder — the drag already shows the new order in
