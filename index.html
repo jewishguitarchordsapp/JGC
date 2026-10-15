@@ -5624,13 +5624,19 @@ const VIEW_CACHE_KEY = 'jgc_view_cache_v1';
 // Closed (or in the background) for more than 30 minutes -> reopening starts
 // on the Welcome page instead of wherever it was left. Not while a song is
 // being added/edited, so nothing typed is lost.
-const APP_IDLE_RESET_MS = 30 * 60 * 1000;
+// How long the app remembers where you were is a per-device setting
+// (Settings › Reopening the app): 30 minutes (default), 1 week or 1 month.
+// Kept only on this device - no server use at all.
+const RESUME_WINDOW_KEY = 'jgc_resume_window';
+const RESUME_WINDOWS = { '30m': 30 * 60 * 1000, '7d': 7 * 864e5, '30d': 30 * 864e5 };
+function resumeWindowKey_() { let k = '30m'; try { k = localStorage.getItem(RESUME_WINDOW_KEY) || '30m'; } catch (e) {} return RESUME_WINDOWS[k] ? k : '30m'; }
+function setResumeWindow_(k) { try { localStorage.setItem(RESUME_WINDOW_KEY, k); } catch (e) {} renderSettings_(); }
 const APP_LAST_ACTIVE_KEY = 'jgc_last_active_at';
 function markAppActive_() { try { localStorage.setItem(APP_LAST_ACTIVE_KEY, String(Date.now())); } catch (e) {} }
 function appIdleTooLong_() {
   let t = 0;
   try { t = parseInt(localStorage.getItem(APP_LAST_ACTIVE_KEY), 10) || 0; } catch (e) {}
-  return !!t && Date.now() - t > APP_IDLE_RESET_MS;
+  return !!t && Date.now() - t > RESUME_WINDOWS[resumeWindowKey_()];
 }
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') { markAppActive_(); return; }
@@ -6675,6 +6681,16 @@ function renderSettings_() {
     
     </div>
     <div class="card">
+      <h3>${L('Reopening the app', 'פתיחה מחדש של האפליקציה')}</h3>
+      <div class="settings-sub" style="margin:-4px 0 6px;">${L('After a break, the app opens on the Welcome page. Choose how long it should remember where you were instead.', 'אחרי הפסקה, האפליקציה נפתחת בדף הפתיחה. בחרו כמה זמן היא תזכור איפה הייתם.')}</div>
+      <div class="adv-row instr-row" style="border:none;">
+        <span class="adv-label">${L('Remember my place for', 'לזכור איפה הייתי במשך')}</span>
+        <span class="adv-controls instr-pills">
+          ${[['30m', L('30 minutes', '30 דקות')], ['7d', L('1 week', 'שבוע')], ['30d', L('1 month', 'חודש')]].map(([k, lab]) => `<button type="button" class="chip${resumeWindowKey_() === k ? ' active' : ''}" onclick="setResumeWindow_('${k}')">${lab}</button>`).join('')}
+        </span>
+      </div>
+    </div>
+    <div class="card">
       <h3>${L('Language', 'שפה')}</h3>
       <div class="adv-row instr-row" style="border:none;">
         <span class="adv-label">${L('App language', 'שפת האפליקציה')}</span>
@@ -7403,7 +7419,7 @@ function renderEdit() {
   editChordAlign = 'left';
   const simpleText = storedIsHtml ? htmlChordFormatToPlainText(stored) : (editChordMode === 'simple' ? stored : '');
   const rawText = stored;
-  const html = `<span class="backlink" onclick="goTo(${song ? `'detail',{id:'${s.id}'}` : `'list'`})">‹ Cancel</span>
+  const html = `<span class="backlink" onclick="${song ? `goTo('detail',{id:'${s.id}'})` : `(view.from && view.from.view) ? goBackFrom_() : goTo('list')`}">‹ Cancel</span>
     <h2>${song ? 'Edit Song' : 'Add Song'}</h2>
     <form onsubmit="return saveSong(event, ${song ? `'${s.id}'` : 'null'})">
       <div class="row">
@@ -9267,7 +9283,7 @@ function renderAdminRequests() {
   // keystroke/filter/page change, so the input never loses focus or
   // cursor position while typing (replacing the box itself would).
   if (!document.getElementById('requestsSearchBox')) {
-    body.innerHTML = `<div class="searchRow"><input type="text" id="requestsSearchBox" placeholder="Search requests…" value="${escapeHtml(requestsSearch)}"></div><div id="adminRequestsListWrap"></div>`;
+    body.innerHTML = `<div class="searchRow"><input type="text" id="requestsSearchBox" placeholder="Search requests…" value="${escapeHtml(requestsSearch)}"><button class="btn" onclick="goTo('edit')">${t('add_song_btn')}</button></div><div id="adminRequestsListWrap"></div>`;
     document.getElementById('requestsSearchBox').addEventListener('input', e => { requestsFocusId = null; requestsSearch = e.target.value; adminRequestsPage = 0; requestsSelected.clear(); renderAdminRequestsList_(); });
   }
   renderAdminRequestsList_();
