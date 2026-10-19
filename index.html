@@ -2891,6 +2891,16 @@ async function supaApi(action, fields) {
   // open - see the fix_admin_page_perf.sql notes). Only ever returns unread,
   // non-archived rows, which is a small, roughly-constant-size result no
   // matter how much message history has piled up over the app's lifetime.
+  // Admin badge: how many new song requests came in since the admin last
+  // opened Song Requests on this device (a count only - no rows downloaded).
+  if (action === 'getAdminNewRequests') {
+    await supaRequireAdmin_();
+    const since = new Date(Number(fields.since) || Date.now()).toISOString();
+    const { count, error } = await getSupa_().from('requests').select('id', { count: 'exact', head: true })
+      .eq('status', 'pending').eq('archived', false).gt('created_at', since);
+    throwIfErr_(error);
+    return { success: true, count: count || 0 };
+  }
   if (action === 'getUnreadMessagesInfo') {
     await supaRequireAdmin_();
     const { data, error } = await getSupa_().from('messages').select('user_id')
@@ -3445,6 +3455,16 @@ async function supaApi(action, fields) {
       ({ error } = await getSupa_().from('messages').insert(plain));
     }
     throwIfErr_(error);
+    // The admin's reply about a song request / error report doesn't need to
+    // sit in the inbox: archive the conversation, unless the user has
+    // unread messages there that still need an answer.
+    if (sender === 'admin' && !isViewAsSend && ref && ref.id && (ref.type === 'request' || ref.type === 'error')) {
+      try {
+        const { count } = await getSupa_().from('messages').select('id', { count: 'exact', head: true })
+          .eq('user_id', targetProfile.id).eq('sender', 'user').eq('read_by_admin', false).eq('archived', false);
+        if (!count) await getSupa_().from('messages').update({ archived: true }).eq('user_id', targetProfile.id);
+      } catch (e) {}
+    }
     return { success: true };
   }
   // Pictures in messages (add_message_images.sql). The picture is only
@@ -6724,6 +6744,8 @@ function saveBadgeSeen_() { try { localStorage.setItem(BADGE_SEEN_KEY, JSON.stri
 // First run on this device: start counting from now, not from every song ever.
 if (!badgeSeen.newSongsAt) { badgeSeen.newSongsAt = Date.now(); saveBadgeSeen_(); }
 let userBadgeData = null; // { requests, messages } for the signed-in (non-admin) user
+let adminBadge = { newReq: 0, unread: 0 }; // admin only: new song requests + unread conversations
+if (!badgeSeen.adminReqAt) { badgeSeen.adminReqAt = Date.now(); saveBadgeSeen_(); }
 let userBadgeFetchedAt = 0;
 function refreshUserBadges_(force) {
   if (!ALERTS_ENABLED) { try { if ('clearAppBadge' in navigator) navigator.clearAppBadge().catch(() => {}); } catch (e) {} return; }
@@ -6731,6 +6753,17 @@ function refreshUserBadges_(force) {
   if (!force && Date.now() - userBadgeFetchedAt < 10 * 60 * 1000) { updateBadges_(); return; }
   userBadgeFetchedAt = Date.now();
   const fetches = currentUser.isAdmin ? [api('getRequests', { scope: 'mine' })] : [api('getRequests', { scope: 'mine' }), api('getMessages', { scope: 'mine' })];
+  if (currentUser.isAdmin) {
+    Promise.all([
+      api('getAdminNewRequests', { since: badgeSeen.adminReqAt }).catch(() => ({ count: adminBadge.newReq })),
+      api('getUnreadMessagesInfo', {}).catch(() => null),
+    ]).then(([nr, ui]) => {
+      adminBadge.newReq = (nr && nr.count) || 0;
+      if (ui) { adminBadge.unread = ui.count || 0; unreadInfo = { count: ui.count || 0, emails: ui.emails || [] }; }
+      updateBadges_();
+      if (view.name === 'admin') { try { renderAdminSectionNav(); renderAdminNav(); } catch (e) {} }
+    });
+  }
   Promise.all(fetches).then(([r, m]) => {
     userBadgeData = { requests: r.requests || [], messages: m ? (m.messages || []) : [] };
     // First time on this device: don't light up for things from before.
@@ -6745,8 +6778,9 @@ function refreshUserBadges_(force) {
 }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshUserBadges_(); });
 function badgeCounts_() {
-  const c = { songs: 0, contact: 0 };
+  const c = { songs: 0, contact: 0, admin: 0 };
   if (!ALERTS_ENABLED || !currentUser || viewAsUser) return c;
+  if (currentUser.isAdmin) c.admin = (adminBadge.newReq || 0) + (typeof unreadThreadCount === 'function' ? unreadThreadCount() : (adminBadge.unread || 0));
   if (alertPrefs.newSongs) c.songs = visibleSongs_().filter(s => { const t = Date.parse(s.date_added || s.created_at || ''); return t && t > badgeSeen.newSongsAt; }).length;
   if (userBadgeData) {
     if (alertPrefs.myRequests) c.contact += userBadgeData.requests.filter(r => r.status === 'added' && !badgeSeen.requestsAdded.includes(r.id)).length;
@@ -6756,7 +6790,7 @@ function badgeCounts_() {
 }
 function navBadgeHtml_(name) {
   const c = badgeCounts_();
-  const n = name === 'list' ? c.songs : name === 'contact' ? c.contact : 0;
+  const n = name === 'list' ? c.songs : name === 'contact' ? c.contact : name === 'admin' ? c.admin : 0;
   return n ? `<span class="nav-badge">${n > 99 ? '99+' : n}</span>` : '';
 }
 function updateBadges_() {
@@ -6768,15 +6802,19 @@ function updateBadges_() {
     if (added.some(id => !badgeSeen.requestsAdded.includes(id))) { badgeSeen.requestsAdded = added; saveBadgeSeen_(); }
   }
   if (view.name === 'contact' && typeof contactChatOpen !== 'undefined' && contactChatOpen) { badgeSeen.messagesAt = Date.now(); saveBadgeSeen_(); }
+  // Admin: opening Song Requests clears the "new requests" count.
+  if (view.name === 'admin' && typeof adminTab !== 'undefined' && adminTab === 'requests' && currentUser && currentUser.isAdmin && !viewAsUser) {
+    if (adminBadge.newReq || Date.now() - badgeSeen.adminReqAt > 5000) { adminBadge.newReq = 0; badgeSeen.adminReqAt = Date.now(); saveBadgeSeen_(); }
+  }
   ['mainNav', 'bottomNav'].forEach(id => {
     const nav = document.getElementById(id); if (!nav) return;
-    ['list', 'contact'].forEach(tab => {
+    ['list', 'contact', 'admin'].forEach(tab => {
       const host = nav.querySelector(`[data-tab="${tab}"] .nav-badge-host`); if (!host) return;
       const old = host.querySelector('.nav-badge'); if (old) old.remove();
       host.insertAdjacentHTML('beforeend', navBadgeHtml_(tab));
     });
   });
-  const c = badgeCounts_(), total = c.songs + c.contact;
+  const c = badgeCounts_(), total = c.songs + c.contact + c.admin;
   try {
     if ('setAppBadge' in navigator) {
       if (alertPrefs.appIcon && total) navigator.setAppBadge(total).catch(() => {});
@@ -9186,8 +9224,9 @@ function renderAdminSectionNav() {
   const nav = document.getElementById('adminSectionNav');
   if (!nav) return;
   const unread = unreadThreadCount();
+  try { updateBadges_(); } catch (e) {}
   nav.innerHTML = `
-      <button class="${adminSection==='communication'?'active':''}" onclick="goAdminSection('communication')">Communication${tabBadgeHtml(unread)}</button>
+      <button class="${adminSection==='communication'?'active':''}" onclick="goAdminSection('communication')">Communication${tabBadgeHtml(unread + (adminTab==='requests' ? 0 : adminBadge.newReq))}</button>
       <button class="${adminSection==='users'?'active':''}" onclick="goAdminSection('users')">Users${tabBadgeHtml(unread)}</button>
       <button class="${adminSection==='stats'?'active':''}" onclick="goAdminSection('stats')">Stats</button>
       <button class="${adminSection==='backup'?'active':''}" onclick="goAdminSection('backup')">Backup</button>`;
@@ -9201,7 +9240,7 @@ function renderAdminNav() {
   const unread = unreadThreadCount();
   if (adminSection === 'communication') {
     nav.innerHTML = `
-      <button class="${adminTab==='requests'?'active':''}" onclick="goAdminTab('requests')">Song Requests</button>
+      <button class="${adminTab==='requests'?'active':''}" onclick="goAdminTab('requests')">Song Requests${adminTab==='requests' ? '' : tabBadgeHtml(adminBadge.newReq)}</button>
       <button class="${adminTab==='messages'?'active':''}" onclick="goAdminTab('messages')">Messages${tabBadgeHtml(unread)}</button>
       <button class="${adminTab==='errors'?'active':''}" onclick="goAdminTab('errors')">Error Reports</button>`;
   } else if (adminSection === 'stats') {
