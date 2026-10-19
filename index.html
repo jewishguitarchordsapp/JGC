@@ -370,6 +370,8 @@
      page rather than blending into the requests table above it. */
   .chat-card{display:flex;align-items:center;gap:12px;background:#f2f4f5;border:1.5px solid var(--teal);border-radius:12px;padding:14px 16px;margin-top:24px;cursor:pointer;transition:background .15s ease;}
   .chat-card:hover{background:#e9edee;}
+  .country-pill.tappable{cursor:pointer;}
+  .country-pill.tappable:hover{filter:brightness(.95);text-decoration:underline;}
   .msg-img-box{margin-top:6px;padding:8px 10px;border:1px dashed var(--border);border-radius:10px;font-size:13px;cursor:pointer;background:rgba(127,127,127,.06);}
   .msg-img-box.gone{cursor:default;color:var(--muted);}
   .msg-img-why{font-size:11.5px;color:var(--muted);margin-top:3px;line-height:1.35;}
@@ -3081,6 +3083,13 @@ async function supaApi(action, fields) {
   //    load - that's all app_visits tracks per user per day, so someone
   //    who opens the app again later the same day doesn't add a second
   //    entry here.
+  if (action === 'getCountryVisitors') {
+    await supaRequireAdmin_();
+    const { data, error } = await getSupa_().rpc('admin_country_visitors', { p_country: fields.country, p_from: fields.from, p_to: fields.to });
+    if (error && /admin_country_visitors|function .* does not exist|schema cache/i.test(error.message || '')) throw new Error('Seeing visitors per country needs add_country_visitors.sql to be run first.');
+    throwIfErr_(error);
+    return { success: true, people: data || [] };
+  }
   if (action === 'getAppModeStats') {
     await supaRequireAdmin_();
     const { data, error } = await getSupa_().rpc('admin_app_mode_stats');
@@ -3094,7 +3103,7 @@ async function supaApi(action, fields) {
     {
       const { data, error } = await getSupa_().rpc('admin_visit_stats');
       if (!error && data && Array.isArray(data.days)) {
-        return { success: true, totalUsers: data.totalUsers || 0, days: data.days, months: data.months || [], todayVisits: data.todayVisits || [], countries7: data.countries7 || null, countries30: data.countries30 || null, countries12m: data.countries12m || null };
+        return { success: true, today: data.today || null, totalUsers: data.totalUsers || 0, days: data.days, months: data.months || [], todayVisits: data.todayVisits || [], countries7: data.countries7 || null, countries30: data.countries30 || null, countries12m: data.countries12m || null };
       }
     }
     const YEAR_DAYS = 371; // comfortably covers 12 full calendar months back from today
@@ -3482,6 +3491,13 @@ async function supaApi(action, fields) {
     const { data, error } = await getSupa_().rpc('get_message_image', { p_message_id: fields.id });
     throwIfErr_(error);
     return { success: true, image: data || { gone: true } };
+  }
+  if (action === 'deleteMessage') {
+    await supaRequireAdmin_();
+    const { error } = await getSupa_().rpc('admin_delete_message', { p_id: fields.id });
+    if (error && /admin_delete_message|function .* does not exist|schema cache/i.test(error.message || '')) throw new Error('Deleting messages needs add_delete_message.sql to be run first.');
+    throwIfErr_(error);
+    return { success: true };
   }
   if (action === 'updateMessage') {
     await supaRequireAdmin_();
@@ -8996,6 +9012,16 @@ function imgDraftHtml_(ctx) {
   return `<div class="img-attach-preview"><img src="${url}" alt=""><div style="flex:1;min-width:0;"><b>${LL_('Picture attached', 'תמונה מצורפת')}</b><div class="msg-img-why">${LL_('⚠ Pictures are deleted automatically 48 hours after they’re opened. Please don’t send anything private.', '⚠ תמונות נמחקות אוטומטית 48 שעות אחרי שהן נפתחות. נא לא לשלוח שום דבר פרטי.')}</div></div><span class="adv-link" onclick="pendingImg['${ctx}']=null;renderImgDraft_('${ctx}')">${LL_('Remove', 'הסרה')}</span></div>`;
 }
 function renderImgDraft_(ctx) { const el = document.getElementById('imgDraft-' + ctx); if (el) el.innerHTML = imgDraftHtml_(ctx); }
+let pendingDeleteMsgId = null; // admin message waiting for "Delete this message?" confirmation
+function deleteAdminMessage_(id) {
+  pendingDeleteMsgId = null;
+  if (editingMessageId === id) { editingMessageId = null; if (chatTarget) chatTarget.prefill = ''; }
+  const before = messagesCache.slice();
+  messagesCache = messagesCache.filter(m => m.id !== id);
+  refreshThreadModalIfOpen();
+  api('deleteMessage', { id }).then(() => { try { renderAdminMessagesList_(); } catch (e) {} })
+    .catch(err => { messagesCache = before; refreshThreadModalIfOpen(); alert(err.message); });
+}
 function renderChatMessages(list, opts) {
   const editable = !!(opts && opts.editable);
   const ctx = editable ? 'admin' : 'user';
@@ -9005,6 +9031,9 @@ function renderChatMessages(list, opts) {
       const editedTag = m.edited_at ? ' <span class="muted">(edited)</span>' : '';
       const editLink = (editable && m.sender === 'admin')
         ? ` · <span class="adv-link" onclick='startEditAdminMessage_(${escapeHtml(JSON.stringify(m.id))},${escapeHtml(JSON.stringify(m.text))})'>Edit</span>`
+          + (pendingDeleteMsgId === m.id
+            ? ` · <span class="msg-del-confirm">Delete this message? <span class="adv-link" style="color:#c0392b;font-weight:700;" onclick="event.stopPropagation();deleteAdminMessage_('${escapeHtml(m.id)}')">Delete</span> / <span class="adv-link" onclick="event.stopPropagation();pendingDeleteMsgId=null;refreshThreadModalIfOpen()">Keep</span></span>`
+            : ` · <span class="adv-link" onclick="event.stopPropagation();pendingDeleteMsgId='${escapeHtml(m.id)}';refreshThreadModalIfOpen()">Delete</span>`)
         : '';
       const replyLink = m.id ? ` · <span class="msg-reply" onclick="startMsgQuote_('${ctx}','${escapeHtml(m.id)}')">↩ Reply</span>` : '';
       const reacts = msgReactsText_(m);
@@ -9696,7 +9725,7 @@ function threadModalHtml() {
   return `<h2 style="margin-top:0">${escapeHtml(chatTarget.name)}</h2>
     <div class="muted" style="margin-top:-10px;margin-bottom:12px;font-size:12.5px;">${escapeHtml(chatTarget.email)}</div>
     <div class="chat-thread" id="adminChatThread">${renderChatMessages(active ? active.msgs : [], { editable: true })}</div>
-    ${editingMessageId ? `<div class="muted" style="font-size:12px;margin-bottom:6px;">Editing your message below — <span class="adv-link" onclick="cancelEditAdminMessage_()">Cancel</span></div>` : ''}
+    ${editingMessageId ? `<div class="muted" style="font-size:12px;margin-bottom:6px;">Editing your message below — <span class="adv-link" onclick="cancelEditAdminMessage_()">Cancel</span> · <span class="adv-link" style="color:#c0392b;" onclick="pendingDeleteMsgId='${escapeHtml(editingMessageId)}';refreshThreadModalIfOpen()">Delete message</span></div>` : ''}
     ${!editingMessageId && chatTarget.replyTo ? `<div class="reply-ref-draft"><span class="muted" style="font-size:12px;">Replying about:</span>${replyRefBoxHtml_({ reply_to_type: chatTarget.replyTo.type, reply_to_id: chatTarget.replyTo.id, reply_to_label: chatTarget.replyTo.label, reply_to_song_id: chatTarget.replyTo.song_id }, 'admin')}<span class="adv-link" style="font-size:12px;" onclick="clearReplyTo_()">Remove</span></div>` : ''}
     <div id="quoteDraft-admin">${editingMessageId ? '' : quoteDraftHtml_('admin')}</div>
     <div id="imgDraft-admin">${editingMessageId ? '' : imgDraftHtml_('admin')}</div>
@@ -10036,10 +10065,39 @@ function countryListSorted_(obj) {
 function countryBreakdownText_(obj) {
   return countryListSorted_(obj).map(([cc, n]) => `${countryName_(cc)}: ${n}`).join('\n');
 }
-function countryBreakdownHtml_(obj) {
+// range (optional): { from, to, label } in New York dates - makes each
+// country tappable to see the people behind the number.
+function countryBreakdownHtml_(obj, range) {
   const list = countryListSorted_(obj);
   if (!list.length) return '<span class="muted">No country information for these visits yet.</span>';
-  return list.map(([cc, n]) => `<span class="country-pill">${countryFlag_(cc)} ${escapeHtml(countryName_(cc))} <b>${n}</b></span>`).join('');
+  return list.map(([cc, n]) => range
+    ? `<span class="country-pill tappable" role="button" tabindex="0" data-cc="${escapeHtml(cc)}" data-from="${range.from}" data-to="${range.to}" data-label="${escapeHtml(range.label || '')}" onclick="event.stopPropagation();openCountryVisitors_(this.dataset)">${countryFlag_(cc)} ${escapeHtml(countryName_(cc))} <b>${n}</b></span>`
+    : `<span class="country-pill">${countryFlag_(cc)} ${escapeHtml(countryName_(cc))} <b>${n}</b></span>`).join('');
+}
+// "Today" in New York time, as the Stats data uses.
+function statsTodayNY_() {
+  const d = statsOverviewCache;
+  if (d && d.today) return String(d.today).slice(0, 10);
+  try { return new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }); } catch (e) { return new Date().toISOString().slice(0, 10); }
+}
+function isoDayAdd_(iso, n) { const t = new Date(iso + 'T12:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); }
+function openCountryVisitors_(ds) {
+  const cc = ds.cc, label = ds.label || '';
+  const head = `<h2 style="margin-top:0">${countryFlag_(cc)} ${escapeHtml(countryName_(cc))}</h2><div class="muted" style="margin-top:-8px;margin-bottom:10px;font-size:13px;">${escapeHtml(label)}</div>`;
+  openModal(head + `<div id="countryVisitorsList" class="muted">Loading…</div><div class="modal-actions"><button class="btn" onclick="closeModal()">Close</button></div>`);
+  api('getCountryVisitors', { country: cc, from: ds.from, to: ds.to }).then(r => {
+    const el = document.getElementById('countryVisitorsList'); if (!el) return;
+    const people = r.people || [];
+    const multiDay = ds.from !== ds.to;
+    el.className = '';
+    el.innerHTML = people.length
+      ? `<div class="muted" style="font-size:12.5px;margin-bottom:6px;">${people.length} ${people.length === 1 ? 'person' : 'people'}${people.length >= 300 ? ' (showing the 300 most recent)' : ''}</div>
+         <div style="max-height:55vh;overflow-y:auto;">${people.map(p => `<div style="padding:7px 2px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:10px;align-items:baseline;">
+            <div style="min-width:0;"><div dir="auto"><b>${escapeHtml(p.name || p.email || '')}</b></div><div class="muted" style="font-size:12px;overflow-wrap:anywhere;">${escapeHtml(p.email || '')}</div></div>
+            <div class="muted" style="font-size:12px;white-space:nowrap;text-align:right;">${multiDay ? `${p.days} day${p.days === 1 ? '' : 's'}<br>` : ''}${p.last ? new Date(p.last).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''}</div>
+          </div>`).join('')}</div>`
+      : '<div class="muted">No one found.</div>';
+  }).catch(err => { const el = document.getElementById('countryVisitorsList'); if (el) { el.className = 'error'; el.textContent = err.message; } });
 }
 let statsChartItems_ = [];
 function showStatDetail_(i) {
@@ -10047,7 +10105,7 @@ function showStatDetail_(i) {
   if (!it || !el) return;
   document.querySelectorAll('.stat-chart-col.selected').forEach(x => x.classList.remove('selected'));
   const col = document.querySelector(`.stat-chart-col[data-i="${i}"]`); if (col) col.classList.add('selected');
-  el.innerHTML = `<div style="margin-bottom:6px;"><b>${escapeHtml(it.fullLabel || it.label)}</b> — ${it.value} visitor${it.value === 1 ? '' : 's'}</div>${it.value ? countryBreakdownHtml_(it.countries) : ''}`;
+  el.innerHTML = `<div style="margin-bottom:6px;"><b>${escapeHtml(it.fullLabel || it.label)}</b> — ${it.value} visitor${it.value === 1 ? '' : 's'}</div>${it.value ? countryBreakdownHtml_(it.countries, it.range) : ''}`;
 }
 function statsBarsHtml_(items) {
   statsChartItems_ = items;
@@ -10159,7 +10217,8 @@ function renderAdminStatsOverview() {
       hourCounts[h]++;
       if (v && typeof v === 'object') { const cc = v.c || '??'; hourCountries[h][cc] = (hourCountries[h][cc] || 0) + 1; }
     });
-    const items = hourCounts.map((v, h) => ({ value: v, label: hourLabelShort_(h), fullLabel: `Today, ${hourLabel_(h)}`, countries: hourCountries[h], title: `${hourLabel_(h)}: ${v} visitor${v === 1 ? '' : 's'}` }));
+    const todayNY = statsTodayNY_();
+    const items = hourCounts.map((v, h) => ({ range: { from: todayNY, to: todayNY, label: 'Everyone from here today' }, value: v, label: hourLabelShort_(h), fullLabel: `Today, ${hourLabel_(h)}`, countries: hourCountries[h], title: `${hourLabel_(h)}: ${v} visitor${v === 1 ? '' : 's'}` }));
     barsHtml = statsBarsHtml_(items);
     const todayCount = (d.todayVisits || []).length;
     caption = `Today's visits by hour, in your local time (first app-open per visitor — ${todayCount} visitor${todayCount === 1 ? '' : 's'} so far today)`;
@@ -10172,7 +10231,7 @@ function renderAdminStatsOverview() {
       // for the bare day number - the month is already named in the
       // caption below, and the full date is still in the hover title.
       const label = statsPeriod === 'weekly' ? fullLabel : String(dateObj.getUTCDate());
-      return { value: day.visitors, label, fullLabel, countries: day.countries, title: `${fullLabel}: ${day.visitors} visitor${day.visitors === 1 ? '' : 's'}` };
+      return { range: { from: day.date, to: day.date, label: fullLabel }, value: day.visitors, label, fullLabel, countries: day.countries, title: `${fullLabel}: ${day.visitors} visitor${day.visitors === 1 ? '' : 's'}` };
     });
     barsHtml = statsBarsHtml_(items);
     caption = statsPeriod === 'weekly' ? 'Visitors per day — last 7 days' : 'Visitors per day — last 30 days';
@@ -10181,7 +10240,8 @@ function renderAdminStatsOverview() {
       const dateObj = new Date(mo.month + '-01T00:00:00Z');
       const label = dateObj.toLocaleDateString(undefined, { month: 'short', timeZone: 'UTC' });
       const fullLabel = dateObj.toLocaleDateString(undefined, { month: 'short', year: 'numeric', timeZone: 'UTC' });
-      return { value: mo.visitors, label, fullLabel, countries: mo.countries, title: `${fullLabel}: ${mo.visitors} visitor${mo.visitors === 1 ? '' : 's'}` };
+      const moEnd = isoDayAdd_(new Date(Date.UTC(dateObj.getUTCFullYear(), dateObj.getUTCMonth() + 1, 1)).toISOString().slice(0, 10), -1);
+      return { range: { from: mo.month + '-01', to: moEnd, label: fullLabel }, value: mo.visitors, label, fullLabel, countries: mo.countries, title: `${fullLabel}: ${mo.visitors} visitor${mo.visitors === 1 ? '' : 's'}` };
     });
     barsHtml = statsBarsHtml_(items);
     caption = 'Visitors per month — last 12 months';
@@ -10203,6 +10263,11 @@ function renderAdminStatsOverview() {
       // Counts are distinct people per country for the whole period (someone
       // who visited on 3 days counts once).
       let obj = null, title = '';
+      const tNY = statsTodayNY_();
+      const range = statsPeriod === 'daily' ? { from: tNY, to: tNY, label: 'Today' }
+        : statsPeriod === 'weekly' ? { from: isoDayAdd_(tNY, -6), to: tNY, label: 'Last 7 days' }
+        : statsPeriod === 'monthly' ? { from: isoDayAdd_(tNY, -29), to: tNY, label: 'Last 30 days' }
+        : (() => { const t = new Date(tNY + 'T12:00:00Z'); return { from: new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() - 11, 1)).toISOString().slice(0, 10), to: tNY, label: 'Last 12 months' }; })();
       if (statsPeriod === 'daily') {
         obj = {};
         (d.todayVisits || []).forEach(v => { if (v && typeof v === 'object') { const cc = v.c || '??'; obj[cc] = (obj[cc] || 0) + 1; } });
@@ -10212,7 +10277,7 @@ function renderAdminStatsOverview() {
       else if (statsPeriod === 'monthly') { obj = d.countries30; title = 'Visitors by country — last 30 days'; }
       else { obj = d.countries12m; title = 'Visitors by country — last 12 months'; }
       if (!obj) return '';
-      return `<div class="card"><div class="muted" style="margin-bottom:8px;">${title}</div>${countryBreakdownHtml_(obj)}<div class="muted" style="font-size:11.5px;margin-top:8px;">Based on each device's time-zone setting.</div></div>`;
+      return `<div class="card"><div class="muted" style="margin-bottom:8px;">${title}</div>${countryBreakdownHtml_(obj, range)}<div class="muted" style="font-size:11.5px;margin-top:8px;">Based on each device's time-zone setting. Tap a country to see who.</div></div>`;
     })()}
     ${appModeCardHtml_()}
     ${appLangCardHtml_()}`;
