@@ -2634,7 +2634,7 @@ async function supaApi(action, fields) {
   fields = fields || {};
   await ensureSupabaseLib_();
   // Anything that changes data makes the startup answer out of date.
-  if (!START_BUNDLE_READS[action] && !/^(get|list|search|incrementSongView)/.test(action)) dropStartBundle_();
+  if (!START_BUNDLE_READS[action] && !/^(get|list|search|incrementSongView|songContent|logVisit)/.test(action)) dropStartBundle_();
   if (START_BUNDLE_READS[action] && currentUser && !viewAsUser) {
     const B = await startBundle_();
     const me = B && B.profile;
@@ -2757,7 +2757,8 @@ async function supaApi(action, fields) {
     return { success: true, content: (data || []).map(r => ({ id: r.id, updated_at: r.updated_at, chords_lyrics: r.chords_lyrics || '', lyrics_only: r.lyrics_only || '' })) };
   }
   if (action === 'songContent') {
-    await supaRequireUser_();
+    // No separate profile lookup first (one less round trip before the
+    // chart arrives) - the database itself only lets signed-in users read songs.
     const { data, error } = await getSupa_().from('songs').select('id,chords_lyrics,lyrics_only').eq('id', fields.id).maybeSingle();
     throwIfErr_(error);
     if (!data) return { success: false, error: 'Song not found' };
@@ -3014,12 +3015,19 @@ async function supaApi(action, fields) {
   // be shown - see Admin > Stats > Top Songs' two columns.
   if (action === 'getTopSongCounts') {
     await supaRequireAdmin_();
-    let res = await supaSelectAll_((from, to) => getSupa_().from('song_view_counts')
-      .select('song_id,view_count,unique_view_count').order('song_id').range(from, to));
+    // Only the top 20 by opens and the top 20 by unique users are needed.
+    const [byOpens, byUnique] = await Promise.all([
+      getSupa_().from('song_view_counts').select('song_id,view_count,unique_view_count').order('view_count', { ascending: false }).limit(TOP_SONGS_N),
+      getSupa_().from('song_view_counts').select('song_id,view_count,unique_view_count').order('unique_view_count', { ascending: false }).limit(TOP_SONGS_N),
+    ]);
+    let res = (byOpens.error || byUnique.error) ? { error: byOpens.error || byUnique.error } : { data: byOpens.data.concat(byUnique.data) };
     if (res.error && /song_view_counts/.test(res.error.message || '')) {
       // reduce_disk_io.sql not run yet - the counts still live on songs.
-      res = await supaSelectAll_((from, to) => getSupa_().from('songs')
-        .select('id,view_count,unique_view_count').order('id').range(from, to));
+      const [a, b2] = await Promise.all([
+        getSupa_().from('songs').select('id,view_count,unique_view_count').order('view_count', { ascending: false }).limit(TOP_SONGS_N),
+        getSupa_().from('songs').select('id,view_count,unique_view_count').order('unique_view_count', { ascending: false }).limit(TOP_SONGS_N),
+      ]);
+      res = (a.error || b2.error) ? { error: a.error || b2.error } : { data: a.data.concat(b2.data) };
       throwIfErr_(res.error);
       return { success: true, counts: (res.data || []).map(r => ({ song_id: r.id, view_count: r.view_count || 0, unique_view_count: r.unique_view_count || 0 })) };
     }
@@ -3090,6 +3098,15 @@ async function supaApi(action, fields) {
     throwIfErr_(error);
     return { success: true, people: data || [] };
   }
+  if (action === 'renameArtist' || action === 'renameCategory') {
+    await supaRequireAdmin_();
+    const { data, error } = action === 'renameArtist'
+      ? await getSupa_().rpc('admin_rename_artist', { p_old: fields.old, p_new: fields.new, p_new_he: fields.he || null })
+      : await getSupa_().rpc('admin_rename_category', { p_old: fields.old, p_new: fields.new });
+    if (error && /admin_rename_|function .* does not exist|schema cache/i.test(error.message || '')) throw new Error('Renaming needs add_rename_tools.sql to be run first.');
+    throwIfErr_(error);
+    return { success: true, count: data || 0 };
+  }
   if (action === 'getAppModeStats') {
     await supaRequireAdmin_();
     const { data, error } = await getSupa_().rpc('admin_app_mode_stats');
@@ -3103,7 +3120,7 @@ async function supaApi(action, fields) {
     {
       const { data, error } = await getSupa_().rpc('admin_visit_stats');
       if (!error && data && Array.isArray(data.days)) {
-        return { success: true, today: data.today || null, totalUsers: data.totalUsers || 0, days: data.days, months: data.months || [], todayVisits: data.todayVisits || [], countries7: data.countries7 || null, countries30: data.countries30 || null, countries12m: data.countries12m || null };
+        return { success: true, today: data.today || null, totalUsers: data.totalUsers || 0, days: data.days, months: data.months || [], todayVisits: data.todayVisits || [], countries7: data.countries7 || null, countries30: data.countries30 || null, countries12m: data.countries12m || null, years: data.years || null, countriesAll: data.countriesAll || null };
       }
     }
     const YEAR_DAYS = 371; // comfortably covers 12 full calendar months back from today
@@ -6226,6 +6243,54 @@ function songRowHtml(s, queueIds, reorderable) {
         <span class="star ${effectiveFavorites().includes(s.id)?'on':''}" data-fav-star="${s.id}" onclick="event.stopPropagation();toggleFavoriteFor('${s.id}')">${SVG_ICONS.heart}</span>
       </div>`;
 }
+// ---- Admin: fix the spelling of an artist / category on every song ---------
+function renameKind_() { return filters.artist ? { kind: 'artist', name: filters.artist } : filters.language ? { kind: 'category', name: filters.language, lang: true } : filters.tag ? { kind: 'category', name: filters.tag } : null; }
+function openRenameModal_() {
+  const k = renameKind_(); if (!k) return;
+  const n = k.kind === 'artist' ? songs.filter(s => splitArtists(s.artist).includes(k.name)).length : songs.filter(s => (s.categories || []).includes(k.name)).length;
+  const he = k.kind === 'artist' ? (artistHebrewMapCached_()[k.name] || '') : '';
+  openModal(`<h2 style="margin-top:0">Fix spelling</h2>
+    <p class="muted" style="margin-top:-6px;">${k.kind === 'artist' ? 'Artist' : (k.lang ? 'Language' : 'Category')} <b dir="auto">${escapeHtml(k.name)}</b> — on ${n} song${n === 1 ? '' : 's'}. Every one of them will be updated.</p>
+    <label>Correct spelling</label><input type="text" id="renameNew" dir="auto" value="${escapeHtml(k.name)}">
+    ${k.kind === 'artist' ? `<label>Hebrew name (optional)</label><input type="text" id="renameHe" dir="rtl" value="${escapeHtml(he)}">` : ''}
+    <p class="muted" style="font-size:12.5px;">If the correct spelling already exists, the two are combined into one.</p>
+    <div class="modal-actions"><span id="renameStatus" class="status"></span><button class="btn secondary" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveRename_()">Save</button></div>`);
+  const el = document.getElementById('renameNew'); if (el) { el.focus(); el.select(); }
+}
+function saveRename_() {
+  const k = renameKind_(); if (!k) return;
+  const nw = (document.getElementById('renameNew').value || '').trim();
+  const heEl = document.getElementById('renameHe'); const he = heEl ? heEl.value.trim() : '';
+  const st = document.getElementById('renameStatus');
+  if (!nw) { st.textContent = 'Please type a name.'; st.className = 'error'; return; }
+  if (k.kind === 'artist' && nw.includes(',')) { st.textContent = 'An artist name can’t contain a comma.'; st.className = 'error'; return; }
+  const heBefore = k.kind === 'artist' ? (artistHebrewMapCached_()[k.name] || '') : '';
+  if (nw === k.name && he === heBefore) { closeModal(); return; }
+  st.textContent = 'Saving…'; st.className = 'status';
+  api(k.kind === 'artist' ? 'renameArtist' : 'renameCategory', { old: k.name, new: nw, he }).then(r => {
+    // Same change on this device right away (the next sync confirms it).
+    songs.forEach(s => {
+      if (k.kind === 'artist') {
+        const en = splitArtists(s.artist); if (!en.includes(k.name)) return;
+        const hes = splitArtists(s.artist_hebrew), aligned = hes.length === en.length;
+        const oe = [], oh = [];
+        en.forEach((a, i) => { const nm = a === k.name ? nw : a; if (oe.includes(nm)) return; oe.push(nm); if (aligned) oh.push(a === k.name && he ? he : hes[i]); });
+        s.artist = oe.join(', ');
+        if (aligned) s.artist_hebrew = oh.join(', '); else if (he && oe.length === 1) s.artist_hebrew = he;
+      } else if ((s.categories || []).includes(k.name)) {
+        const out = []; s.categories.forEach(c => { const v = c === k.name ? nw : c; if (!out.includes(v)) out.push(v); }); s.categories = out;
+      }
+    });
+    if (k.lang && Array.isArray(LANGUAGE_VALUES)) { const i = LANGUAGE_VALUES.indexOf(k.name); if (i >= 0) { if (LANGUAGE_VALUES.includes(nw)) LANGUAGE_VALUES.splice(i, 1); else LANGUAGE_VALUES[i] = nw; } }
+    _artistHeCache = {};
+    if (k.kind === 'artist') filters.artist = nw; else if (k.lang) filters.language = nw; else filters.tag = nw;
+    try { saveCatalogCache(); } catch (e) {}
+    closeModal();
+    showToast(`Updated ${r.count} song${r.count === 1 ? '' : 's'}.`);
+    render();
+    try { loadSongs(false); } catch (e) {}
+  }).catch(err => { st.textContent = err.message; st.className = 'error'; });
+}
 function renderList() {
   const activeFilterChip = filters.artist ? `Artist: ${filters.artist}` : filters.language ? `Language: ${filters.language}` : filters.tag ? `Tag: ${filters.tag}` : null;
 
@@ -6240,7 +6305,7 @@ function renderList() {
       <button class="btn secondary icon-btn-round" onclick="goRandomSong()" title="${t('random_song')}" aria-label="${t('random_song')}" style="border-radius:50%;width:38px;height:38px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex:none;">${SVG_ICONS.shuffle}</button>
       ${effectiveIsAdmin() ? `<button class="btn" onclick="goTo('edit')">${t('add_song_btn')}</button>` : ''}
     </div>`;
-  if (activeFilterChip) html += `<div style="margin-bottom:10px"><span class="chip active" onclick="filters.artist='';filters.language='';filters.tag='';songListPage=0;render()">${escapeHtml(activeFilterChip)} ✕</span></div>`;
+  if (activeFilterChip) html += `<div style="margin-bottom:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span class="chip active" onclick="filters.artist='';filters.language='';filters.tag='';songListPage=0;render()">${escapeHtml(activeFilterChip)} ✕</span>${effectiveIsAdmin() ? `<button class="btn secondary" style="padding:4px 10px;font-size:12.5px;" onclick="openRenameModal_()">✎ Fix spelling</button>` : ''}</div>`;
   if (songTab === 'favorites' && currentUser) {
     let favControls = '';
     // Only offered on the plain, unfiltered Favorites view — a filtered
@@ -9962,6 +10027,7 @@ function setErrorArchived(id, archived) { api('archiveError', { id, archived }).
 let topSongCounts = null;     // { songId: {view_count, unique_view_count} } - admin only, see getTopSongCounts
 let topSongCountsAt = 0;      // when it was fetched; re-fetched after 5 minutes
 let topSongCountsLoading = false;
+const TOP_SONGS_N = 20;
 function renderAdminTopSongs() {
   const body = document.getElementById('adminBody');
   if (!body) return;
@@ -9983,10 +10049,10 @@ function renderAdminTopSongs() {
   const key = adminTopSongsSort;
   const other = key === 'view_count' ? 'unique_view_count' : 'view_count';
   const cnt = s => topSongCounts[s.id] || { view_count: 0, unique_view_count: 0 };
-  const sorted = songs.map(s => Object.assign({}, s, cnt(s))).sort((a, b) => (b[key] || 0) - (a[key] || 0) || (b[other] || 0) - (a[other] || 0) || (a.title || '').localeCompare(b.title || ''));
-  const page = adminTopSongsPage;
+  const sorted = songs.filter(s => topSongCounts[s.id]).map(s => Object.assign({}, s, cnt(s))).sort((a, b) => (b[key] || 0) - (a[key] || 0) || (b[other] || 0) - (a[other] || 0) || (a.title || '').localeCompare(b.title || '')).slice(0, TOP_SONGS_N);
+  const page = 0;
   const th = (k, label, title) => `<th class="sortable-th num${key === k ? ' sorted' : ''}" title="${title}" onclick="setAdminTopSongsSort('${k}')">${label}${key === k ? ' ▾' : ''}</th>`;
-  const rows = pageSlice(sorted, page).map((s, i) => `<tr>
+  const rows = sorted.map((s, i) => `<tr>
       <td class="muted">${page * PAGE_SIZE + i + 1}</td>
       <td><span class="adv-link" onclick="goTo('detail',{id:'${s.id}'})">${escapeHtml(s.title)}</span></td>
       <td>${escapeHtml(fmtArtists_(s.artist))}</td>
@@ -9995,7 +10061,7 @@ function renderAdminTopSongs() {
     </tr>`).join('') || `<tr><td colspan="5" class="muted">No songs yet.</td></tr>`;
   body.innerHTML = `<div class="muted" style="font-size:12.5px;margin-bottom:8px;"><b>Opens</b> counts every time a song was opened. <b>Unique users</b> counts each person once, however many times they open it. Click a column to rank by it.</div>
     <div class="table-wrap"><table><tr><th>#</th><th>Song</th><th>Artist</th>${th('view_count', 'Opens', 'Total times opened')}${th('unique_view_count', 'Unique users', 'Different people who opened it')}</tr>${rows}</table></div>
-    ${pagerHtml(sorted.length, page, 'changeAdminTopSongsPage')}`;
+`;
 }
 function setAdminTopSongsSort(k) { adminTopSongsSort = k; adminTopSongsPage = 0; renderAdminTopSongs(); }
 function changeAdminTopSongsPage(p) { adminTopSongsPage = p; renderAdminTopSongs(); }
@@ -10222,8 +10288,8 @@ function renderAdminStatsOverview() {
     barsHtml = statsBarsHtml_(items);
     const todayCount = (d.todayVisits || []).length;
     caption = `Today's visits by hour, in your local time (first app-open per visitor — ${todayCount} visitor${todayCount === 1 ? '' : 's'} so far today)`;
-  } else if (statsPeriod === 'weekly' || statsPeriod === 'monthly') {
-    const list = statsPeriod === 'weekly' ? d.days.slice(-7) : d.days;
+  } else if (statsPeriod === 'weekly') {
+    const list = d.days.slice(-7);
     const items = list.map(day => {
       const dateObj = new Date(day.date + 'T00:00:00Z');
       const fullLabel = dateObj.toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
@@ -10234,8 +10300,8 @@ function renderAdminStatsOverview() {
       return { range: { from: day.date, to: day.date, label: fullLabel }, value: day.visitors, label, fullLabel, countries: day.countries, title: `${fullLabel}: ${day.visitors} visitor${day.visitors === 1 ? '' : 's'}` };
     });
     barsHtml = statsBarsHtml_(items);
-    caption = statsPeriod === 'weekly' ? 'Visitors per day — last 7 days' : 'Visitors per day — last 30 days';
-  } else {
+    caption = 'Visitors per day — last 7 days';
+  } else if (statsPeriod === 'monthly') {
     const items = d.months.map(mo => {
       const dateObj = new Date(mo.month + '-01T00:00:00Z');
       const label = dateObj.toLocaleDateString(undefined, { month: 'short', timeZone: 'UTC' });
@@ -10245,6 +10311,10 @@ function renderAdminStatsOverview() {
     });
     barsHtml = statsBarsHtml_(items);
     caption = 'Visitors per month — last 12 months';
+  } else {
+    const items = (d.years || []).map(y => ({ range: { from: y.year + '-01-01', to: y.year + '-12-31', label: String(y.year) }, value: y.visitors, label: String(y.year), fullLabel: String(y.year), countries: y.countries, title: `${y.year}: ${y.visitors} visitor${y.visitors === 1 ? '' : 's'}` }));
+    barsHtml = items.length ? statsBarsHtml_(items) : '<div class="muted" style="padding:10px 0;">Run add_yearly_stats.sql in Supabase to see visitors per year.</div>';
+    caption = 'Visitors per year';
   }
 
   body.innerHTML = `
@@ -10266,16 +10336,16 @@ function renderAdminStatsOverview() {
       const tNY = statsTodayNY_();
       const range = statsPeriod === 'daily' ? { from: tNY, to: tNY, label: 'Today' }
         : statsPeriod === 'weekly' ? { from: isoDayAdd_(tNY, -6), to: tNY, label: 'Last 7 days' }
-        : statsPeriod === 'monthly' ? { from: isoDayAdd_(tNY, -29), to: tNY, label: 'Last 30 days' }
-        : (() => { const t = new Date(tNY + 'T12:00:00Z'); return { from: new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() - 11, 1)).toISOString().slice(0, 10), to: tNY, label: 'Last 12 months' }; })();
+        : statsPeriod === 'monthly' ? (() => { const t = new Date(tNY + 'T12:00:00Z'); return { from: new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() - 11, 1)).toISOString().slice(0, 10), to: tNY, label: 'Last 12 months' }; })()
+        : { from: ((d.years && d.years[0] && d.years[0].year) || tNY.slice(0, 4)) + '-01-01', to: tNY, label: 'All time' };
       if (statsPeriod === 'daily') {
         obj = {};
         (d.todayVisits || []).forEach(v => { if (v && typeof v === 'object') { const cc = v.c || '??'; obj[cc] = (obj[cc] || 0) + 1; } });
         if (!Object.keys(obj).length) obj = null;
         title = 'Visitors by country — today';
       } else if (statsPeriod === 'weekly') { obj = d.countries7; title = 'Visitors by country — last 7 days'; }
-      else if (statsPeriod === 'monthly') { obj = d.countries30; title = 'Visitors by country — last 30 days'; }
-      else { obj = d.countries12m; title = 'Visitors by country — last 12 months'; }
+      else if (statsPeriod === 'monthly') { obj = d.countries12m; title = 'Visitors by country — last 12 months'; }
+      else { obj = d.countriesAll; title = 'Visitors by country — all time'; }
       if (!obj) return '';
       return `<div class="card"><div class="muted" style="margin-bottom:8px;">${title}</div>${countryBreakdownHtml_(obj, range)}<div class="muted" style="font-size:11.5px;margin-top:8px;">Based on each device's time-zone setting. Tap a country to see who.</div></div>`;
     })()}
