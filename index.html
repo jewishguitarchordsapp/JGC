@@ -341,6 +341,9 @@
   .status-icon-btn.resolved,.status-icon-btn.added{color:#1a7a3d;}
   .status-icon-btn.declined{color:#a33;}
   .status-icon-btn.archive-action{color:#666;}
+  .req-expiry{font-size:11px;color:var(--muted);white-space:nowrap;}
+  .req-expiry.soon{color:#d64545;font-weight:600;}
+  .status-icon-btn.archive-action.overdue, :where(html[data-theme="dark"]) .status-icon-btn.archive-action.overdue{color:#d64545;}
   .admin-grid-icons{display:flex;gap:4px;align-items:center;}
   .tab-badge{display:inline-block;min-width:16px;height:16px;padding:0 5px;border-radius:9px;background:#d93a3a;color:#fff;font-size:10.5px;font-weight:700;line-height:16px;text-align:center;vertical-align:2px;}
   .tab-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#d93a3a;margin-inline-end:6px;vertical-align:1px;}
@@ -1517,8 +1520,11 @@ Object.assign(HE_UI, {
   Object.assign(HE_UI, {"Add a picture": "הוספת תמונה", "Sending pictures needs add_message_images.sql to be run first.": "שליחת תמונות עדיין לא זמינה.", "You can send up to 5 pictures a day.": "אפשר לשלוח עד 5 תמונות ביום.", "That picture is too large.": "התמונה גדולה מדי.", "Picture not found.": "התמונה לא נמצאה."});
   Object.assign(HE_UI, {"Save as PDF": "שמירה כ-PDF", "In the window that opens, choose": "בחלון שייפתח, בחרו", "as the printer (on iPhone: tap": "בתור המדפסת (באייפון: הקישו על", "then": "ואז על", "Save to Files": "שמירה בקבצים", "Continue": "המשך"});
   Object.assign(HE_UI, {"🔎 Also search song lyrics": "🔎 חיפוש גם במילות השירים", "🔎 Searching song lyrics…": "🔎 מחפש במילות השירים…"});
+  Object.assign(HE_UI, {"Will be archived soon": "יועבר לארכיון בקרוב", "1 day left": "נשאר יום אחד", "Requests that aren't added within 100 days are archived.": "בקשות שלא נוספו תוך 100 ימים מועברות לארכיון."});
+  Object.assign(HE_UI, {"When we ask for a song's lyrics and they aren't sent within 100 days, the request is archived.": "כשאנחנו מבקשים את המילים של שיר והן לא נשלחות תוך 100 ימים, הבקשה מועברת לארכיון.", "If the lyrics aren't sent within 100 days, the request is archived.": "אם המילים לא יישלחו תוך 100 ימים, הבקשה תועבר לארכיון."});
   Object.assign(HE_UI, { 'Songs': 'שירים', 'Home': 'דף הבית', 'Search': 'חיפוש', 'Known Chords': 'האקורדים שלי', 'Tuner': 'טיונר', 'Playlist': 'פלייליסט', 'Admin': 'ניהול', 'Add Songs': 'הוספת שירים' });
   HE_UI_PATTERNS.push(
+    [/^(\d+) days left$/, m => 'נשארו ' + m[1] + ' ימים'],
     [/^The file will be named “(.+)”\.$/, m => 'שם הקובץ יהיה “' + m[1] + '”.'],
     [/^‹ Back to (.+)$/, m => '‹ חזרה ' + le(m[1])],
     [/^Reset to (\d+)$/, m => 'איפוס ל-' + m[1]],
@@ -3608,7 +3614,7 @@ function supaRequestToOld_(r, emailMap) {
     song_title: r.song_title, artist: r.artist, note: r.note || '', status: r.status,
     created_at: r.created_at, archived: supaBool_(r.archived),
     youtube_url: r.youtube_url || '', categories: r.categories || [], lyrics: r.lyrics || '',
-    decline_reason: r.decline_reason || '',
+    decline_reason: r.decline_reason || '', needs_lyrics_at: r.needs_lyrics_at || null,
   };
 }
 // A user's saved "My Capo" per song, as { songId: capo }. Returns {} if
@@ -8652,6 +8658,21 @@ function requestStatusMeaning_(status) {
     declined: 'Not added — this request was declined. Any note from the admin is shown underneath.',
   })[status] || String(status || '');
 }
+// A request marked "Looking for lyrics" is archived 100 days after it was
+// marked (needs_lyrics_at, add_needs_lyrics_date.sql) if the lyrics never
+// come. Plain "Waiting" requests have no countdown.
+const REQUEST_EXPIRE_DAYS = 100;
+function requestLyricsOverdue_(r) {
+  return !!(r && r.status === 'needs_lyrics' && r.archived !== 'true' && r.needs_lyrics_at && Date.now() - Date.parse(r.needs_lyrics_at) > REQUEST_EXPIRE_DAYS * 864e5);
+}
+function requestExpiryHtml_(r) {
+  if (!r || r.status !== 'needs_lyrics' || r.archived === 'true' || !r.needs_lyrics_at) return '';
+  const age = Math.floor((Date.now() - Date.parse(r.needs_lyrics_at)) / 864e5);
+  if (isNaN(age)) return '';
+  const left = REQUEST_EXPIRE_DAYS - age;
+  const txt = left <= 0 ? 'Will be archived soon' : left === 1 ? '1 day left' : left + ' days left';
+  return `<br><span class="req-expiry${left <= 14 ? ' soon' : ''}" title="If the lyrics aren't sent within ${REQUEST_EXPIRE_DAYS} days, the request is archived.">${txt}</span>`;
+}
 function requestStatusSymbol(status) {
   return status === 'added' ? '✓' : status === 'declined' ? '✕' : status === 'pending' ? '⏳' : status === 'needs_lyrics' ? '✎' : (status || '');
 }
@@ -8712,8 +8733,9 @@ function renderContactBody() {
     html += `<div class="contact-panel">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">${requestQuotaHtml_().replace('<p class="muted">', '<p class="muted" style="margin:0;flex:1;min-width:180px;">')}<button class="btn${quotaNow.left ? '' : ' secondary'}" onclick="openRequestSongModal()">+ Request a Song</button></div>
       <div class="table-wrap" style="margin-top:10px;"><table><tr><th>Status</th><th>Song</th><th>Artist</th></tr>
-      ${pageSlice(myRequests, contactRequestsPage, 10).map(r => `<tr data-req-id="${escapeHtml(r.id)}"><td><span class="badge badge-explain ${r.status}" role="button" tabindex="0" title="${escapeHtml(requestStatusMeaning_(r.status))}" onclick="showToast(this.title)">${requestStatusSymbol(r.status)}</span>${r.status==='declined' && r.decline_reason ? `<br><span class="muted" dir="auto" style="font-size:11.5px;">${escapeHtml(r.decline_reason)}</span>` : ''}${r.status==='needs_lyrics' ? ` <button class="btn add-lyrics-btn" onclick="openAddRequestLyrics_('${r.id}')">Add lyrics</button>` : ''}</td><td dir="auto">${escapeHtml(r.song_title)}</td><td dir="auto">${escapeHtml(fmtArtists_(r.artist))}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No requests yet.</td></tr>'}
+      ${pageSlice(myRequests, contactRequestsPage, 10).map(r => `<tr data-req-id="${escapeHtml(r.id)}"><td><span class="badge badge-explain ${r.status}" role="button" tabindex="0" title="${escapeHtml(requestStatusMeaning_(r.status))}" onclick="showToast(this.title)">${requestStatusSymbol(r.status)}</span>${r.status==='declined' && r.decline_reason ? `<br><span class="muted" dir="auto" style="font-size:11.5px;">${escapeHtml(r.decline_reason)}</span>` : ''}${r.status==='needs_lyrics' ? ` <button class="btn add-lyrics-btn" onclick="openAddRequestLyrics_('${r.id}')">Add lyrics</button>` : ''}${requestExpiryHtml_(r)}</td><td dir="auto">${escapeHtml(r.song_title)}</td><td dir="auto">${escapeHtml(fmtArtists_(r.artist))}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No requests yet.</td></tr>'}
       </table></div>
+      ${myRequests.some(r => r.status === 'needs_lyrics' && r.archived !== 'true') ? `<div class="muted" style="font-size:12px;margin-top:6px;">When we ask for a song's lyrics and they aren't sent within ${REQUEST_EXPIRE_DAYS} days, the request is archived.</div>` : ''}
       ${pagerHtml(myRequests.length, contactRequestsPage, 'changeContactRequestsPage', 10)}
     </div>`;
   }
@@ -9573,7 +9595,7 @@ function renderAdminRequestsList_() {
       <td class="c-note" dir="auto">${escapeHtml(r.note)}</td>
       <td class="c-lyrics">${lyricsCell(r)}</td>
       <td class="c-date muted" title="${r.created_at ? escapeHtml(new Date(r.created_at).toLocaleString()) : ''}">${r.created_at ? reqShortDate_(r.created_at) : ''}</td>
-      <td class="c-act"><button class="status-icon-btn archive-action" onclick="setRequestArchived('${r.id}',${r.archived==='true'?'false':'true'})" title="${r.archived==='true'?'Unarchive':'Archive'}" aria-label="${r.archived==='true'?'Unarchive':'Archive'}">${r.archived==='true'?SVG_ICONS.unarchive:SVG_ICONS.archive}</button></td>
+      <td class="c-act"><button class="status-icon-btn archive-action${requestLyricsOverdue_(r) ? ' overdue' : ''}" onclick="setRequestArchived('${r.id}',${r.archived==='true'?'false':'true'})" title="${r.archived==='true'?'Unarchive':(requestLyricsOverdue_(r) ? 'Archive (lyrics not sent within 100 days)' : 'Archive')}" aria-label="${r.archived==='true'?'Unarchive':'Archive'}">${r.archived==='true'?SVG_ICONS.unarchive:SVG_ICONS.archive}</button></td>
     </tr>`).join('') || `<tr><td colspan="9" class="muted">No requests${requestsFilter.length===0 && !requestsSearch?' yet':' match'}.</td></tr>`) + `</table></div>` +
     pagerHtml(filtered.length, adminRequestsPage, 'changeAdminRequestsPage') + adminDraftsSectionHtml_();
 }
