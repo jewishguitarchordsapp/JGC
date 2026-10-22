@@ -1523,6 +1523,7 @@ Object.assign(HE_UI, {
   Object.assign(HE_UI, {"Will be archived soon": "יועבר לארכיון בקרוב", "1 day left": "נשאר יום אחד", "Requests that aren't added within 100 days are archived.": "בקשות שלא נוספו תוך 100 ימים מועברות לארכיון."});
   Object.assign(HE_UI, {"When we ask for a song's lyrics and they aren't sent within 100 days, the request is archived.": "כשאנחנו מבקשים את המילים של שיר והן לא נשלחות תוך 100 ימים, הבקשה מועברת לארכיון.", "If the lyrics aren't sent within 100 days, the request is archived.": "אם המילים לא יישלחו תוך 100 ימים, הבקשה תועבר לארכיון."});
   Object.assign(HE_UI, {"Print songs": "הדפסת שירים", "Select all": "בחירת הכל", "Select none": "ניקוי הבחירה", "There are no songs to print here.": "אין כאן שירים להדפסה.", "My Favorites": "המועדפים שלי", "Hebrew songs: right-to-left columns": "שירים בעברית: עמודות מימין לשמאל", "Couldn’t load these songs — please check your connection and try again.": "לא הצלחנו לטעון את השירים — בדקו את החיבור ונסו שוב."});
+  Object.assign(HE_UI, {"Can’t use Google? Sign in with a username": "לא מצליחים להתחבר עם Google? התחברו עם שם משתמש", "Sign in with a username": "התחברות עם שם משתמש", "Create an account": "יצירת חשבון", "Create account": "יצירת חשבון", "Sign in": "התחברות", "For people who can’t use Google sign-in. New accounts are approved by us before they can be used.": "למי שלא יכול להתחבר עם Google. חשבונות חדשים מאושרים על ידינו לפני שאפשר להשתמש בהם.", "Your name": "השם שלך", "Username": "שם משתמש", "Password": "סיסמה", "Password again": "סיסמה שוב", "3–30 letters or numbers (you can also use . _ -)": "3–30 אותיות באנגלית או מספרים (אפשר גם . _ -)", "At least 6 characters. Please remember it — it can’t be reset by email.": "לפחות 6 תווים. חשוב לזכור אותה — אי אפשר לאפס אותה דרך מייל.", "Already have an account?": "כבר יש לכם חשבון?", "New here?": "חדשים כאן?", "Forgot your password? Please get in touch with us and we’ll set a new one.": "שכחתם את הסיסמה? צרו איתנו קשר ונגדיר לכם סיסמה חדשה.", "Wrong username or password.": "שם משתמש או סיסמה שגויים.", "That username is taken — please choose another.": "שם המשתמש תפוס — בחרו שם אחר.", "Username accounts aren’t available right now.": "חשבונות עם שם משתמש לא זמינים כרגע.", "Too many tries — please wait a few minutes and try again.": "יותר מדי ניסיונות — המתינו כמה דקות ונסו שוב.", "Couldn’t connect — please check your connection.": "אין חיבור — בדקו את החיבור לאינטרנט.", "Something went wrong — please try again.": "משהו השתבש — נסו שוב.", "Please type your username and password.": "הקלידו שם משתמש וסיסמה.", "Signing in…": "מתחבר…", "Please type your name.": "הקלידו את שמכם.", "The username needs 3–30 letters or numbers (. _ - are OK too), with no spaces.": "שם המשתמש צריך 3–30 אותיות באנגלית או מספרים (אפשר גם . _ -), בלי רווחים.", "The password needs at least 6 characters.": "הסיסמה צריכה לפחות 6 תווים.", "The two passwords don’t match.": "שתי הסיסמאות לא זהות.", "Creating your account…": "יוצר את החשבון…", "Waiting for approval": "ממתין לאישור", "Your account was created and is waiting to be approved. You’ll be able to use the app as soon as it is.": "החשבון נוצר וממתין לאישור. תוכלו להשתמש באפליקציה ברגע שיאושר.", "Check again": "בדיקה שוב", "Checking…": "בודק…", "Account not approved": "החשבון לא אושר", "This account wasn’t approved. If you think this is a mistake, please get in touch with us.": "החשבון הזה לא אושר. אם לדעתכם זו טעות, צרו איתנו קשר."});
   Object.assign(HE_UI, { 'Songs': 'שירים', 'Home': 'דף הבית', 'Search': 'חיפוש', 'Known Chords': 'האקורדים שלי', 'Tuner': 'טיונר', 'Playlist': 'פלייליסט', 'Admin': 'ניהול', 'Add Songs': 'הוספת שירים' });
   HE_UI_PATTERNS.push(
     [/^(\d+) days left$/, m => 'נשארו ' + m[1] + ' ימים'],
@@ -2071,7 +2072,7 @@ async function hasAppSession_() {
     if (currentUser && currentUser.email !== email) { appSessionOk = false; return false; }
     if (!currentUser) {
       const md = u.user_metadata || {};
-      currentUser = { idToken: '', email, name: md.full_name || md.name || email, picture: md.avatar_url || md.picture || '', googlePicture: md.avatar_url || md.picture || '', isAdmin: false };
+      currentUser = { idToken: '', email, name: md.full_name || md.name || usernameOf_(email), picture: md.avatar_url || md.picture || '', googlePicture: md.avatar_url || md.picture || '', isAdmin: false, pending: isUsernameAccount_(email) };
       saveAuthCache(currentUser);
       renderUserArea();
       if (!myDataReady) loadMyData();
@@ -2083,6 +2084,88 @@ async function hasAppSession_() {
   } catch (e) { appSessionOk = false; return false; }
 }
 
+// ---- Username accounts (for people whose filters block Google) -------------
+// Stored as <username>@users.jgcapp.org - an address only this app uses.
+const USERNAME_DOMAIN = 'users.jgcapp.org';
+const USERNAME_RE = /^[a-z0-9][a-z0-9._-]{2,29}$/;
+function isUsernameAccount_(email) { return String(email || '').toLowerCase().endsWith('@' + USERNAME_DOMAIN); }
+function usernameOf_(email) { return isUsernameAccount_(email) ? String(email).split('@')[0] : String(email || ''); }
+function openUsernameSignIn_(mode) {
+  const up = mode === 'signup';
+  openModal(`<h2 style="margin-top:0">${up ? 'Create an account' : 'Sign in with a username'}</h2>
+    ${up ? `<p class="muted" style="margin-top:-6px;font-size:13px;">For people who can’t use Google sign-in. New accounts are approved by us before they can be used.</p>
+    <label>Your name</label><input type="text" id="unName" dir="auto" autocomplete="name">` : ''}
+    <label>Username</label><input type="text" id="unUser" autocomplete="username" autocapitalize="none" spellcheck="false" dir="ltr">
+    ${up ? `<div class="muted" style="font-size:11.5px;margin-top:-4px;">3–30 letters or numbers (you can also use . _ -)</div>` : ''}
+    <label>Password</label><input type="password" id="unPass" autocomplete="${up ? 'new-password' : 'current-password'}" dir="ltr">
+    ${up ? `<label>Password again</label><input type="password" id="unPass2" autocomplete="new-password" dir="ltr">
+    <div class="muted" style="font-size:11.5px;">At least 6 characters. Please remember it — it can’t be reset by email.</div>` : ''}
+    <div class="modal-actions"><span id="unStatus" class="status"></span><button class="btn secondary" onclick="closeModal()">Cancel</button><button class="btn" id="unGo" onclick="${up ? 'usernameSignUp_()' : 'usernameSignIn_()'}">${up ? 'Create account' : 'Sign in'}</button></div>
+    <div style="text-align:center;font-size:13px;margin-top:6px;">${up
+      ? `Already have an account? <span class="adv-link" onclick="openUsernameSignIn_('signin')">Sign in</span>`
+      : `New here? <span class="adv-link" onclick="openUsernameSignIn_('signup')">Create an account</span><div class="muted" style="font-size:11.5px;margin-top:6px;">Forgot your password? Please get in touch with us and we’ll set a new one.</div>`}</div>`);
+  const first = document.getElementById(up ? 'unName' : 'unUser'); if (first) first.focus();
+  ['unUser', 'unPass', 'unPass2'].forEach(id => { const el = document.getElementById(id); if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); document.getElementById('unGo').click(); } }); });
+}
+function usernameErr_(msg) { const st = document.getElementById('unStatus'); if (st) { st.textContent = msg; st.className = msg ? 'error' : 'status'; } }
+function friendlyAuthError_(err) {
+  const m = String((err && err.message) || err || '');
+  if (/invalid login credentials/i.test(m)) return 'Wrong username or password.';
+  if (/already registered|already exists/i.test(m)) return 'That username is taken — please choose another.';
+  if (/signups? not allowed|email.*disabled|provider is disabled/i.test(m)) return 'Username accounts aren’t available right now.';
+  if (/rate limit|too many/i.test(m)) return 'Too many tries — please wait a few minutes and try again.';
+  if (/failed to fetch|network|load failed/i.test(m)) return 'Couldn’t connect — please check your connection.';
+  return 'Something went wrong — please try again.';
+}
+async function finishPasswordSignIn_() {
+  // Same path the app uses when it finds a saved sign-in on this device.
+  closeModal();
+  signedOutForInactivity = false;
+  supaProfileCache = null;
+  try { dropStartBundle_(); _startBundleTried = false; } catch (e) {}
+  currentUser = null;
+  await hasAppSession_();
+  render();
+}
+async function usernameSignIn_() {
+  const u = (document.getElementById('unUser').value || '').trim().toLowerCase();
+  const pw = document.getElementById('unPass').value || '';
+  if (!u || !pw) { usernameErr_('Please type your username and password.'); return; }
+  usernameErr_(''); const st = document.getElementById('unStatus'); if (st) st.textContent = 'Signing in…';
+  try {
+    await ensureSupabaseLib_();
+    const { error } = await getSupa_().auth.signInWithPassword({ email: u + '@' + USERNAME_DOMAIN, password: pw });
+    if (error) { usernameErr_(friendlyAuthError_(error)); return; }
+    await finishPasswordSignIn_();
+  } catch (e) { usernameErr_(friendlyAuthError_(e)); }
+}
+async function usernameSignUp_() {
+  const name = (document.getElementById('unName').value || '').trim();
+  const u = (document.getElementById('unUser').value || '').trim().toLowerCase();
+  const pw = document.getElementById('unPass').value || '', pw2 = document.getElementById('unPass2').value || '';
+  if (!name) { usernameErr_('Please type your name.'); return; }
+  if (!USERNAME_RE.test(u)) { usernameErr_('The username needs 3–30 letters or numbers (. _ - are OK too), with no spaces.'); return; }
+  if (pw.length < 6) { usernameErr_('The password needs at least 6 characters.'); return; }
+  if (pw !== pw2) { usernameErr_('The two passwords don’t match.'); return; }
+  usernameErr_(''); const st = document.getElementById('unStatus'); if (st) st.textContent = 'Creating your account…';
+  try {
+    await ensureSupabaseLib_();
+    const { data, error } = await getSupa_().auth.signUp({ email: u + '@' + USERNAME_DOMAIN, password: pw, options: { data: { full_name: name } } });
+    if (error) { usernameErr_(friendlyAuthError_(error)); return; }
+    if (!data || !data.session) {
+      // "Confirm email" is still on in Supabase (or the username already exists).
+      const again = await getSupa_().auth.signInWithPassword({ email: u + '@' + USERNAME_DOMAIN, password: pw });
+      if (again.error) { usernameErr_(/confirm/i.test(again.error.message || '') ? 'Username accounts aren’t available right now.' : 'That username is taken — please choose another.'); return; }
+    }
+    await finishPasswordSignIn_();
+  } catch (e) { usernameErr_(friendlyAuthError_(e)); }
+}
+function recheckApproval_(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+  supaProfileCache = null;
+  try { dropStartBundle_(); _startBundleTried = false; } catch (e) {}
+  loadMyData().finally(() => { render(); });
+}
 function signOut() {
   try { dropStartBundle_(); _startBundleTried = false; } catch (e) {}
   if (window.google) google.accounts.id.disableAutoSelect();
@@ -2153,6 +2236,13 @@ async function loadMyData() {
     if (view.name === 'detail' && playerState.songId && myTransposes[playerState.songId] !== undefined && !playerState.transpose) playerState.transpose = Number(myTransposes[playerState.songId]) || 0;
     if (view.name === 'detail' && playerState.songId && myCapos[playerState.songId] !== undefined && playerState.myCapo == null) playerState.myCapo = myCapos[playerState.songId];
     currentUser.isAdmin = !!(data.user && data.user.isAdmin);
+    if (data.user) {
+      const wasPending = !!currentUser.pending;
+      currentUser.pending = !!data.user.pending; currentUser.rejected = !!data.user.rejected;
+      saveAuthCache(currentUser);
+      // Just approved: load the songs properly now.
+      if (wasPending && !currentUser.pending && !currentUser.rejected) { try { localStorage.removeItem(CATALOG_CACHE_KEY); } catch (e) {} try { loadSongs(true); } catch (e) {} }
+    }
     if (data.user && data.user.name) currentUser.name = data.user.name;
     if (data.user && data.user.photo) currentUser.picture = data.user.photo;
     myDataReady = true;
@@ -2651,7 +2741,7 @@ async function supaApi(action, fields) {
       if (action === 'getMyData') {
         return { success: true, favorites: B.favorites || [], knownChords: B.known_chords || [],
           myCapos: bundlePairs_(B.capos, 'capo'), myTransposes: bundlePairs_(B.transposes, 'transpose'),
-          user: { email: me.email, name: me.name, photo: me.photo || '', isAdmin: !!me.is_admin } };
+          user: { email: me.email, name: me.name, photo: me.photo || '', isAdmin: !!me.is_admin, pending: !!me.pending_approval, rejected: !!me.rejected } };
       }
       if (action === 'getLanguages' && Array.isArray(B.languages)) return { success: true, languages: B.languages };
       if (action === 'getRequests' && mine) return { success: true, requests: (B.requests || []).map(r => supaRequestToOld_(r, selfMap)) };
@@ -2843,7 +2933,7 @@ async function supaApi(action, fields) {
       knownChords: (kcRes.data && kcRes.data.chords) || [],
       myCapos: await supaLoadMyCapos_(me.id),
       myTransposes: await supaLoadMyTransposes_(me.id),
-      user: { email: me.email, name: me.name, photo: me.photo || '', isAdmin: !!me.is_admin },
+      user: { email: me.email, name: me.name, photo: me.photo || '', isAdmin: !!me.is_admin, pending: !!me.pending_approval, rejected: !!me.rejected },
     };
   }
 
@@ -3113,6 +3203,24 @@ async function supaApi(action, fields) {
     if (error && /admin_rename_|function .* does not exist|schema cache/i.test(error.message || '')) throw new Error('Renaming needs add_rename_tools.sql to be run first.');
     throwIfErr_(error);
     return { success: true, count: data || 0 };
+  }
+  if (action === 'getUsernameAccounts') {
+    await supaRequireAdmin_();
+    const { data, error } = await getSupa_().rpc('admin_username_accounts');
+    if (error) return { success: true, accounts: null }; // add_username_accounts.sql not run yet
+    return { success: true, accounts: data || [] };
+  }
+  if (action === 'setUsernameAccountStatus') {
+    await supaRequireAdmin_();
+    const { error } = await getSupa_().rpc('admin_set_account_status', { p_id: fields.id, p_status: fields.status });
+    throwIfErr_(error);
+    return { success: true };
+  }
+  if (action === 'setUsernamePassword') {
+    await supaRequireAdmin_();
+    const { error } = await getSupa_().rpc('admin_set_user_password', { p_id: fields.id, p_password: fields.password });
+    throwIfErr_(error);
+    return { success: true };
   }
   if (action === 'getAppModeStats') {
     await supaRequireAdmin_();
@@ -6799,7 +6907,7 @@ function renderProfile_() {
       </div>
       <label>Name</label>
       <input type="text" id="profileName" maxlength="80" value="${escapeHtml(currentUser.name || '')}">
-      <div class="muted" style="font-size:12.5px;margin-top:4px;">${escapeHtml(currentUser.email || '')}</div>
+      <div class="muted" style="font-size:12.5px;margin-top:4px;">${isUsernameAccount_(currentUser.email) ? 'Username: ' + escapeHtml(usernameOf_(currentUser.email)) : escapeHtml(currentUser.email || '')}</div>
       <div style="margin-top:14px;display:flex;gap:10px;align-items:center;">
         <button class="btn" onclick="saveProfile_()">Save</button>
         <span id="profileStatus" class="status"></span>
@@ -6962,7 +7070,7 @@ function saveBadgeSeen_() { try { localStorage.setItem(BADGE_SEEN_KEY, JSON.stri
 // First run on this device: start counting from now, not from every song ever.
 if (!badgeSeen.newSongsAt) { badgeSeen.newSongsAt = Date.now(); saveBadgeSeen_(); }
 let userBadgeData = null; // { requests, messages } for the signed-in (non-admin) user
-let adminBadge = { newReq: 0, unread: 0 }; // admin only: new song requests + unread conversations
+let adminBadge = { newReq: 0, unread: 0, pendingAccounts: 0 }; // admin only: new song requests + unread conversations
 if (!badgeSeen.adminReqAt) { badgeSeen.adminReqAt = Date.now(); saveBadgeSeen_(); }
 let userBadgeFetchedAt = 0;
 function refreshUserBadges_(force) {
@@ -6975,7 +7083,9 @@ function refreshUserBadges_(force) {
     Promise.all([
       api('getAdminNewRequests', { since: badgeSeen.adminReqAt }).catch(() => ({ count: adminBadge.newReq })),
       api('getUnreadMessagesInfo', {}).catch(() => null),
-    ]).then(([nr, ui]) => {
+      api('getUsernameAccounts', {}).catch(() => null),
+    ]).then(([nr, ui, ua]) => {
+      if (ua && ua.accounts) { usernameAccounts = ua.accounts; adminBadge.pendingAccounts = ua.accounts.filter(a => a.pending).length; }
       adminBadge.newReq = (nr && nr.count) || 0;
       if (ui) { adminBadge.unread = ui.count || 0; unreadInfo = { count: ui.count || 0, emails: ui.emails || [] }; }
       updateBadges_();
@@ -6998,7 +7108,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 function badgeCounts_() {
   const c = { songs: 0, contact: 0, admin: 0 };
   if (!ALERTS_ENABLED || !currentUser || viewAsUser) return c;
-  if (currentUser.isAdmin) c.admin = (adminBadge.newReq || 0) + (typeof unreadThreadCount === 'function' ? unreadThreadCount() : (adminBadge.unread || 0));
+  if (currentUser.isAdmin) c.admin = (adminBadge.newReq || 0) + (adminBadge.pendingAccounts || 0) + (typeof unreadThreadCount === 'function' ? unreadThreadCount() : (adminBadge.unread || 0));
   if (alertPrefs.newSongs) c.songs = visibleSongs_().filter(s => { const t = Date.parse(s.date_added || s.created_at || ''); return t && t > badgeSeen.newSongsAt; }).length;
   if (userBadgeData) {
     if (alertPrefs.myRequests) c.contact += userBadgeData.requests.filter(r => r.status === 'added' && !badgeSeen.requestsAdded.includes(r.id)).length;
@@ -9474,7 +9584,7 @@ function renderAdminSectionNav() {
   try { updateBadges_(); } catch (e) {}
   nav.innerHTML = `
       <button class="${adminSection==='communication'?'active':''}" onclick="goAdminSection('communication')">Communication${tabBadgeHtml(unread + (adminTab==='requests' ? 0 : adminBadge.newReq))}</button>
-      <button class="${adminSection==='users'?'active':''}" onclick="goAdminSection('users')">Users${tabBadgeHtml(unread)}</button>
+      <button class="${adminSection==='users'?'active':''}" onclick="goAdminSection('users')">Users${tabBadgeHtml(unread + (adminBadge.pendingAccounts || 0))}</button>
       <button class="${adminSection==='stats'?'active':''}" onclick="goAdminSection('stats')">Stats</button>
       <button class="${adminSection==='backup'?'active':''}" onclick="goAdminSection('backup')">Backup</button>`;
 }
@@ -10549,6 +10659,36 @@ function loadAdminUsers() {
     if (adminTab === 'users') renderUsersTable();
   }).catch(err => { if (adminTab === 'users') document.getElementById('adminBody').innerHTML = `<div class="error">${err.message}</div>`; });
 }
+let usernameAccounts = null;
+function loadUsernameAccounts_() {
+  api('getUsernameAccounts', {}).then(d => { usernameAccounts = d.accounts; adminBadge.pendingAccounts = (usernameAccounts || []).filter(a => a.pending).length; renderUsernameAccountsCard_(); updateBadges_(); try { renderAdminSectionNav(); } catch (e) {} }).catch(() => {});
+}
+function renderUsernameAccountsCard_() {
+  const el = document.getElementById('usernameAccountsCard'); if (!el) return;
+  const list = usernameAccounts || [];
+  if (!list.length) { el.innerHTML = ''; return; }
+  const pending = list.filter(a => a.pending);
+  el.innerHTML = `<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><b>Username accounts</b><span class="muted" style="font-size:12.5px;">${pending.length ? `${pending.length} waiting for approval` : 'none waiting'}</span></div>
+    <div class="muted" style="font-size:12px;margin:2px 0 6px;">People who can’t use Google sign-in. New ones can’t use the app until you approve them.</div>
+    <div style="max-height:320px;overflow-y:auto;">${list.map(a => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 2px;border-top:1px solid var(--border);flex-wrap:wrap;">
+      <div style="min-width:0;"><div dir="auto"><b>${escapeHtml(a.name || a.username)}</b> ${a.pending ? '<span class="badge pending">Waiting</span>' : a.rejected ? '<span class="badge declined">Rejected</span>' : ''}</div>
+        <div class="muted" style="font-size:12px;">@${escapeHtml(a.username)} · ${a.created_at ? new Date(a.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : ''}</div></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        ${a.pending || a.rejected ? `<button class="btn" style="padding:5px 12px;font-size:12.5px;" onclick="setUsernameStatus_('${a.id}','approve')">Approve</button>` : ''}
+        ${!a.rejected ? `<button class="btn secondary" style="padding:5px 12px;font-size:12.5px;" onclick="setUsernameStatus_('${a.id}','reject')">${a.pending ? 'Reject' : 'Block'}</button>` : ''}
+        <button class="btn secondary" style="padding:5px 12px;font-size:12.5px;" data-u="${escapeHtml(a.username)}" onclick="setUsernamePasswordPrompt_('${a.id}', this.dataset.u)">Set password</button>
+      </div></div>`).join('')}</div></div>`;
+}
+function setUsernameStatus_(id, status) {
+  api('setUsernameAccountStatus', { id, status }).then(() => { showToast(status === 'approve' ? 'Approved.' : 'Done.'); loadUsernameAccounts_(); }).catch(err => alert(err.message));
+}
+async function setUsernamePasswordPrompt_(id, username) {
+  const pw = await customPromptAsync('New password (at least 6 characters)', '', { title: 'Set a password for @' + username, submitLabel: 'Save' });
+  if (pw === null || pw === undefined) return;
+  if (String(pw).length < 6) { alert('The password needs at least 6 characters.'); return; }
+  api('setUsernamePassword', { id, password: String(pw) }).then(() => alert('Password set. Let @' + username + ' know the new password.')).catch(err => alert(err.message));
+}
 function renderUsersTable() {
   const body = document.getElementById('adminBody');
   if (!body) return;
@@ -10567,7 +10707,9 @@ function renderUsersTable() {
         <option value="lastActive" ${userSort==='lastActive'?'selected':''}>Sort: Last active (newest)</option>
       </select>
     </div>
+    <div id="usernameAccountsCard"></div>
     <div id="usersListContainer"></div>`;
+  loadUsernameAccounts_();
   const box = document.getElementById('userSearchBox');
   if (box) box.addEventListener('input', e => { userSearch = e.target.value; usersPage = 0; renderUsersList(); });
   const sel = document.getElementById('userSortSelect');
@@ -10705,8 +10847,15 @@ function render() {
         <h2>${t('signin_title')}</h2>
         <p class="muted">${t('signin_sub')}</p>
         <div id="gsiButtonContainerGate" style="display:flex;justify-content:center;margin-top:14px;"></div>
+        <div style="margin-top:18px;font-size:13px;"><span class="adv-link" onclick="openUsernameSignIn_('signin')">Can’t use Google? Sign in with a username</span></div>
       </div>`;
     mountGateSignInButton();
+    return;
+  }
+  if (currentUser.pending || currentUser.rejected) {
+    document.getElementById('app').innerHTML = currentUser.rejected
+      ? `<div class="card" style="text-align:center;max-width:420px;margin:40px auto;"><h2>Account not approved</h2><p class="muted">This account wasn’t approved. If you think this is a mistake, please get in touch with us.</p><button class="btn secondary" onclick="signOut()">Sign out</button></div>`
+      : `<div class="card" style="text-align:center;max-width:420px;margin:40px auto;"><img src="${ICONS.logo}" alt="" style="width:64px;height:64px;border-radius:14px;margin-bottom:14px;"><h2>Waiting for approval</h2><p>Thanks, ${escapeHtml(currentUser.name || '')}!</p><p class="muted">Your account was created and is waiting to be approved. You’ll be able to use the app as soon as it is.</p><div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:10px;"><button class="btn" onclick="recheckApproval_(this)">Check again</button><button class="btn secondary" onclick="signOut()">Sign out</button></div></div>`;
     return;
   }
   if (view.name === 'home') renderHome();
