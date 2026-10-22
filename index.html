@@ -10665,8 +10665,15 @@ function loadUsernameAccounts_() {
 }
 function renderUsernameAccountsCard_() {
   const el = document.getElementById('usernameAccountsCard'); if (!el) return;
+  if (usernameAccounts === null) {
+    el.innerHTML = `<div class="card"><b>Username accounts</b><div class="muted" style="font-size:12.5px;margin-top:4px;">Run add_username_accounts.sql in Supabase to turn on username sign-in.</div></div>`;
+    return;
+  }
   const list = usernameAccounts || [];
-  if (!list.length) { el.innerHTML = ''; return; }
+  if (!list.length) {
+    el.innerHTML = `<div class="card"><b>Username accounts</b><div class="muted" style="font-size:12.5px;margin-top:4px;">No one has signed up with a username yet. When someone does, they'll appear here for you to approve.</div></div>`;
+    return;
+  }
   const pending = list.filter(a => a.pending);
   el.innerHTML = `<div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><b>Username accounts</b><span class="muted" style="font-size:12.5px;">${pending.length ? `${pending.length} waiting for approval` : 'none waiting'}</span></div>
