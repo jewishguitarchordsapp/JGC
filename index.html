@@ -2115,7 +2115,9 @@ function friendlyAuthError_(err) {
   if (/signups? not allowed|email.*disabled|provider is disabled/i.test(m)) return 'Username accounts aren’t available right now.';
   if (/rate limit|too many/i.test(m)) return 'Too many tries — please wait a few minutes and try again.';
   if (/failed to fetch|network|load failed/i.test(m)) return 'Couldn’t connect — please check your connection.';
-  return 'Something went wrong — please try again.';
+  if (/password/i.test(m) && /(weak|short|at least|characters|contain|pwned|leaked)/i.test(m)) return 'Please choose a stronger password (longer, with letters and numbers).';
+  // Anything else: show the server's own words too, so it can be looked into.
+  return 'Something went wrong — please try again.' + (m ? ' (' + m + ')' : '');
 }
 async function finishPasswordSignIn_() {
   // Same path the app uses when it finds a saved sign-in on this device.
