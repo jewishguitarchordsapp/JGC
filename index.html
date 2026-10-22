@@ -457,7 +457,7 @@
   #mainNav button svg{width:17px;height:17px;vertical-align:-3px;stroke:#fff;}
   .fav-btn svg{width:15px;height:14px;vertical-align:-2px;margin-right:5px;}
   .html-chord-row{position:relative;height:1.35em;font-family:"CustomCourier",'Courier New',monospace;color:var(--chord);font-weight:700;white-space:pre;line-height:1.35;font-size:calc(14px + var(--chart-step,0px));}
-  .line-editor{width:100%;min-height:220px;max-height:60vh;overflow:auto;border:1px solid var(--border);border-radius:7px;background:#fff;padding:9px 10px;font-family:"CustomCourier",'Courier New',monospace;font-size:14px;line-height:1.45;white-space:pre-wrap;word-break:normal;outline:none;}
+  .line-editor{width:100%;min-height:220px;max-height:60vh;overflow:auto;border:1px solid var(--border);border-radius:7px;background:#fff;padding:9px 10px;font-family:"CustomCourier",'Courier New',monospace;font-size:14px;line-height:1.45;white-space:pre-wrap;white-space:break-spaces;word-break:normal;outline:none;}
   .line-editor:focus{border-color:var(--teal);box-shadow:0 0 0 2px rgba(74,155,155,.2);}
   .line-editor > div{min-height:1.45em;}
   .line-editor > div.le-chord{color:var(--chord);font-weight:700;}
@@ -1522,6 +1522,7 @@ Object.assign(HE_UI, {
   Object.assign(HE_UI, {"🔎 Also search song lyrics": "🔎 חיפוש גם במילות השירים", "🔎 Searching song lyrics…": "🔎 מחפש במילות השירים…"});
   Object.assign(HE_UI, {"Will be archived soon": "יועבר לארכיון בקרוב", "1 day left": "נשאר יום אחד", "Requests that aren't added within 100 days are archived.": "בקשות שלא נוספו תוך 100 ימים מועברות לארכיון."});
   Object.assign(HE_UI, {"When we ask for a song's lyrics and they aren't sent within 100 days, the request is archived.": "כשאנחנו מבקשים את המילים של שיר והן לא נשלחות תוך 100 ימים, הבקשה מועברת לארכיון.", "If the lyrics aren't sent within 100 days, the request is archived.": "אם המילים לא יישלחו תוך 100 ימים, הבקשה תועבר לארכיון."});
+  Object.assign(HE_UI, {"Print songs": "הדפסת שירים", "Select all": "בחירת הכל", "Select none": "ניקוי הבחירה", "There are no songs to print here.": "אין כאן שירים להדפסה.", "My Favorites": "המועדפים שלי", "Hebrew songs: right-to-left columns": "שירים בעברית: עמודות מימין לשמאל", "Couldn’t load these songs — please check your connection and try again.": "לא הצלחנו לטעון את השירים — בדקו את החיבור ונסו שוב."});
   Object.assign(HE_UI, { 'Songs': 'שירים', 'Home': 'דף הבית', 'Search': 'חיפוש', 'Known Chords': 'האקורדים שלי', 'Tuner': 'טיונר', 'Playlist': 'פלייליסט', 'Admin': 'ניהול', 'Add Songs': 'הוספת שירים' });
   HE_UI_PATTERNS.push(
     [/^(\d+) days left$/, m => 'נשארו ' + m[1] + ' ימים'],
@@ -5066,6 +5067,125 @@ document.addEventListener('click', (e) => {
    everything on the page except this overlay's printable content. */
 let printPreviewState = null; // { songId, fontSize, bold, columns, rtl, capo, transpose }
 
+// ---- Print many songs at once (a playlist, or Favorites) -------------------
+const BULK_PRINT_MAX = 60;
+function openBulkPrint_(ids, title) {
+  ids = (ids || []).filter(id => songs.some(s => s.id === id));
+  if (!ids.length) { alert('There are no songs to print here.'); return; }
+  bulkPrintPick_ = { ids, title: title || 'Songs', on: new Set(ids.slice(0, BULK_PRINT_MAX)) };
+  renderBulkPrintPick_();
+}
+let bulkPrintPick_ = null;
+function renderBulkPrintPick_() {
+  const b = bulkPrintPick_; if (!b) return;
+  const n = b.on.size, over = n > BULK_PRINT_MAX;
+  openModal(`<h2 style="margin-top:0">Print songs</h2>
+    <div class="muted" style="margin-top:-8px;margin-bottom:8px;font-size:13px;" dir="auto">${escapeHtml(b.title)}</div>
+    <div style="display:flex;gap:12px;margin-bottom:6px;font-size:13px;"><span class="adv-link" onclick="bulkPrintPick_.on=new Set(bulkPrintPick_.ids.slice(0,BULK_PRINT_MAX));renderBulkPrintPick_()">Select all</span><span class="adv-link" onclick="bulkPrintPick_.on=new Set();renderBulkPrintPick_()">Select none</span></div>
+    <div style="max-height:50vh;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:4px 8px;">
+      ${b.ids.map(id => { const s = songs.find(x => x.id === id); return `<label style="display:flex;gap:10px;align-items:center;padding:6px 2px;border-bottom:1px solid var(--border);margin:0;font-weight:normal;"><input type="checkbox" ${b.on.has(id) ? 'checked' : ''} onchange="bulkPrintToggle_('${id}', this.checked)"><span dir="auto">${escapeHtml(songDisplayTitle_(s))} <span class="muted" style="font-size:12px;">${escapeHtml(songDisplayArtist_(s))}</span></span></label>`; }).join('')}
+    </div>
+    <div class="muted" style="font-size:12px;margin-top:6px;">${n} song${n === 1 ? '' : 's'} selected${over ? ` — please choose up to ${BULK_PRINT_MAX}` : ''}. Each song starts on a new page.</div>
+    <div class="modal-actions"><span id="bulkPrintStatus" class="status"></span><button class="btn secondary" onclick="closeModal()">Cancel</button><button class="btn" ${!n || over ? 'disabled' : ''} onclick="startBulkPrint_()">Continue</button></div>`);
+}
+function bulkPrintToggle_(id, on) {
+  if (!bulkPrintPick_) return;
+  if (on) bulkPrintPick_.on.add(id); else bulkPrintPick_.on.delete(id);
+  const scroller = document.querySelector('#modalBackdrop .modal-card div[style*="overflow-y"]'); const y = scroller ? scroller.scrollTop : 0;
+  renderBulkPrintPick_();
+  const s2 = document.querySelector('#modalBackdrop .modal-card div[style*="overflow-y"]'); if (s2) s2.scrollTop = y;
+}
+// Makes sure every chosen song's chart text is here (saved on the phone, or
+// fetched in one or two small requests), then opens the preview.
+async function startBulkPrint_() {
+  const b = bulkPrintPick_; if (!b) return;
+  const ids = b.ids.filter(id => b.on.has(id));
+  const st = document.getElementById('bulkPrintStatus');
+  if (st) { st.textContent = `Getting ${ids.length} song${ids.length === 1 ? '' : 's'} ready…`; st.className = 'status'; }
+  // Songs already saved on this phone need no download.
+  const cache = songTextCache_();
+  ids.forEach(id => { const sg = songs.find(s => s.id === id); const hit = sg && cache[id];
+    if (sg && sg.chords_lyrics === undefined && hit && hit.u === sg.updated_at) { sg.chords_lyrics = hit.cl; sg.lyrics_only = hit.lo; } });
+  const missing = ids.filter(id => { const sg = songs.find(s => s.id === id); return sg && sg.chords_lyrics === undefined; });
+  if (missing.length && !isOffline) {
+    try {
+      for (let i = 0; i < missing.length; i += 50) {
+        const data = await withTimeout_(api('songContentMany', { ids: missing.slice(i, i + 50) }), 25000);
+        (data.content || []).forEach(c => applySongText_(c.id, c.updated_at, c.chords_lyrics, c.lyrics_only));
+      }
+    } catch (e) { /* whatever loaded is printed; the rest are listed as skipped */ }
+  }
+  // Single-song loads that were already on their way get a moment to finish.
+  for (let k = 0; k < 20 && ids.some(id => { const sg = songs.find(s => s.id === id); return sg && sg.chords_lyrics === undefined && _songTextInflight[id]; }); k++) await new Promise(z => setTimeout(z, 300));
+  const ready = ids.filter(id => { const sg = songs.find(s => s.id === id); return sg && sg.chords_lyrics !== undefined; });
+  const skipped = ids.length - ready.length;
+  if (!ready.length) { if (st) { st.textContent = 'Couldn’t load these songs — please check your connection and try again.'; st.className = 'error'; } return; }
+  closeModal();
+  printPreviewState = { bulk: true, songIds: ready, title: b.title, skipped, fontSize: 0, bold: false, columns: 1, rtl: true, paper: defaultPrintPaper_() };
+  renderPrintPreview();
+}
+function renderBulkPrintPreview_() {
+  const st = printPreviewState;
+  const list = st.songIds.map(id => songs.find(s => s.id === id)).filter(s => s && s.chords_lyrics !== undefined);
+  const existing = document.getElementById('printPreviewOverlay');
+  if (existing) existing.remove();
+  document.removeEventListener('keydown', printPreviewEscHandler_);
+  document.addEventListener('keydown', printPreviewEscHandler_);
+  const el = document.createElement('div');
+  el.className = 'print-preview-overlay';
+  el.id = 'printPreviewOverlay';
+  el.innerHTML = `
+    <div class="print-preview-toolbar no-print">
+      <div class="ppt-row"><b dir="auto">${escapeHtml(st.title)}</b><span class="muted" style="font-size:12.5px;">${list.length} song${list.length === 1 ? '' : 's'}${st.skipped ? ` (${st.skipped} couldn’t be loaded)` : ''}</span></div>
+      <div class="ppt-row">
+        <span class="ppt-label">Font</span>
+        <button class="stepper-btn" onclick="updatePrintPreview({fontSize:Math.max(-4,printPreviewState.fontSize-1)})">A&#8595;</button>
+        <span class="ppt-val">${17 + st.fontSize}</span>
+        <button class="stepper-btn" onclick="updatePrintPreview({fontSize:Math.min(8,printPreviewState.fontSize+1)})">A&#8593;</button>
+        <button class="stepper-btn${st.bold?' active':''}" onclick="updatePrintPreview({bold:!printPreviewState.bold})" title="Bold" style="font-weight:700;">B</button>
+      </div>
+      <div class="ppt-row">
+        <span class="ppt-label">Columns</span>
+        <button class="btn secondary${st.columns===1?' active':''}" onclick="updatePrintPreview({columns:1})">1</button>
+        <button class="btn secondary${st.columns===2?' active':''}" onclick="updatePrintPreview({columns:2})">2</button>
+        <label style="display:inline-flex;align-items:center;gap:5px;font-size:12.5px;margin-left:6px;">
+          <input type="checkbox" ${st.rtl?'checked':''} onchange="updatePrintPreview({rtl:this.checked})"> Hebrew songs: right-to-left columns
+        </label>
+      </div>
+      <div class="ppt-row">
+        <span class="ppt-label">Paper</span>
+        <button class="btn secondary${st.paper==='letter'?' active':''}" onclick="setPrintPaper_('letter')">8.5 × 11</button>
+        <button class="btn secondary${st.paper==='a4'?' active':''}" onclick="setPrintPaper_('a4')">A4</button>
+      </div>
+      <div class="ppt-row" style="margin-left:auto;">
+        <span class="muted" id="printPageCount" style="font-size:12.5px;"></span>
+        <button class="btn secondary" onclick="closePrintPreview()">Cancel</button>
+        <button class="btn secondary" onclick="printSong_(true)">Save as PDF</button>
+        <button class="btn" onclick="printSong_(false)">Print</button>
+      </div>
+    </div>
+    <div class="print-page-wrap"><div class="print-pages" id="printPages"></div></div>`;
+  document.body.appendChild(el);
+  const pagesEl = document.getElementById('printPages');
+  let html = '', count = 0, paper = null;
+  list.forEach(song => {
+    const chartHtml = wrapChartForPrint(renderChart(song.chords_lyrics, 0));
+    const headerHtml = `<div class="print-header">
+          <div class="print-title">${escapeHtml(song.title)}</div>
+          <div class="print-meta">${escapeHtml(fmtArtists_(song.artist))}${song.capo ? ` &middot; Capo ${song.capo}` : ''}</div>
+        </div>`;
+    const songSt = Object.assign({}, st, { rtl: st.rtl && (containsHebrew(song.chords_lyrics) || containsHebrew(song.title_hebrew)) });
+    const r = songSheets_(pagesEl, headerHtml, chartHtml, songSt, song.title || '');
+    html += r.html; count += r.count; paper = r.paper;
+  });
+  pagesEl.innerHTML = html;
+  const cnt = document.getElementById('printPageCount');
+  if (cnt) cnt.textContent = count === 1 ? '1 page' : `${count} pages`;
+  if (paper) fitPrintPagesToScreen_(paper);
+}
+function openBulkPrintFromFavorites_() {
+  openBulkPrint_(filteredSongs().map(s => s.id), 'My Favorites');
+}
 function openPrintPreview(songId) {
   const song = songs.find(s => s.id === songId);
   if (!song) return;
@@ -5102,7 +5222,7 @@ function closePrintPreview() {
 function printSong_(asPdf) {
   const st = printPreviewState;
   const song = st && songs.find(s => s.id === st.songId);
-  const name = String((song && song.title) || 'Song').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim() || 'Song';
+  const name = String((st && st.bulk ? st.title : (song && song.title)) || 'Song').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim() || 'Song';
   const oldTitle = document.title;
   const restore = () => { document.title = oldTitle; window.removeEventListener('afterprint', restore); };
   const go = () => {
@@ -5159,6 +5279,15 @@ function setPrintPaper_(paper) {
 function paginatePrint_(headerHtml, chartHtml, st, songTitle) {
   const pagesEl = document.getElementById('printPages');
   if (!pagesEl) return;
+  const r = songSheets_(pagesEl, headerHtml, chartHtml, st, songTitle);
+  pagesEl.innerHTML = r.html;
+  const cnt = document.getElementById('printPageCount');
+  if (cnt) cnt.textContent = r.count === 1 ? '1 page' : `${r.count} pages`;
+  fitPrintPagesToScreen_(r.paper);
+}
+// One song's printed sheets (HTML) - used for a single song and, one after
+// another, for printing many songs at once.
+function songSheets_(pagesEl, headerHtml, chartHtml, st, songTitle) {
   const paper = PRINT_PAPERS[st.paper] || PRINT_PAPERS.letter;
   // @page size follows the chosen paper so the printer gets the same pages.
   let ps = document.getElementById('printPageSizeStyle');
@@ -5200,7 +5329,7 @@ function paginatePrint_(headerHtml, chartHtml, st, songTitle) {
   // Footer on every printed page: jgcapp.org, plus "<Song> Page 2 of 5"
   // when the song runs to more than one page.
   const multi = pages.length > 1;
-  pagesEl.innerHTML = pages.map((pg, i) => `
+  const html = pages.map((pg, i) => `
     <div class="print-sheet" style="width:${paper.w}in;height:${paper.h}in;padding:${PRINT_MARGIN_IN}in;--sheet-print-h:${(paper.h - 2 * PRINT_MARGIN_IN - 0.03).toFixed(2)}in;">
       <div class="print-sheet-main">
         ${pg.first ? headerHtml : ''}
@@ -5213,9 +5342,7 @@ function paginatePrint_(headerHtml, chartHtml, st, songTitle) {
         ${multi ? `<span class="print-footer-page" dir="auto">${escapeHtml(songTitle)} &nbsp;Page ${i + 1} of ${pages.length}</span>` : ''}
       </div>
     </div>`).join('');
-  const cnt = document.getElementById('printPageCount');
-  if (cnt) cnt.textContent = pages.length === 1 ? '1 page' : `${pages.length} pages`;
-  fitPrintPagesToScreen_(paper);
+  return { html, count: pages.length, paper };
 }
 // On a phone the 8.5in-wide sheets are scaled down to fit the screen (the
 // layout itself is never changed, so the preview still matches the print).
@@ -5231,6 +5358,7 @@ function fitPrintPagesToScreen_(paper) {
 function renderPrintPreview() {
   const st = printPreviewState;
   if (!st) return;
+  if (st.bulk) { renderBulkPrintPreview_(); return; }
   const song = songs.find(s => s.id === st.songId);
   if (!song) { closePrintPreview(); return; }
   const transposeSemitones = (song.capo||0) - st.capo + (st.transpose||0);
@@ -5351,7 +5479,9 @@ function htmlChordFormatToLines_(html) {
   return Array.from(container.querySelectorAll('p')).map(p => {
     const t = (p.textContent || '').replace(/\u00a0/g, ' ');
     const a = (p.getAttribute('data-align') || '').toLowerCase();
-    return { text: t.trim() === '' ? '' : t.replace(/\s+$/, ''), align: (a === 'left' || a === 'right') ? a : '' };
+    // Trailing spaces are kept: on chord lines over Hebrew (right-aligned)
+    // they are what holds each chord away from the right edge.
+    return { text: t.trim() === '' ? '' : t, align: (a === 'left' || a === 'right') ? a : '' };
   });
 }
 
@@ -6318,6 +6448,7 @@ function renderList() {
     // view is always alphabetical already, so the toggle wouldn't mean
     // anything there (see favoritesCanToggleSort_()).
     if (favoritesCanToggleSort_()) favControls += `<button class="btn secondary" onclick="toggleFavoritesSortAlpha()">${favoritesSortAlpha ? 'Sort: My Order' : 'Sort: A–Z'}</button>`;
+    favControls += `<button class="btn secondary icon-btn-round" onclick="openBulkPrintFromFavorites_()" title="Print songs" aria-label="Print songs" style="border-radius:50%;width:38px;height:38px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex:none;">${SVG_ICONS.print}</button>`;
     if (!isOffline) favControls += `<button id="favOfflineBtn" class="btn secondary icon-btn-round offline-toggle-btn" onclick="toggleFavoritesOffline()" title="Available Offline" aria-label="Available Offline" style="border-radius:50%;width:38px;height:38px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex:none;">${SVG_ICONS.download}</button>`;
     if (favControls) html += `<div style="margin-bottom:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">${favControls}</div>`;
   }
@@ -8343,8 +8474,8 @@ function renderPlaylistDetail() {
   // Offline availability is a personal, on-this-device thing — not tied to
   // owning/editing the playlist, so it's offered to anyone viewing it
   // (public/shared included), same as Favorites.
-  if (!isOffline && list.length) {
-    html += `<div style="margin-bottom:10px"><button id="playlistOfflineBtn" class="btn secondary icon-btn-round offline-toggle-btn" onclick="togglePlaylistOffline('${p.id}')" title="Available Offline" aria-label="Available Offline" style="border-radius:50%;width:38px;height:38px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex:none;">${SVG_ICONS.download}</button></div>`;
+  if (list.length) {
+    html += `<div style="margin-bottom:10px;display:flex;gap:8px;align-items:center;">${!isOffline ? `<button id="playlistOfflineBtn" class="btn secondary icon-btn-round offline-toggle-btn" onclick="togglePlaylistOffline('${p.id}')" title="Available Offline" aria-label="Available Offline" style="border-radius:50%;width:38px;height:38px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex:none;">${SVG_ICONS.download}</button>` : ''}<button class="btn secondary icon-btn-round" data-ids="${escapeHtml(list.map(s => s.id).join(','))}" data-title="${escapeHtml(p.title || 'Playlist')}" onclick="openBulkPrint_(this.dataset.ids.split(','), this.dataset.title)" title="Print songs" aria-label="Print songs" style="border-radius:50%;width:38px;height:38px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex:none;">${SVG_ICONS.print}</button></div>`;
   }
   html += list.length ? `<div id="playlistSongList">` + list.map(s => `
     <div class="song-row" data-reorder-id="${s.id}">
