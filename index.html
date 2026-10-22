@@ -10663,7 +10663,7 @@ function loadAdminUsers() {
 }
 let usernameAccounts = null;
 function loadUsernameAccounts_() {
-  api('getUsernameAccounts', {}).then(d => { usernameAccounts = d.accounts; adminBadge.pendingAccounts = (usernameAccounts || []).filter(a => a.pending).length; renderUsernameAccountsCard_(); updateBadges_(); try { renderAdminSectionNav(); } catch (e) {} }).catch(() => {});
+  api('getUsernameAccounts', {}).then(d => { usernameAccounts = d.accounts; adminBadge.pendingAccounts = (usernameAccounts || []).filter(a => a.pending).length; renderUsernameAccountsCard_(); try { renderUsersList(); } catch (e) {} updateBadges_(); try { renderAdminSectionNav(); } catch (e) {} }).catch(() => {});
 }
 function renderUsernameAccountsCard_() {
   const el = document.getElementById('usernameAccountsCard'); if (!el) return;
@@ -10715,6 +10715,7 @@ function renderUsersTable() {
         <option value="email" ${userSort==='email'?'selected':''}>Sort: Email (A–Z)</option>
         <option value="lastActive" ${userSort==='lastActive'?'selected':''}>Sort: Last active (newest)</option>
       </select>
+      <button class="btn secondary" onclick="refreshAdminUsers_()" title="Download a fresh copy of the users list">↻ Refresh</button>
     </div>
     <div id="usernameAccountsCard"></div>
     <div id="usersListContainer"></div>`;
@@ -10757,7 +10758,8 @@ function renderUsersList() {
   const container = document.getElementById('usersListContainer');
   if (!container) return;
   const q = userSearch.toLowerCase();
-  const list = sortUsersList_(usersCache.filter(u => !q || u.email.toLowerCase().includes(q) || (u.name||'').toLowerCase().includes(q)));
+  const liveUsernames = Array.isArray(usernameAccounts) ? new Set(usernameAccounts.map(a => a.username)) : null;
+  const list = sortUsersList_(usersCache.filter(u => (!liveUsernames || !isUsernameAccount_(u.email) || liveUsernames.has(usernameOf_(u.email))) && (!q || u.email.toLowerCase().includes(q) || (u.name||'').toLowerCase().includes(q))));
   container.innerHTML = `${list.length === 0 ? `<div class="empty">No users found.</div>` : pageSlice(list, usersPage).map(u => {
       const expanded = expandedUserEmail === u.email;
       return `
