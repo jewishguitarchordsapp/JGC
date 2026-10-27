@@ -2857,7 +2857,11 @@ async function supaApi(action, fields) {
   }
   if (action === 'songContent') {
     // No separate profile lookup first (one less round trip before the
-    // chart arrives) - the database itself only lets signed-in users read songs.
+    // chart arrives) - the database itself only lets signed-in users read
+    // songs. Just make sure the saved sign-in has been restored first (read
+    // from this device, no network), so the very first song opened right
+    // after the app starts isn't asked for as a signed-out visitor.
+    try { await getSupa_().auth.getSession(); } catch (e) {}
     const { data, error } = await getSupa_().from('songs').select('id,chords_lyrics,lyrics_only').eq('id', fields.id).maybeSingle();
     throwIfErr_(error);
     if (!data) return { success: false, error: 'Song not found' };
@@ -4125,7 +4129,15 @@ function loadSongContentFor(id) {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         if (attempt) await new Promise(z => setTimeout(z, 600));
-        const data = await withTimeout_(api('songContent', { id }), SONG_TEXT_TIMEOUT_MS);
+        const req = api('songContent', { id });
+        // On a slow connection the answer can arrive after we've stopped
+        // waiting for it - use it anyway (it used to be thrown away, so the
+        // page sat on "Loading chart…" until the song was opened again).
+        req.then(late => {
+          const sg = songs.find(s => s.id === id);
+          if (late && sg && sg.chords_lyrics === undefined && applySongText_(id, askedAt, late.chords_lyrics, late.lyrics_only)) showChartIfOpen_(id);
+        }).catch(() => {});
+        const data = await withTimeout_(req, SONG_TEXT_TIMEOUT_MS);
         // false = edited meanwhile; the re-render below then fetches the new version.
         applySongText_(id, askedAt, data.chords_lyrics, data.lyrics_only);
         lastErr = null;
@@ -4140,11 +4152,19 @@ function loadSongContentFor(id) {
   _songTextInflight[id] = run;
   return run;
 }
+// Re-draws the song page if it's open on this song and still shows the
+// "Loading chart…" placeholder.
+function showChartIfOpen_(id) {
+  if (view.name !== 'detail' || view.id !== id) return;
+  const sc = document.getElementById('chartScroll');
+  if (!sc || /Loading chart|Couldn’t load this chart/.test(sc.textContent || '') || !sc.children.length) renderDetail();
+}
 let _chartWatchdog = null;
 function ensureChartWatchdog_() {
   if (_chartWatchdog) return;
   _chartWatchdog = setInterval(() => {
     const song = view.name === 'detail' ? songs.find(s => s.id === view.id) : null;
+    if (song && song.chords_lyrics !== undefined) showChartIfOpen_(song.id);
     if (!song || song.chords_lyrics !== undefined || song._contentError) { clearInterval(_chartWatchdog); _chartWatchdog = null; return; }
     if (!_songTextInflight[song.id]) loadSongContentFor(song.id);
   }, 3000);
