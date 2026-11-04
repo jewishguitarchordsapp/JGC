@@ -1251,6 +1251,8 @@ Object.assign(HE_UI, {
   "🎵 Request it": "🎵 בקשו אותו",
   "Remove your favorites from offline storage on this device?": "להסיר את המועדפים מהשמירה ללא אינטרנט במכשיר הזה?",
   "Remove offline copy": "הסרת העותק השמור",
+  "You've opened a lot of songs today, so new ones are paused until tomorrow. Songs you've already opened today still work.": "פתחת היום הרבה שירים, לכן שירים חדשים מושהים עד מחר. שירים שכבר פתחת היום עדיין זמינים.",
+  "Some songs were skipped — you've opened a lot of songs today. Try the rest tomorrow.": "חלק מהשירים דולגו — פתחת היום הרבה שירים. אפשר לנסות את השאר מחר.",
   "Make favorites available offline on this device?": "לשמור את המועדפים לשימוש ללא אינטרנט במכשיר הזה?",
   "Make Available": "שמירה",
   "Favorite a few songs first.": "קודם הוסיפו כמה שירים למועדפים.",
@@ -2370,6 +2372,19 @@ function getSupa_() {
 
 function supaBool_(v) { return v ? 'true' : 'false'; }
 function throwIfErr_(error) { if (error) throw new Error(error.message || String(error)); }
+// Chord charts come through get_song_charts() (add_chart_limits.sql), which
+// caps how many different songs one account can open per day. Until that SQL
+// is run the function doesn't exist and this returns null - callers then use
+// the old direct read.
+const CHART_LIMIT_MSG = "You've opened a lot of songs today, so new ones are paused until tomorrow. Songs you've already opened today still work.";
+function isMissingFn_(error) { return !!error && (error.code === 'PGRST202' || /could not find the function|schema cache|does not exist/i.test(error.message || '')); }
+let _chartRpcMissing = false;
+async function songChartsRpc_(ids) {
+  if (_chartRpcMissing) return null;
+  const { data, error } = await getSupa_().rpc('get_song_charts', { p_ids: ids });
+  if (error) { if (isMissingFn_(error)) { _chartRpcMissing = true; return null; } throwIfErr_(error); }
+  return { limited: !!(data && data.limited), songs: ((data && data.songs) || []).map(r => ({ id: r.id, updated_at: r.updated_at, chords_lyrics: r.chords_lyrics || '', lyrics_only: r.lyrics_only || '' })) };
+}
 
 // Supabase's REST API (PostgREST) caps an unpaginated .select() at 1,000
 // rows by default (the project's "Max Rows" API setting) - several tables
@@ -2835,6 +2850,9 @@ async function supaApi(action, fields) {
     await supaRequireUser_();
     const q = String(fields.q || '').trim();
     if (q.length < 2) return { success: true, ids: [] };
+    const rpc = await getSupa_().rpc('search_song_lyrics', { p_q: q });
+    if (!rpc.error) return { success: true, ids: rpc.data || [] };
+    if (!isMissingFn_(rpc.error)) throwIfErr_(rpc.error);
     const pattern = '%' + q.replace(/[\\%_]/g, m => '\\' + m) + '%';
     const { data, error } = await getSupa_().from('songs').select('id').ilike('lyrics_only', pattern).limit(1000);
     throwIfErr_(error);
@@ -2851,6 +2869,8 @@ async function supaApi(action, fields) {
     await supaRequireUser_();
     const ids = (fields.ids || []).slice(0, 50);
     if (!ids.length) return { success: true, content: [] };
+    const charts = await songChartsRpc_(ids);
+    if (charts) return { success: true, limited: charts.limited, content: charts.songs };
     const { data, error } = await getSupa_().from('songs').select('id,updated_at,chords_lyrics,lyrics_only').in('id', ids);
     throwIfErr_(error);
     return { success: true, content: (data || []).map(r => ({ id: r.id, updated_at: r.updated_at, chords_lyrics: r.chords_lyrics || '', lyrics_only: r.lyrics_only || '' })) };
@@ -2862,6 +2882,12 @@ async function supaApi(action, fields) {
     // from this device, no network), so the very first song opened right
     // after the app starts isn't asked for as a signed-out visitor.
     try { await getSupa_().auth.getSession(); } catch (e) {}
+    const charts = await songChartsRpc_([fields.id]);
+    if (charts) {
+      const row = charts.songs.find(r => r.id === fields.id);
+      if (row) return { success: true, id: row.id, chords_lyrics: row.chords_lyrics, lyrics_only: row.lyrics_only };
+      return { success: false, error: charts.limited ? CHART_LIMIT_MSG : 'Song not found' };
+    }
     const { data, error } = await getSupa_().from('songs').select('id,chords_lyrics,lyrics_only').eq('id', fields.id).maybeSingle();
     throwIfErr_(error);
     if (!data) return { success: false, error: 'Song not found' };
@@ -3216,6 +3242,24 @@ async function supaApi(action, fields) {
     if (error) return { success: true, accounts: null }; // add_username_accounts.sql not run yet
     return { success: true, accounts: data || [] };
   }
+  if (action === 'getChartAlerts') {
+    await supaRequireAdmin_();
+    const { data, error } = await getSupa_().rpc('admin_chart_alerts');
+    if (error) return { success: true, alerts: null }; // add_chart_limits.sql not run yet
+    return { success: true, alerts: data || [] };
+  }
+  if (action === 'markChartAlertsSeen') {
+    await supaRequireAdmin_();
+    const { error } = await getSupa_().rpc('admin_chart_alerts_seen');
+    throwIfErr_(error);
+    return { success: true };
+  }
+  if (action === 'blockUser') {
+    await supaRequireAdmin_();
+    const { error } = await getSupa_().rpc('admin_block_user', { p_id: fields.id, p_block: !!fields.block });
+    throwIfErr_(error);
+    return { success: true };
+  }
   if (action === 'setUsernameAccountStatus') {
     await supaRequireAdmin_();
     const { error } = await getSupa_().rpc('admin_set_account_status', { p_id: fields.id, p_status: fields.status });
@@ -3293,9 +3337,14 @@ async function supaApi(action, fields) {
   // nightly schedule or a manual "Re-run" from the Actions tab.
   if (action === 'triggerManualBackup') {
     await supaRequireAdmin_();
+    // Preferred: start_manual_backup() (fix_backup_button.sql) starts the
+    // snapshot in the background, so it isn't cut off by the 8-second limit.
+    const bg = await getSupa_().rpc('start_manual_backup');
+    if (!bg.error) return { success: true, mode: bg.data || 'started' };
+    if (!/start_manual_backup|function .* does not exist|schema cache/i.test(bg.error.message || '')) throwIfErr_(bg.error);
     const { error } = await getSupa_().rpc('trigger_manual_backup');
     throwIfErr_(error);
-    return { success: true };
+    return { success: true, mode: 'done' };
   }
 
   if (action === 'getUserSnapshot') {
@@ -4142,9 +4191,9 @@ function loadSongContentFor(id) {
         applySongText_(id, askedAt, data.chords_lyrics, data.lyrics_only);
         lastErr = null;
         break;
-      } catch (err) { lastErr = err; console.warn('Song text load failed (try ' + (attempt + 1) + ')', err && err.message); }
+      } catch (err) { lastErr = err; console.warn('Song text load failed (try ' + (attempt + 1) + ')', err && err.message); if (err && err.message === CHART_LIMIT_MSG) break; }
     }
-    if (lastErr) { const sg = songs.find(s => s.id === id); if (sg && sg.chords_lyrics === undefined) sg._contentError = true; }
+    if (lastErr) { const sg = songs.find(s => s.id === id); if (sg && sg.chords_lyrics === undefined) { sg._contentError = true; sg._contentLimited = lastErr.message === CHART_LIMIT_MSG; } }
   })().finally(() => {
     delete _songTextInflight[id];
     if (view.name === 'detail' && view.id === id) renderDetail();
@@ -5237,11 +5286,13 @@ async function startBulkPrint_() {
   ids.forEach(id => { const sg = songs.find(s => s.id === id); const hit = sg && cache[id];
     if (sg && sg.chords_lyrics === undefined && hit && hit.u === sg.updated_at) { sg.chords_lyrics = hit.cl; sg.lyrics_only = hit.lo; } });
   const missing = ids.filter(id => { const sg = songs.find(s => s.id === id); return sg && sg.chords_lyrics === undefined; });
+  let hitLimit = false;
   if (missing.length && !isOffline) {
     try {
       for (let i = 0; i < missing.length; i += 50) {
         const data = await withTimeout_(api('songContentMany', { ids: missing.slice(i, i + 50) }), 25000);
         (data.content || []).forEach(c => applySongText_(c.id, c.updated_at, c.chords_lyrics, c.lyrics_only));
+        if (data.limited) { hitLimit = true; break; }
       }
     } catch (e) { /* whatever loaded is printed; the rest are listed as skipped */ }
   }
@@ -5249,7 +5300,8 @@ async function startBulkPrint_() {
   for (let k = 0; k < 20 && ids.some(id => { const sg = songs.find(s => s.id === id); return sg && sg.chords_lyrics === undefined && _songTextInflight[id]; }); k++) await new Promise(z => setTimeout(z, 300));
   const ready = ids.filter(id => { const sg = songs.find(s => s.id === id); return sg && sg.chords_lyrics !== undefined; });
   const skipped = ids.length - ready.length;
-  if (!ready.length) { if (st) { st.textContent = 'Couldn’t load these songs — please check your connection and try again.'; st.className = 'error'; } return; }
+  if (!ready.length) { if (st) { st.textContent = hitLimit ? CHART_LIMIT_MSG : 'Couldn’t load these songs — please check your connection and try again.'; st.className = 'error'; } return; }
+  if (hitLimit) showToast("Some songs were skipped — you've opened a lot of songs today. Try the rest tomorrow.");
   closeModal();
   printPreviewState = { bulk: true, songIds: ready, title: b.title, skipped, fontSize: 0, bold: false, columns: 1, rtl: true, paper: defaultPrintPaper_() };
   renderPrintPreview();
@@ -7092,7 +7144,7 @@ function saveBadgeSeen_() { try { localStorage.setItem(BADGE_SEEN_KEY, JSON.stri
 // First run on this device: start counting from now, not from every song ever.
 if (!badgeSeen.newSongsAt) { badgeSeen.newSongsAt = Date.now(); saveBadgeSeen_(); }
 let userBadgeData = null; // { requests, messages } for the signed-in (non-admin) user
-let adminBadge = { newReq: 0, unread: 0, pendingAccounts: 0 }; // admin only: new song requests + unread conversations
+let adminBadge = { newReq: 0, unread: 0, pendingAccounts: 0, heavy: 0 }; // admin only: new song requests + unread conversations
 if (!badgeSeen.adminReqAt) { badgeSeen.adminReqAt = Date.now(); saveBadgeSeen_(); }
 let userBadgeFetchedAt = 0;
 function refreshUserBadges_(force) {
@@ -7106,8 +7158,10 @@ function refreshUserBadges_(force) {
       api('getAdminNewRequests', { since: badgeSeen.adminReqAt }).catch(() => ({ count: adminBadge.newReq })),
       api('getUnreadMessagesInfo', {}).catch(() => null),
       api('getUsernameAccounts', {}).catch(() => null),
-    ]).then(([nr, ui, ua]) => {
+      api('getChartAlerts', {}).catch(() => null),
+    ]).then(([nr, ui, ua, ca]) => {
       if (ua && ua.accounts) { usernameAccounts = ua.accounts; adminBadge.pendingAccounts = ua.accounts.filter(a => a.pending).length; }
+      if (ca && ca.alerts) { chartAlerts = ca.alerts; adminBadge.heavy = ca.alerts.filter(a => !a.seen).length; }
       adminBadge.newReq = (nr && nr.count) || 0;
       if (ui) { adminBadge.unread = ui.count || 0; unreadInfo = { count: ui.count || 0, emails: ui.emails || [] }; }
       updateBadges_();
@@ -7130,7 +7184,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 function badgeCounts_() {
   const c = { songs: 0, contact: 0, admin: 0 };
   if (!ALERTS_ENABLED || !currentUser || viewAsUser) return c;
-  if (currentUser.isAdmin) c.admin = (adminBadge.newReq || 0) + (adminBadge.pendingAccounts || 0) + (typeof unreadThreadCount === 'function' ? unreadThreadCount() : (adminBadge.unread || 0));
+  if (currentUser.isAdmin) c.admin = (adminBadge.newReq || 0) + (adminBadge.pendingAccounts || 0) + (adminBadge.heavy || 0) + (typeof unreadThreadCount === 'function' ? unreadThreadCount() : (adminBadge.unread || 0));
   if (alertPrefs.newSongs) c.songs = visibleSongs_().filter(s => { const t = Date.parse(s.date_added || s.created_at || ''); return t && t > badgeSeen.newSongsAt; }).length;
   if (userBadgeData) {
     if (alertPrefs.myRequests) c.contact += userBadgeData.requests.filter(r => r.status === 'added' && !badgeSeen.requestsAdded.includes(r.id)).length;
@@ -7358,7 +7412,7 @@ function renderDetail() {
       </div>
     </div>` : ''}`}
 
-    <div id="chartScroll" class="${playerState.showChords ? '' : 'hide-chords'}${playerState.playing ? ' chart-playing' : ''}" style="--chart-step:${playerState.fontSize||0}px;--chart-fw:${playerState.bold?700:400};">${contentReady ? renderChart(song.chords_lyrics, transpose) : (song._contentError ? `<div class="muted" style="padding:24px 4px">Couldn’t load this chart — the connection is slow right now. <button class="btn" onclick="retrySongText_('${escapeHtml(song.id)}')">Try again</button></div>` : '<div class="muted" style="padding:24px 4px">Loading chart…</div>')}</div>
+    <div id="chartScroll" class="${playerState.showChords ? '' : 'hide-chords'}${playerState.playing ? ' chart-playing' : ''}" style="--chart-step:${playerState.fontSize||0}px;--chart-fw:${playerState.bold?700:400};">${contentReady ? renderChart(song.chords_lyrics, transpose) : (song._contentError ? (song._contentLimited ? `<div class="muted" style="padding:24px 4px">${escapeHtml(CHART_LIMIT_MSG)}</div>` : `<div class="muted" style="padding:24px 4px">Couldn’t load this chart — the connection is slow right now. <button class="btn" onclick="retrySongText_('${escapeHtml(song.id)}')">Try again</button></div>`) : '<div class="muted" style="padding:24px 4px">Loading chart…</div>')}</div>
     ${playerState.playing ? '' : `${ytId ? `<div class="yt-wrap"><iframe src="https://www.youtube.com/embed/${ytId}" allowfullscreen></iframe></div>` : ''}
     <div class="grid-cats" style="margin-top:10px">${tags.map(t=>`<span class="chip">${escapeHtml(t)}</span>`).join('')}${languages.map(l=>`<span class="chip">${escapeHtml(l)}</span>`).join('')}</div>`}
     ${playerState.playing ? playFloatBarHtml() : ''}`;
@@ -9606,7 +9660,7 @@ function renderAdminSectionNav() {
   try { updateBadges_(); } catch (e) {}
   nav.innerHTML = `
       <button class="${adminSection==='communication'?'active':''}" onclick="goAdminSection('communication')">Communication${tabBadgeHtml(unread + (adminTab==='requests' ? 0 : adminBadge.newReq))}</button>
-      <button class="${adminSection==='users'?'active':''}" onclick="goAdminSection('users')">Users${tabBadgeHtml(unread + (adminBadge.pendingAccounts || 0))}</button>
+      <button class="${adminSection==='users'?'active':''}" onclick="goAdminSection('users')">Users${tabBadgeHtml(unread + (adminBadge.pendingAccounts || 0) + (adminBadge.heavy || 0))}</button>
       <button class="${adminSection==='stats'?'active':''}" onclick="goAdminSection('stats')">Stats</button>
       <button class="${adminSection==='backup'?'active':''}" onclick="goAdminSection('backup')">Backup</button>`;
 }
@@ -9641,11 +9695,12 @@ function renderAdminBackup() {
   const body = document.getElementById('adminBody');
   if (!body) return;
   const running = backupStatus === 'running';
-  const label = running ? 'Backing up…' : (backupStatus === 'done' ? 'Backed up ✓' : 'Backup Now');
+  const label = running ? 'Backing up…' : (backupStatus === 'done' ? 'Backed up ✓' : backupStatus === 'started' ? 'Backup started ✓' : 'Backup Now');
   const errMsg = backupStatus.startsWith('error') ? backupStatus.slice('error: '.length) : '';
   body.innerHTML = `<div class="card">
       <p class="muted">Takes an on-demand snapshot of the database (the same one that otherwise only runs automatically overnight) - handy right before making a risky change.</p>
       <button ${running ? 'disabled' : ''} onclick="runManualBackup()">${label}</button>
+      ${backupStatus === 'started' ? `<div class="muted" style="margin-top:10px;">The snapshot is running in the background and will be finished within about a minute.</div>` : ''}
       ${errMsg ? `<div class="error" style="margin-top:10px;">${errMsg}</div>` : ''}
     </div>`;
 }
@@ -9653,10 +9708,10 @@ function runManualBackup() {
   if (backupStatus === 'running') return;
   backupStatus = 'running';
   renderAdminBackup();
-  api('triggerManualBackup', {}).then(() => {
-    backupStatus = 'done';
+  api('triggerManualBackup', {}).then(r => {
+    backupStatus = r && r.mode === 'started' ? 'started' : 'done';
     renderAdminBackup();
-    setTimeout(() => { if (backupStatus === 'done') { backupStatus = ''; renderAdminBackup(); } }, 5000);
+    setTimeout(() => { if (backupStatus === 'done' || backupStatus === 'started') { backupStatus = ''; renderAdminBackup(); } }, 15000);
   }).catch(err => {
     backupStatus = 'error: ' + (err.message || 'Backup failed');
     renderAdminBackup();
@@ -10681,6 +10736,55 @@ function loadAdminUsers() {
     if (adminTab === 'users') renderUsersTable();
   }).catch(err => { if (adminTab === 'users') document.getElementById('adminBody').innerHTML = `<div class="error">${err.message}</div>`; });
 }
+// Accounts that opened a lot of different songs in one day (possible
+// copying) - see add_chart_limits.sql. Opening this tab marks them seen.
+let chartAlerts = null;
+let chartAlertsShowAll = false;
+function loadChartAlerts_() {
+  api('getChartAlerts', {}).then(d => {
+    chartAlerts = d.alerts;
+    renderChartAlertsCard_();
+    if (chartAlerts && chartAlerts.some(a => !a.seen)) {
+      api('markChartAlertsSeen', {}).then(() => { adminBadge.heavy = 0; updateBadges_(); try { renderAdminSectionNav(); } catch (e) {} }).catch(() => {});
+    }
+  }).catch(() => {});
+}
+function renderChartAlertsCard_() {
+  const el = document.getElementById('chartAlertsCard'); if (!el) return;
+  if (chartAlerts === null) { el.innerHTML = ''; return; }
+  if (!chartAlerts.length) {
+    el.innerHTML = `<div class="card"><b>Lots of songs opened</b><div class="muted" style="font-size:12.5px;margin-top:4px;">No one has opened an unusual number of songs in the last 60 days. You'll get a badge here if someone opens 100+ different songs in a day (at 200 they're paused until the next day).</div></div>`;
+    return;
+  }
+  // One line per account per day (the "limit" alert replaces the "warn" one).
+  const byKey = {};
+  chartAlerts.forEach(a => { const k = a.profile_id + '|' + a.day; if (!byKey[k] || a.level === 'limit') byKey[k] = Object.assign({}, a, { seen: byKey[k] ? (byKey[k].seen && a.seen) : a.seen }); });
+  const rows = Object.values(byKey).sort((x, y) => String(y.day).localeCompare(String(x.day)) || y.songs - x.songs);
+  const days = {}; chartAlerts.forEach(a => { days[a.profile_id] = days[a.profile_id] || new Set(); days[a.profile_id].add(a.day); });
+  const shown = chartAlertsShowAll ? rows : rows.slice(0, 8);
+  const fmtDay = d => new Date(d + 'T12:00:00Z').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  el.innerHTML = `<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><b>Lots of songs opened</b><span class="muted" style="font-size:12.5px;">last 60 days</span></div>
+    <div class="muted" style="font-size:12px;margin:2px 0 6px;">Accounts that opened 100+ different songs in one day. At 200 they're paused until the next day. Someone who shows up day after day may be copying.</div>
+    ${shown.map(a => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 2px;border-top:1px solid var(--border);flex-wrap:wrap;">
+      <div style="min-width:0;"><div dir="auto"><b>${escapeHtml(a.name || a.email || '')}</b> ${a.seen ? '' : '<span class="badge pending">New</span>'} ${a.blocked ? '<span class="badge declined">Blocked</span>' : ''}</div>
+        <div class="muted" style="font-size:12px;">${escapeHtml(a.email || '')} · ${fmtDay(a.day)} · <b style="color:${a.level === 'limit' ? 'var(--danger,#c0392b)' : 'inherit'}">${a.songs} songs</b>${a.level === 'limit' ? ' (paused)' : ''}${days[a.profile_id].size > 1 ? ` · ${days[a.profile_id].size} days` : ''}</div></div>
+      <button class="btn secondary" style="padding:5px 12px;font-size:12.5px;" onclick="blockUserFromAlert_('${a.profile_id}', ${a.blocked ? 'false' : 'true'})">${a.blocked ? 'Unblock' : 'Block'}</button>
+    </div>`).join('')}
+    ${rows.length > shown.length ? `<button class="btn secondary" style="margin-top:6px;padding:5px 12px;font-size:12.5px;" onclick="chartAlertsShowAll=true;renderChartAlertsCard_()">Show all ${rows.length}</button>` : ''}
+  </div>`;
+}
+async function blockUserFromAlert_(profileId, block) {
+  const a = (chartAlerts || []).find(x => x.profile_id === profileId);
+  const who = a ? (a.name || a.email) : 'this account';
+  const ok = await customConfirmAsync(block ? `Block ${who}? They won't be able to see any songs, playlists or messages until you unblock them.` : `Unblock ${who}?`, { title: block ? 'Block account' : 'Unblock account', confirmLabel: block ? 'Block' : 'Unblock', danger: block });
+  if (!ok) return;
+  api('blockUser', { id: profileId, block }).then(() => {
+    (chartAlerts || []).forEach(x => { if (x.profile_id === profileId) x.blocked = block; });
+    renderChartAlertsCard_();
+    showToast(block ? 'Blocked.' : 'Unblocked.');
+  }).catch(err => alert(err.message));
+}
 let usernameAccounts = null;
 function loadUsernameAccounts_() {
   api('getUsernameAccounts', {}).then(d => { usernameAccounts = d.accounts; adminBadge.pendingAccounts = (usernameAccounts || []).filter(a => a.pending).length; renderUsernameAccountsCard_(); try { renderUsersList(); } catch (e) {} updateBadges_(); try { renderAdminSectionNav(); } catch (e) {} }).catch(() => {});
@@ -10737,9 +10841,11 @@ function renderUsersTable() {
       </select>
       <button class="btn secondary" onclick="refreshAdminUsers_()" title="Download a fresh copy of the users list">↻ Refresh</button>
     </div>
+    <div id="chartAlertsCard"></div>
     <div id="usernameAccountsCard"></div>
     <div id="usersListContainer"></div>`;
   loadUsernameAccounts_();
+  loadChartAlerts_();
   const box = document.getElementById('userSearchBox');
   if (box) box.addEventListener('input', e => { userSearch = e.target.value; usersPage = 0; renderUsersList(); });
   const sel = document.getElementById('userSortSelect');
