@@ -1251,6 +1251,8 @@ Object.assign(HE_UI, {
   "🎵 Request it": "🎵 בקשו אותו",
   "Remove your favorites from offline storage on this device?": "להסיר את המועדפים מהשמירה ללא אינטרנט במכשיר הזה?",
   "Remove offline copy": "הסרת העותק השמור",
+  "Account paused": "החשבון הושהה",
+  "This account has been paused. If you think this is a mistake, please get in touch with us.": "החשבון הזה הושהה. אם לדעתך זו טעות, אפשר ליצור איתנו קשר.",
   "You've opened a lot of songs today, so new ones are paused until tomorrow. Songs you've already opened today still work.": "פתחת היום הרבה שירים, לכן שירים חדשים מושהים עד מחר. שירים שכבר פתחת היום עדיין זמינים.",
   "Some songs were skipped — you've opened a lot of songs today. Try the rest tomorrow.": "חלק מהשירים דולגו — פתחת היום הרבה שירים. אפשר לנסות את השאר מחר.",
   "Make favorites available offline on this device?": "לשמור את המועדפים לשימוש ללא אינטרנט במכשיר הזה?",
@@ -4113,6 +4115,18 @@ function startAfterSignIn() {
 // a song costs no download unless the song was edited since. Capped to the
 // most recent SONG_TEXT_CACHE_MAX songs so it stays well inside storage limits.
 const SONG_TEXT_CACHE_KEY = 'jgc_song_text_v1';
+// A blocked account: remove every chart saved on this device (recently
+// opened songs, the song list and anything saved for offline), once.
+let _localSongDataWiped = false;
+function wipeLocalSongData_() {
+  if (_localSongDataWiped) return;
+  _localSongDataWiped = true;
+  try { localStorage.removeItem(SONG_TEXT_CACHE_KEY); localStorage.removeItem(CATALOG_CACHE_KEY); } catch (e) {}
+  _songTextCache = {};
+  try { songContentById = {}; } catch (e) {}
+  try { (songs || []).forEach(sg => { delete sg.chords_lyrics; delete sg.lyrics_only; }); } catch (e) {}
+  try { indexedDB.deleteDatabase(OFFLINE_DB_NAME); } catch (e) {}
+}
 const SONG_TEXT_CACHE_MAX = 250;
 let _songTextCache = null;
 function songTextCache_() {
@@ -10768,11 +10782,18 @@ function renderChartAlertsCard_() {
     <div class="muted" style="font-size:12px;margin:2px 0 6px;">Accounts that opened 100+ different songs in one day. At 200 they're paused until the next day. Someone who shows up day after day may be copying.</div>
     ${shown.map(a => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 2px;border-top:1px solid var(--border);flex-wrap:wrap;">
       <div style="min-width:0;"><div dir="auto"><b>${escapeHtml(a.name || a.email || '')}</b> ${a.seen ? '' : '<span class="badge pending">New</span>'} ${a.blocked ? '<span class="badge declined">Blocked</span>' : ''}</div>
-        <div class="muted" style="font-size:12px;">${escapeHtml(a.email || '')} · ${fmtDay(a.day)} · <b style="color:${a.level === 'limit' ? 'var(--danger,#c0392b)' : 'inherit'}">${a.songs} songs</b>${a.level === 'limit' ? ' (paused)' : ''}${days[a.profile_id].size > 1 ? ` · ${days[a.profile_id].size} days` : ''}</div></div>
+        <div class="muted" style="font-size:12px;">${escapeHtml(a.email || '')} · ${fmtDay(a.day)} · <b style="color:${a.level === 'limit' ? 'var(--danger,#c0392b)' : 'inherit'}">${a.songs} songs</b>${a.level === 'limit' ? ' (paused)' : ''}${days[a.profile_id].size > 1 ? ` · ${days[a.profile_id].size} days` : ''}</div>${a.blocked && a.blocked_tries !== undefined ? `<div class="muted" style="font-size:12px;">${blockedTriesText_(a)}</div>` : ''}</div>
       <button class="btn secondary" style="padding:5px 12px;font-size:12.5px;" onclick="blockUserFromAlert_('${a.profile_id}', ${a.blocked ? 'false' : 'true'})">${a.blocked ? 'Unblock' : 'Block'}</button>
     </div>`).join('')}
     ${rows.length > shown.length ? `<button class="btn secondary" style="margin-top:6px;padding:5px 12px;font-size:12.5px;" onclick="chartAlertsShowAll=true;renderChartAlertsCard_()">Show all ${rows.length}</button>` : ''}
   </div>`;
+}
+// "Asked for songs N times since being blocked" (add_blocked_tries.sql).
+function blockedTriesText_(a) {
+  const n = a.blocked_tries || 0;
+  const when = d => d ? new Date(d).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+  if (!n) return `Hasn't asked for any songs since being blocked${a.blocked_at ? ' (' + when(a.blocked_at) + ')' : ''}.`;
+  return `<b style="color:${n >= 20 ? 'var(--danger,#c0392b)' : 'inherit'}">Asked for songs ${n} time${n === 1 ? '' : 's'} since being blocked</b> · last ${when(a.blocked_last_try)}`;
 }
 async function blockUserFromAlert_(profileId, block) {
   const a = (chartAlerts || []).find(x => x.profile_id === profileId);
@@ -10780,7 +10801,7 @@ async function blockUserFromAlert_(profileId, block) {
   const ok = await customConfirmAsync(block ? `Block ${who}? They won't be able to see any songs, playlists or messages until you unblock them.` : `Unblock ${who}?`, { title: block ? 'Block account' : 'Unblock account', confirmLabel: block ? 'Block' : 'Unblock', danger: block });
   if (!ok) return;
   api('blockUser', { id: profileId, block }).then(() => {
-    (chartAlerts || []).forEach(x => { if (x.profile_id === profileId) x.blocked = block; });
+    (chartAlerts || []).forEach(x => { if (x.profile_id === profileId) { x.blocked = block; if (x.blocked_tries !== undefined) { x.blocked_tries = 0; x.blocked_at = block ? new Date().toISOString() : null; } } });
     renderChartAlertsCard_();
     showToast(block ? 'Blocked.' : 'Unblocked.');
   }).catch(err => alert(err.message));
@@ -10990,8 +11011,11 @@ function render() {
     return;
   }
   if (currentUser.pending || currentUser.rejected) {
+    if (currentUser.rejected) wipeLocalSongData_();
     document.getElementById('app').innerHTML = currentUser.rejected
-      ? `<div class="card" style="text-align:center;max-width:420px;margin:40px auto;"><h2>Account not approved</h2><p class="muted">This account wasn’t approved. If you think this is a mistake, please get in touch with us.</p><button class="btn secondary" onclick="signOut()">Sign out</button></div>`
+      ? (isUsernameAccount_(currentUser.email)
+          ? `<div class="card" style="text-align:center;max-width:420px;margin:40px auto;"><h2>Account not approved</h2><p class="muted">This account wasn’t approved. If you think this is a mistake, please get in touch with us.</p><button class="btn secondary" onclick="signOut()">Sign out</button></div>`
+          : `<div class="card" style="text-align:center;max-width:420px;margin:40px auto;"><h2>Account paused</h2><p class="muted">This account has been paused. If you think this is a mistake, please get in touch with us.</p><button class="btn secondary" onclick="signOut()">Sign out</button></div>`)
       : `<div class="card" style="text-align:center;max-width:420px;margin:40px auto;"><img src="${ICONS.logo}" alt="" style="width:64px;height:64px;border-radius:14px;margin-bottom:14px;"><h2>Waiting for approval</h2><p>Thanks, ${escapeHtml(currentUser.name || '')}!</p><p class="muted">Your account was created and is waiting to be approved. You’ll be able to use the app as soon as it is.</p><div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:10px;"><button class="btn" onclick="recheckApproval_(this)">Check again</button><button class="btn secondary" onclick="signOut()">Sign out</button></div></div>`;
     return;
   }
