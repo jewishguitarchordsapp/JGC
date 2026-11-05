@@ -304,6 +304,15 @@
   .status-icon-btn.needs-lyrics{color:#1f5aa6;}
   /* Admin lists: wider page, Select-mode checkboxes, roomier request columns */
   main.admin-wide{max-width:1400px;}
+  /* Admin > Users: the list takes most of the width; the two side boxes
+     ("Lots of songs opened", "Username accounts") sit on the right. On a
+     phone they stack above the list. */
+  .users-layout{display:flex;gap:16px;align-items:flex-start;}
+  .users-main{flex:2 1 0;min-width:0;}
+  .users-side{flex:1 1 0;min-width:260px;max-width:420px;display:flex;flex-direction:column;gap:12px;}
+  .users-side .card{margin:0;}
+  .users-side:empty{display:none;}
+  @media (max-width:820px){ .users-layout{flex-direction:column;} .users-side{order:-1;max-width:none;width:100%;min-width:0;} .users-main{width:100%;} }
   .admin-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px;}
   .admin-toolbar .admin-filter-row{margin-bottom:0;}
   .sel-toggle{padding:5px 12px;font-size:12.5px;}
@@ -10945,7 +10954,7 @@ function renderUsersTable() {
   // focus after every single character typed. Building it once here and
   // only ever touching the container below it keeps focus (and cursor
   // position) intact.
-  body.innerHTML = `<div style="margin-bottom:10px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+  body.innerHTML = `<div class="users-layout"><div class="users-main"><div style="margin-bottom:10px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
       <input type="text" id="userSearchBox" placeholder="Search by name or email…" value="${escapeHtml(userSearch)}" style="max-width:320px;flex:1;min-width:180px;">
       <select id="userSortSelect" style="max-width:220px;">
         <option value="name" ${userSort==='name'?'selected':''}>Sort: Name (A–Z)</option>
@@ -10954,9 +10963,8 @@ function renderUsersTable() {
       </select>
       <button class="btn secondary" onclick="refreshAdminUsers_()" title="Download a fresh copy of the users list">↻ Refresh</button>
     </div>
-    <div id="chartAlertsCard"></div>
-    <div id="usernameAccountsCard"></div>
-    <div id="usersListContainer"></div>`;
+    <div id="usersListContainer"></div></div>
+    <aside class="users-side"><div id="chartAlertsCard"></div><div id="usernameAccountsCard"></div></aside></div>`;
   loadUsernameAccounts_();
   loadChartAlerts_();
   const box = document.getElementById('userSearchBox');
