@@ -2397,10 +2397,19 @@ function throwIfErr_(error) { if (error) throw new Error(error.message || String
 // the old direct read.
 const CHART_LIMIT_MSG = "You've opened a lot of songs today, so new ones are paused until tomorrow. Songs you've already opened today still work.";
 function isMissingFn_(error) { return !!error && (error.code === 'PGRST202' || /could not find the function|schema cache|does not exist/i.test(error.message || '')); }
-let _chartRpcMissing = false;
-async function songChartsRpc_(ids) {
+let _chartRpcMissing = false, _chartBulkRpcMissing = false;
+// bulk = printing several songs, saving offline, or the quiet new-song
+// download - counted separately from songs opened on screen
+// (add_auto_block.sql), so they never look like copying.
+async function songChartsRpc_(ids, bulk) {
   if (_chartRpcMissing) return null;
-  const { data, error } = await getSupa_().rpc('get_song_charts', { p_ids: ids });
+  let { data, error } = (bulk && !_chartBulkRpcMissing)
+    ? await getSupa_().rpc('get_song_charts_bulk', { p_ids: ids })
+    : await getSupa_().rpc('get_song_charts', { p_ids: ids });
+  if (error && bulk && !_chartBulkRpcMissing && isMissingFn_(error)) {
+    _chartBulkRpcMissing = true;
+    ({ data, error } = await getSupa_().rpc('get_song_charts', { p_ids: ids }));
+  }
   if (error) { if (isMissingFn_(error)) { _chartRpcMissing = true; return null; } throwIfErr_(error); }
   return { limited: !!(data && data.limited), songs: ((data && data.songs) || []).map(r => ({ id: r.id, updated_at: r.updated_at, chords_lyrics: r.chords_lyrics || '', lyrics_only: r.lyrics_only || '' })) };
 }
@@ -2888,7 +2897,7 @@ async function supaApi(action, fields) {
     await supaRequireUser_();
     const ids = (fields.ids || []).slice(0, 50);
     if (!ids.length) return { success: true, content: [] };
-    const charts = await songChartsRpc_(ids);
+    const charts = await songChartsRpc_(ids, true);
     if (charts) return { success: true, limited: charts.limited, content: charts.songs };
     const { data, error } = await getSupa_().from('songs').select('id,updated_at,chords_lyrics,lyrics_only').in('id', ids);
     throwIfErr_(error);
@@ -2901,7 +2910,7 @@ async function supaApi(action, fields) {
     // from this device, no network), so the very first song opened right
     // after the app starts isn't asked for as a signed-out visitor.
     try { await getSupa_().auth.getSession(); } catch (e) {}
-    const charts = await songChartsRpc_([fields.id]);
+    const charts = await songChartsRpc_([fields.id], !!fields.bulk);
     if (charts) {
       const row = charts.songs.find(r => r.id === fields.id);
       if (row) return { success: true, id: row.id, chords_lyrics: row.chords_lyrics, lyrics_only: row.lyrics_only };
@@ -3384,6 +3393,7 @@ async function supaApi(action, fields) {
     const emailMap = { [target.id]: { email: target.email, name: target.name } };
     return {
       success: true, email: targetEmail,
+      pending: !!target.pending_approval, rejected: !!target.rejected,
       favorites: (favRes.data || []).map(f => f.song_id),
       knownChords: (kcRes.data && kcRes.data.chords) || [],
       playlists: await supaHydratePlaylists_(plRes.data || []),
@@ -4137,16 +4147,19 @@ const SONG_TEXT_CACHE_KEY = 'jgc_song_text_v1';
 let _blockedChatMsgs = null, _blockedChatDraft = '';
 function renderBlockedChat_() {
   const app = document.getElementById('app');
-  if (!app || !currentUser || !currentUser.rejected) return;
+  const preview = !!(viewAsUser && viewAsUser.rejected);
+  if (!app || !currentUser || !(preview || (!viewAsUser && currentUser.rejected))) return;
+  if (preview) _blockedChatMsgs = ((viewAsData && viewAsData.messages) || []).slice().sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
   let box = document.getElementById('blockedChat');
   if (!box) { box = document.createElement('div'); box.id = 'blockedChat'; box.className = 'card'; box.style.cssText = 'max-width:420px;margin:0 auto 40px;'; app.appendChild(box); }
   const msgs = _blockedChatMsgs || [];
   const when = d => d ? new Date(d).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
   box.innerHTML = `<b>Messages</b>
     <div style="max-height:300px;overflow-y:auto;margin:8px 0;">${_blockedChatMsgs === null ? '<div class="muted" style="font-size:13px;">Loading…</div>' : (msgs.length ? msgs.map(m => `<div style="margin:6px 0;display:flex;justify-content:${m.sender === 'admin' ? 'flex-start' : 'flex-end'};"><div dir="auto" style="max-width:85%;padding:7px 10px;border-radius:12px;background:${m.sender === 'admin' ? 'var(--chip-bg,#eef2f1)' : 'var(--accent,#0f766e)'};color:${m.sender === 'admin' ? 'inherit' : '#fff'};white-space:pre-wrap;font-size:14px;">${escapeHtml(m.text || '')}<div style="font-size:11px;opacity:.7;margin-top:2px;">${when(m.created_at)}</div></div></div>`).join('') : '<div class="muted" style="font-size:13px;">No messages yet.</div>')}</div>
-    <textarea id="blockedChatText" rows="3" placeholder="Write a message…" style="width:100%;box-sizing:border-box;" oninput="_blockedChatDraft=this.value"></textarea>
-    <div style="display:flex;justify-content:flex-end;margin-top:6px;"><button class="btn" id="blockedChatSend" onclick="sendBlockedChat_()">Send</button></div>`;
+    <textarea id="blockedChatText" rows="3" placeholder="Write a message…" style="width:100%;box-sizing:border-box;" oninput="_blockedChatDraft=this.value"${preview ? ' disabled' : ''}></textarea>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:6px;">${preview ? '<span class="muted" style="font-size:12px;">Preview — reply to them from your inbox.</span>' : '<span></span>'}<button class="btn" id="blockedChatSend" onclick="sendBlockedChat_()"${preview ? ' disabled' : ''}>Send</button></div>`;
   const ta = document.getElementById('blockedChatText'); if (ta) ta.value = _blockedChatDraft;
+  if (preview) { _blockedChatMsgs = null; return; }
   if (_blockedChatMsgs === null) loadBlockedChat_();
 }
 function loadBlockedChat_() {
@@ -4218,7 +4231,7 @@ function applySongText_(id, updatedAt, cl, lo) {
   saveSongText_(id, updatedAt || (song && song.updated_at), cl, lo);
   return true;
 }
-function loadSongContentFor(id) {
+function loadSongContentFor(id, bulk) {
   const cachedSong = songs.find(s => s.id === id);
   const hit = cachedSong && cachedSong.updated_at && songTextCache_()[id];
   if (hit && hit.u === cachedSong.updated_at) {
@@ -4237,7 +4250,7 @@ function loadSongContentFor(id) {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         if (attempt) await new Promise(z => setTimeout(z, 600));
-        const req = api('songContent', { id });
+        const req = api('songContent', bulk ? { id, bulk: true } : { id });
         // On a slow connection the answer can arrive after we've stopped
         // waiting for it - use it anyway (it used to be thrown away, so the
         // page sat on "Loading chart…" until the song was opened again).
@@ -4408,7 +4421,7 @@ async function isOfflineAvailable(setId) {
 // include chords_lyrics/lyrics_only.
 async function ensureContentFor(ids) {
   const missing = ids.filter(id => !songContentById[id]);
-  await Promise.all(missing.map(id => loadSongContentFor(id)));
+  await Promise.all(missing.map(id => loadSongContentFor(id, true)));
 }
 
 // Saves the given songs into IndexedDB under setId/title, available offline
@@ -10817,7 +10830,7 @@ function renderChartAlertsCard_() {
   }
   // One line per account per day (the "limit" alert replaces the "warn" one).
   const byKey = {};
-  chartAlerts.forEach(a => { const k = a.profile_id + '|' + a.day; if (!byKey[k] || a.level === 'limit') byKey[k] = Object.assign({}, a, { seen: byKey[k] ? (byKey[k].seen && a.seen) : a.seen }); });
+  chartAlerts.forEach(a => { const k = a.profile_id + '|' + a.day; if (!byKey[k] || a.level === 'limit') byKey[k] = Object.assign({}, a, { seen: byKey[k] ? (byKey[k].seen && a.seen) : a.seen, auto_blocked: !!((byKey[k] && byKey[k].auto_blocked) || a.auto_blocked) }); });
   const rows = Object.values(byKey).sort((x, y) => String(y.day).localeCompare(String(x.day)) || y.songs - x.songs);
   const days = {}; chartAlerts.forEach(a => { days[a.profile_id] = days[a.profile_id] || new Set(); days[a.profile_id].add(a.day); });
   const shown = chartAlertsShowAll ? rows : rows.slice(0, 8);
@@ -10826,7 +10839,7 @@ function renderChartAlertsCard_() {
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><b>Lots of songs opened</b><span class="muted" style="font-size:12.5px;">last 60 days</span></div>
     <div class="muted" style="font-size:12px;margin:2px 0 6px;">Accounts that opened 100+ different songs in one day. At 200 they're paused until the next day. Someone who shows up day after day may be copying.</div>
     ${shown.map(a => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 2px;border-top:1px solid var(--border);flex-wrap:wrap;">
-      <div style="min-width:0;"><div dir="auto"><b>${escapeHtml(a.name || a.email || '')}</b> ${a.seen ? '' : '<span class="badge pending">New</span>'} ${a.blocked ? '<span class="badge declined">Blocked</span>' : ''}</div>
+      <div style="min-width:0;"><div dir="auto"><b>${escapeHtml(a.name || a.email || '')}</b> ${a.seen ? '' : '<span class="badge pending">New</span>'} ${a.blocked ? `<span class="badge declined">${a.auto_blocked ? 'Auto-blocked' : 'Blocked'}</span>` : ''}</div>
         <div class="muted" style="font-size:12px;">${escapeHtml(a.email || '')} · ${fmtDay(a.day)} · <b style="color:${a.level === 'limit' ? 'var(--danger,#c0392b)' : 'inherit'}">${a.songs} songs</b>${a.level === 'limit' ? ' (paused)' : ''}${days[a.profile_id].size > 1 ? ` · ${days[a.profile_id].size} days` : ''}</div>${chartAlertSpanHtml_(a)}${a.blocked && a.blocked_tries !== undefined ? `<div class="muted" style="font-size:12px;">${blockedTriesText_(a)}</div>` : ''}</div>
       <button class="btn secondary" style="padding:5px 12px;font-size:12.5px;" onclick="blockUserFromAlert_('${a.profile_id}', ${a.blocked ? 'false' : 'true'})">${a.blocked ? 'Unblock' : 'Block'}</button>
     </div>`).join('')}
@@ -10845,9 +10858,10 @@ function chartAlertSpanHtml_(a) {
     parts.push(`${t(a.first_at)} – ${t(a.last_at)} (${dur})`);
   }
   if (a.on_screen !== undefined && a.on_screen !== null) {
-    const few = a.songs >= 50 && a.on_screen < a.songs / 4;
+    const few = a.songs >= 50 && (a.on_screen + (a.bulk || 0)) < a.songs / 4;
     parts.push(`<span style="${few ? 'color:var(--danger,#c0392b);font-weight:600;' : ''}">${a.on_screen} opened on screen</span>`);
   }
+  if (a.bulk) parts.push(`${a.bulk} printed or saved offline`);
   if (!parts.length) return '';
   const hasHours = Array.isArray(a.hours) && a.hours.some(n => n > 0);
   return `<div class="muted" style="font-size:12px;">${parts.join(' · ')}${hasHours ? ` · <a href="#" onclick="openChartAlertHours_(${Number(a.id)});return false;">Details</a>` : ''}</div>`;
@@ -10876,7 +10890,7 @@ function blockedTriesText_(a) {
 async function blockUserFromAlert_(profileId, block) {
   const a = (chartAlerts || []).find(x => x.profile_id === profileId);
   const who = a ? (a.name || a.email) : 'this account';
-  const ok = await customConfirmAsync(block ? `Block ${who}? They won't be able to see any songs, playlists or messages until you unblock them.` : `Unblock ${who}?`, { title: block ? 'Block account' : 'Unblock account', confirmLabel: block ? 'Block' : 'Unblock', danger: block });
+  const ok = await customConfirmAsync(block ? `Block ${who}? They won't be able to see any songs or playlists until you unblock them. They can still send you messages.` : `Unblock ${who}?`, { title: block ? 'Block account' : 'Unblock account', confirmLabel: block ? 'Block' : 'Unblock', danger: block });
   if (!ok) return;
   api('blockUser', { id: profileId, block }).then(() => {
     (chartAlerts || []).forEach(x => { if (x.profile_id === profileId) { x.blocked = block; if (x.blocked_tries !== undefined) { x.blocked_tries = 0; x.blocked_at = block ? new Date().toISOString() : null; } } });
@@ -11020,7 +11034,7 @@ function renderUsersList() {
 function changeUsersPage(p) { usersPage = p; renderUsersList(); }
 function enterViewAs(email, name) {
   api('getUserSnapshot', { target_email: email }).then(data => {
-    viewAsUser = { email: data.email, name: name || data.email };
+    viewAsUser = { email: data.email, name: name || data.email, pending: !!data.pending, rejected: !!data.rejected };
     viewAsData = { favorites: data.favorites || [], knownChords: data.knownChords || [], playlists: data.playlists || [], requests: data.requests || [], messages: data.messages || [], myCapos: data.myCapos || {}, myTransposes: data.myTransposes || {} };
     songTab = 'all';
     contactRequestsOpen = true; contactChatOpen = true; // starts open on entering View As (see isOpen in renderContactBody) - but, unlike before, can now be collapsed
@@ -11028,7 +11042,7 @@ function enterViewAs(email, name) {
   }).catch(err => alert(err.message));
 }
 function exitViewAs() {
-  viewAsUser = null; viewAsData = null; contactChatOpen = false; contactRequestsOpen = false;
+  viewAsUser = null; viewAsData = null; _blockedChatMsgs = null; contactChatOpen = false; contactRequestsOpen = false;
   goTo('admin');
 }
 
@@ -11088,13 +11102,21 @@ function render() {
     mountGateSignInButton();
     return;
   }
-  if (currentUser.pending || currentUser.rejected) {
-    if (currentUser.rejected) { wipeLocalSongData_(); setTimeout(renderBlockedChat_, 0); }
-    document.getElementById('app').innerHTML = currentUser.rejected
-      ? (isUsernameAccount_(currentUser.email)
-          ? `<div class="card" style="text-align:center;max-width:420px;margin:40px auto;"><h2>Account not approved</h2><p class="muted">This account wasn’t approved. If you think this is a mistake, send us a message below.</p><button class="btn secondary" onclick="signOut()">Sign out</button></div>`
-          : `<div class="card" style="text-align:center;max-width:420px;margin:40px auto;"><h2>Account paused</h2><p class="muted">This account has been paused. If you think this is a mistake, send us a message below.</p><button class="btn secondary" onclick="signOut()">Sign out</button></div>`)
-      : `<div class="card" style="text-align:center;max-width:420px;margin:40px auto;"><img src="${ICONS.logo}" alt="" style="width:64px;height:64px;border-radius:14px;margin-bottom:14px;"><h2>Waiting for approval</h2><p>Thanks, ${escapeHtml(currentUser.name || '')}!</p><p class="muted">Your account was created and is waiting to be approved. You’ll be able to use the app as soon as it is.</p><div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:10px;"><button class="btn" onclick="recheckApproval_(this)">Check again</button><button class="btn secondary" onclick="signOut()">Sign out</button></div></div>`;
+  // Blocked / waiting accounts see only a notice. "View As" on such an
+  // account shows the admin the same screen (a preview - nothing is sent
+  // or signed out from it).
+  const gateUser = (viewAsUser && (viewAsUser.rejected || viewAsUser.pending)) ? viewAsUser
+    : (!viewAsUser && (currentUser.pending || currentUser.rejected)) ? currentUser : null;
+  if (gateUser) {
+    const preview = gateUser === viewAsUser;
+    const outBtn = preview ? `<button class="btn secondary" onclick="exitViewAs()">Exit View As</button>` : `<button class="btn secondary" onclick="signOut()">Sign out</button>`;
+    if (!preview && gateUser.rejected) wipeLocalSongData_();
+    if (gateUser.rejected) setTimeout(renderBlockedChat_, 0);
+    document.getElementById('app').innerHTML = gateUser.rejected
+      ? (isUsernameAccount_(gateUser.email)
+          ? `<div class="card" style="text-align:center;max-width:420px;margin:40px auto;"><h2>Account not approved</h2><p class="muted">This account wasn’t approved. If you think this is a mistake, send us a message below.</p>${outBtn}</div>`
+          : `<div class="card" style="text-align:center;max-width:420px;margin:40px auto;"><h2>Account paused</h2><p class="muted">This account has been paused. If you think this is a mistake, send us a message below.</p>${outBtn}</div>`)
+      : `<div class="card" style="text-align:center;max-width:420px;margin:40px auto;"><img src="${ICONS.logo}" alt="" style="width:64px;height:64px;border-radius:14px;margin-bottom:14px;"><h2>Waiting for approval</h2><p>Thanks, ${escapeHtml(gateUser.name || '')}!</p><p class="muted">Your account was created and is waiting to be approved. You’ll be able to use the app as soon as it is.</p><div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:10px;">${preview ? '' : `<button class="btn" onclick="recheckApproval_(this)">Check again</button>`}${outBtn}</div></div>`;
     return;
   }
   if (view.name === 'home') renderHome();
