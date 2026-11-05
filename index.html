@@ -1,4 +1,9 @@
 <!DOCTYPE html>
+<!--
+  Hi! If you are looking at this code to copy the songs:
+  The chord charts in this app were put together and checked by hand, song by song. Please don't copy the song database or republish the songs elsewhere. If you'd like to use them for a project, please ask first through the Contact page in the app - we're happy to talk.
+  Downloads are limited per account, and unusual activity is reviewed.
+-->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -874,6 +879,12 @@
 <nav id="bottomNav" class="bottom-nav"></nav>
 
 <script>
+// A note for anyone opening the browser console (Inspect) to copy the songs.
+const COPY_NOTICE = "The chord charts in this app were put together and checked by hand, song by song. Please don't copy the song database or republish the songs elsewhere. If you'd like to use them for a project, please ask first through the Contact page in the app - we're happy to talk.";
+try {
+  console.log('%cPlease don\u2019t copy the songs', 'font-size:22px;font-weight:700;color:#0f766e;');
+  console.log('%c' + COPY_NOTICE + '\n\nDownloads are limited per account, and unusual activity is reviewed.', 'font-size:14px;line-height:1.5;');
+} catch (e) {}
 /* ============================================================
    CONFIG — fill these in (see SETUP.md)
    ============================================================ */
@@ -1252,7 +1263,13 @@ Object.assign(HE_UI, {
   "Remove your favorites from offline storage on this device?": "להסיר את המועדפים מהשמירה ללא אינטרנט במכשיר הזה?",
   "Remove offline copy": "הסרת העותק השמור",
   "Account paused": "החשבון הושהה",
-  "This account has been paused. If you think this is a mistake, please get in touch with us.": "החשבון הזה הושהה. אם לדעתך זו טעות, אפשר ליצור איתנו קשר.",
+  "This account has been paused. If you think this is a mistake, send us a message below.": "החשבון הזה הושהה. אם לדעתך זו טעות, אפשר לשלוח לנו הודעה למטה.",
+  "This account wasn’t approved. If you think this is a mistake, send us a message below.": "החשבון הזה לא אושר. אם לדעתך זו טעות, אפשר לשלוח לנו הודעה למטה.",
+  "Messages": "הודעות",
+  "Write a message…": "כתיבת הודעה…",
+  "Send": "שליחה",
+  "Sent ✓": "נשלח ✓",
+  "No messages yet.": "אין עדיין הודעות.",
   "You've opened a lot of songs today, so new ones are paused until tomorrow. Songs you've already opened today still work.": "פתחת היום הרבה שירים, לכן שירים חדשים מושהים עד מחר. שירים שכבר פתחת היום עדיין זמינים.",
   "Some songs were skipped — you've opened a lot of songs today. Try the rest tomorrow.": "חלק מהשירים דולגו — פתחת היום הרבה שירים. אפשר לנסות את השאר מחר.",
   "Make favorites available offline on this device?": "לשמור את המועדפים לשימוש ללא אינטרנט במכשיר הזה?",
@@ -4115,6 +4132,34 @@ function startAfterSignIn() {
 // a song costs no download unless the song was edited since. Capped to the
 // most recent SONG_TEXT_CACHE_MAX songs so it stays well inside storage limits.
 const SONG_TEXT_CACHE_KEY = 'jgc_song_text_v1';
+// Blocked accounts can still message the admin (add_blocked_messages.sql) -
+// a simple conversation under the "Account paused" card.
+let _blockedChatMsgs = null, _blockedChatDraft = '';
+function renderBlockedChat_() {
+  const app = document.getElementById('app');
+  if (!app || !currentUser || !currentUser.rejected) return;
+  let box = document.getElementById('blockedChat');
+  if (!box) { box = document.createElement('div'); box.id = 'blockedChat'; box.className = 'card'; box.style.cssText = 'max-width:420px;margin:0 auto 40px;'; app.appendChild(box); }
+  const msgs = _blockedChatMsgs || [];
+  const when = d => d ? new Date(d).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+  box.innerHTML = `<b>Messages</b>
+    <div style="max-height:300px;overflow-y:auto;margin:8px 0;">${_blockedChatMsgs === null ? '<div class="muted" style="font-size:13px;">Loading…</div>' : (msgs.length ? msgs.map(m => `<div style="margin:6px 0;display:flex;justify-content:${m.sender === 'admin' ? 'flex-start' : 'flex-end'};"><div dir="auto" style="max-width:85%;padding:7px 10px;border-radius:12px;background:${m.sender === 'admin' ? 'var(--chip-bg,#eef2f1)' : 'var(--accent,#0f766e)'};color:${m.sender === 'admin' ? 'inherit' : '#fff'};white-space:pre-wrap;font-size:14px;">${escapeHtml(m.text || '')}<div style="font-size:11px;opacity:.7;margin-top:2px;">${when(m.created_at)}</div></div></div>`).join('') : '<div class="muted" style="font-size:13px;">No messages yet.</div>')}</div>
+    <textarea id="blockedChatText" rows="3" placeholder="Write a message…" style="width:100%;box-sizing:border-box;" oninput="_blockedChatDraft=this.value"></textarea>
+    <div style="display:flex;justify-content:flex-end;margin-top:6px;"><button class="btn" id="blockedChatSend" onclick="sendBlockedChat_()">Send</button></div>`;
+  const ta = document.getElementById('blockedChatText'); if (ta) ta.value = _blockedChatDraft;
+  if (_blockedChatMsgs === null) loadBlockedChat_();
+}
+function loadBlockedChat_() {
+  dropStartBundle_();
+  api('getMessages', { scope: 'mine' }).then(d => { _blockedChatMsgs = (d.messages || []).slice().sort((a, b) => String(a.created_at).localeCompare(String(b.created_at))); renderBlockedChat_(); })
+    .catch(() => { _blockedChatMsgs = []; renderBlockedChat_(); });
+}
+function sendBlockedChat_() {
+  const text = String(_blockedChatDraft || '').trim(); if (!text) return;
+  const btn = document.getElementById('blockedChatSend'); if (btn) btn.disabled = true;
+  api('sendMessage', { text }).then(() => { _blockedChatDraft = ''; _blockedChatMsgs = null; showToast('Sent ✓'); renderBlockedChat_(); })
+    .catch(err => { if (btn) btn.disabled = false; alert(err.message); });
+}
 // A blocked account: remove every chart saved on this device (recently
 // opened songs, the song list and anything saved for offline), once.
 let _localSongDataWiped = false;
@@ -10782,11 +10827,44 @@ function renderChartAlertsCard_() {
     <div class="muted" style="font-size:12px;margin:2px 0 6px;">Accounts that opened 100+ different songs in one day. At 200 they're paused until the next day. Someone who shows up day after day may be copying.</div>
     ${shown.map(a => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 2px;border-top:1px solid var(--border);flex-wrap:wrap;">
       <div style="min-width:0;"><div dir="auto"><b>${escapeHtml(a.name || a.email || '')}</b> ${a.seen ? '' : '<span class="badge pending">New</span>'} ${a.blocked ? '<span class="badge declined">Blocked</span>' : ''}</div>
-        <div class="muted" style="font-size:12px;">${escapeHtml(a.email || '')} · ${fmtDay(a.day)} · <b style="color:${a.level === 'limit' ? 'var(--danger,#c0392b)' : 'inherit'}">${a.songs} songs</b>${a.level === 'limit' ? ' (paused)' : ''}${days[a.profile_id].size > 1 ? ` · ${days[a.profile_id].size} days` : ''}</div>${a.blocked && a.blocked_tries !== undefined ? `<div class="muted" style="font-size:12px;">${blockedTriesText_(a)}</div>` : ''}</div>
+        <div class="muted" style="font-size:12px;">${escapeHtml(a.email || '')} · ${fmtDay(a.day)} · <b style="color:${a.level === 'limit' ? 'var(--danger,#c0392b)' : 'inherit'}">${a.songs} songs</b>${a.level === 'limit' ? ' (paused)' : ''}${days[a.profile_id].size > 1 ? ` · ${days[a.profile_id].size} days` : ''}</div>${chartAlertSpanHtml_(a)}${a.blocked && a.blocked_tries !== undefined ? `<div class="muted" style="font-size:12px;">${blockedTriesText_(a)}</div>` : ''}</div>
       <button class="btn secondary" style="padding:5px 12px;font-size:12.5px;" onclick="blockUserFromAlert_('${a.profile_id}', ${a.blocked ? 'false' : 'true'})">${a.blocked ? 'Unblock' : 'Block'}</button>
     </div>`).join('')}
     ${rows.length > shown.length ? `<button class="btn secondary" style="margin-top:6px;padding:5px 12px;font-size:12.5px;" onclick="chartAlertsShowAll=true;renderChartAlertsCard_()">Show all ${rows.length}</button>` : ''}
   </div>`;
+}
+// When the songs were opened (add_alert_timespan.sql): first - latest time,
+// how many were opened on screen, and a Details button with songs per hour.
+function chartAlertSpanHtml_(a) {
+  if (a.first_at === undefined && a.on_screen === undefined) return '';
+  const t = d => new Date(d).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  const parts = [];
+  if (a.first_at && a.last_at) {
+    const mins = Math.max(0, Math.round((Date.parse(a.last_at) - Date.parse(a.first_at)) / 60000));
+    const dur = mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)} h ${mins % 60} min`;
+    parts.push(`${t(a.first_at)} – ${t(a.last_at)} (${dur})`);
+  }
+  if (a.on_screen !== undefined && a.on_screen !== null) {
+    const few = a.songs >= 50 && a.on_screen < a.songs / 4;
+    parts.push(`<span style="${few ? 'color:var(--danger,#c0392b);font-weight:600;' : ''}">${a.on_screen} opened on screen</span>`);
+  }
+  if (!parts.length) return '';
+  const hasHours = Array.isArray(a.hours) && a.hours.some(n => n > 0);
+  return `<div class="muted" style="font-size:12px;">${parts.join(' · ')}${hasHours ? ` · <a href="#" onclick="openChartAlertHours_(${Number(a.id)});return false;">Details</a>` : ''}</div>`;
+}
+function openChartAlertHours_(id) {
+  const a = (chartAlerts || []).find(x => Number(x.id) === Number(id)); if (!a || !Array.isArray(a.hours)) return;
+  const max = Math.max(1, ...a.hours);
+  const rows = a.hours.map((n, h) => ({ n, at: new Date(Date.UTC(+a.day.slice(0, 4), +a.day.slice(5, 7) - 1, +a.day.slice(8, 10), h)) }))
+    .filter(r => r.n > 0)
+    .map(r => `<div style="display:flex;align-items:center;gap:8px;margin:3px 0;font-size:13px;">
+        <span style="width:78px;flex:none;" class="muted">${r.at.toLocaleTimeString(undefined, { hour: 'numeric' })}</span>
+        <span style="flex:1;min-width:0;"><span style="display:block;height:12px;border-radius:6px;background:var(--accent,#0f766e);width:${Math.max(3, Math.round(r.n / max * 100))}%;"></span></span>
+        <b style="width:32px;flex:none;text-align:right;">${r.n}</b></div>`).join('');
+  openModal(`<h2>${escapeHtml(a.name || a.email || '')}</h2>
+    <p class="muted" style="font-size:13px;margin-top:-4px;">New songs opened per hour (your time). Spread across many hours usually means a person playing; almost all in one hour, with few opened on screen, looks like a script.</p>
+    ${rows}
+    <div class="modal-actions"><button class="btn" onclick="closeModal()">Close</button></div>`);
 }
 // "Asked for songs N times since being blocked" (add_blocked_tries.sql).
 function blockedTriesText_(a) {
@@ -11011,11 +11089,11 @@ function render() {
     return;
   }
   if (currentUser.pending || currentUser.rejected) {
-    if (currentUser.rejected) wipeLocalSongData_();
+    if (currentUser.rejected) { wipeLocalSongData_(); setTimeout(renderBlockedChat_, 0); }
     document.getElementById('app').innerHTML = currentUser.rejected
       ? (isUsernameAccount_(currentUser.email)
-          ? `<div class="card" style="text-align:center;max-width:420px;margin:40px auto;"><h2>Account not approved</h2><p class="muted">This account wasn’t approved. If you think this is a mistake, please get in touch with us.</p><button class="btn secondary" onclick="signOut()">Sign out</button></div>`
-          : `<div class="card" style="text-align:center;max-width:420px;margin:40px auto;"><h2>Account paused</h2><p class="muted">This account has been paused. If you think this is a mistake, please get in touch with us.</p><button class="btn secondary" onclick="signOut()">Sign out</button></div>`)
+          ? `<div class="card" style="text-align:center;max-width:420px;margin:40px auto;"><h2>Account not approved</h2><p class="muted">This account wasn’t approved. If you think this is a mistake, send us a message below.</p><button class="btn secondary" onclick="signOut()">Sign out</button></div>`
+          : `<div class="card" style="text-align:center;max-width:420px;margin:40px auto;"><h2>Account paused</h2><p class="muted">This account has been paused. If you think this is a mistake, send us a message below.</p><button class="btn secondary" onclick="signOut()">Sign out</button></div>`)
       : `<div class="card" style="text-align:center;max-width:420px;margin:40px auto;"><img src="${ICONS.logo}" alt="" style="width:64px;height:64px;border-radius:14px;margin-bottom:14px;"><h2>Waiting for approval</h2><p>Thanks, ${escapeHtml(currentUser.name || '')}!</p><p class="muted">Your account was created and is waiting to be approved. You’ll be able to use the app as soon as it is.</p><div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:10px;"><button class="btn" onclick="recheckApproval_(this)">Check again</button><button class="btn secondary" onclick="signOut()">Sign out</button></div></div>`;
     return;
   }
