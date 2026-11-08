@@ -3281,7 +3281,8 @@ async function supaApi(action, fields) {
   }
   if (action === 'noteDevice') {
     try { await getSupa_().auth.getSession(); } catch (e) {}
-    const { error } = await getSupa_().rpc('note_device', { p_device: fields.device, p_ua: fields.ua || null });
+    let { error } = await getSupa_().rpc('note_device', { p_device: fields.device, p_ua: fields.ua || null, p_country: fields.country || null });
+    if (error && isMissingFn_(error)) ({ error } = await getSupa_().rpc('note_device', { p_device: fields.device, p_ua: fields.ua || null })); // add_request_country.sql not run yet
     return { success: !error }; // add_device_tags.sql not run yet = just skip
   }
   if (action === 'getDeviceMatches') {
@@ -4181,7 +4182,7 @@ function noteDevice_() {
   if (!currentUser || viewAsUser || isOffline || !CONFIG.USE_SUPABASE) return;
   if (_deviceNotedFor === currentUser.email) return;
   _deviceNotedFor = currentUser.email;
-  setTimeout(() => { api('noteDevice', { device: deviceId_(), ua: String(navigator.userAgent || '').slice(0, 300) }).catch(() => { _deviceNotedFor = ''; }); }, 2500);
+  setTimeout(() => { api('noteDevice', { device: deviceId_(), ua: String(navigator.userAgent || '').slice(0, 300), country: detectVisitorCountry_() }).catch(() => { _deviceNotedFor = ''; }); }, 2500);
 }
 const SONG_TEXT_CACHE_KEY = 'jgc_song_text_v1';
 // Blocked accounts can still message the admin (add_blocked_messages.sql) -
@@ -10902,7 +10903,7 @@ function renderChartAlertsCard_() {
     <div class="muted" style="font-size:12px;margin:2px 0 6px;">Accounts that opened 100+ different songs in one day. At 200 they're paused until the next day. Someone who shows up day after day may be copying.</div>
     ${shown.map(a => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 2px;border-top:1px solid var(--border);flex-wrap:wrap;">
       <div style="min-width:0;"><div dir="auto"><b>${escapeHtml(a.name || a.email || '')}</b> ${a.seen ? '' : '<span class="badge pending">New</span>'} ${a.blocked ? `<span class="badge declined">${a.auto_blocked ? 'Auto-blocked' : 'Blocked'}</span>` : ''}</div>
-        <div class="muted" style="font-size:12px;">${escapeHtml(a.email || '')} · ${fmtDay(a.day)} · <b style="color:${a.level === 'limit' ? 'var(--danger,#c0392b)' : 'inherit'}">${a.songs} songs</b>${a.level === 'limit' ? ' (paused)' : ''}${days[a.profile_id].size > 1 ? ` · ${days[a.profile_id].size} days` : ''}</div>${chartAlertSpanHtml_(a)}${deviceMatchHtml_(a.profile_id)}${a.blocked && a.blocked_tries !== undefined ? `<div class="muted" style="font-size:12px;">${blockedTriesText_(a)}</div>` : ''}</div>
+        <div class="muted" style="font-size:12px;">${escapeHtml(a.email || '')}${a.country ? ' · ' + countryFlag_(a.country) + ' ' + escapeHtml(countryName_(a.country)) : ''} · ${fmtDay(a.day)} · <b style="color:${a.level === 'limit' ? 'var(--danger,#c0392b)' : 'inherit'}">${a.songs} songs</b>${a.level === 'limit' ? ' (paused)' : ''}${days[a.profile_id].size > 1 ? ` · ${days[a.profile_id].size} days` : ''}</div>${chartAlertSpanHtml_(a)}${deviceMatchHtml_(a.profile_id)}${a.blocked && a.blocked_tries !== undefined ? `<div class="muted" style="font-size:12px;">${blockedTriesText_(a)}</div>` : ''}</div>
       <button class="btn secondary" style="padding:5px 12px;font-size:12.5px;" onclick="blockUserFromAlert_('${a.profile_id}', ${a.blocked ? 'false' : 'true'})">${a.blocked ? 'Unblock' : 'Block'}</button>
     </div>`).join('')}
     ${rows.length > shown.length ? `<button class="btn secondary" style="margin-top:6px;padding:5px 12px;font-size:12.5px;" onclick="chartAlertsShowAll=true;renderChartAlertsCard_()">Show all ${rows.length}</button>` : ''}
@@ -10981,7 +10982,7 @@ function renderUsernameAccountsCard_() {
     <div class="muted" style="font-size:12px;margin:2px 0 6px;">People who can’t use Google sign-in. New ones can’t use the app until you approve them.</div>
     <div style="max-height:320px;overflow-y:auto;">${list.map(a => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 2px;border-top:1px solid var(--border);flex-wrap:wrap;">
       <div style="min-width:0;"><div dir="auto"><b>${escapeHtml(a.name || a.username)}</b> ${a.pending ? '<span class="badge pending">Waiting</span>' : a.rejected ? '<span class="badge declined">Rejected</span>' : ''}</div>
-        <div class="muted" style="font-size:12px;">@${escapeHtml(a.username)} · ${a.created_at ? new Date(a.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : ''}</div>${deviceMatchHtml_(a.id)}</div>
+        <div class="muted" style="font-size:12px;">@${escapeHtml(a.username)} · ${a.created_at ? new Date(a.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : ''}</div>${a.country || a.ip ? `<div class="muted" style="font-size:12px;">${a.country ? countryFlag_(a.country) + ' ' + escapeHtml(countryName_(a.country)) : ''}${a.country && a.ip ? ' · ' : ''}${a.ip ? 'IP ' + escapeHtml(a.ip) : ''}</div>` : ''}${deviceMatchHtml_(a.id)}</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;">
         ${a.pending || a.rejected ? `<button class="btn" style="padding:5px 12px;font-size:12.5px;" onclick="setUsernameStatus_('${a.id}','approve')">Approve</button>` : ''}
         ${!a.rejected ? `<button class="btn secondary" style="padding:5px 12px;font-size:12.5px;" onclick="setUsernameStatus_('${a.id}','reject')">${a.pending ? 'Reject' : 'Block'}</button>` : ''}
