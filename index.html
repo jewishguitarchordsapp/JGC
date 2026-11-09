@@ -3303,6 +3303,13 @@ async function supaApi(action, fields) {
     throwIfErr_(error);
     return { success: true };
   }
+  if (action === 'unpauseUser') {
+    await supaRequireAdmin_();
+    const { error } = await getSupa_().rpc('admin_unpause_user', { p_id: fields.id });
+    if (error && isMissingFn_(error)) throw new Error('Unpausing needs add_unpause.sql to be run first.');
+    throwIfErr_(error);
+    return { success: true };
+  }
   if (action === 'blockUser') {
     await supaRequireAdmin_();
     const { error } = await getSupa_().rpc('admin_block_user', { p_id: fields.id, p_block: !!fields.block });
@@ -10903,8 +10910,8 @@ function renderChartAlertsCard_() {
     <div class="muted" style="font-size:12px;margin:2px 0 6px;">Accounts that opened 100+ different songs in one day. At 200 they're paused until the next day. Someone who shows up day after day may be copying.</div>
     ${shown.map(a => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 2px;border-top:1px solid var(--border);flex-wrap:wrap;">
       <div style="min-width:0;"><div dir="auto"><b>${escapeHtml(a.name || a.email || '')}</b> ${a.seen ? '' : '<span class="badge pending">New</span>'} ${a.blocked ? `<span class="badge declined">${a.auto_blocked ? 'Auto-blocked' : 'Blocked'}</span>` : ''} ${repeatBadgeHtml_(days[a.profile_id], a.day)}</div>
-        <div class="muted" style="font-size:12px;">${escapeHtml(a.email || '')}${a.country ? ' · ' + countryFlag_(a.country) + ' ' + escapeHtml(countryName_(a.country)) : ''} · ${fmtDay(a.day)} · <b style="color:${a.level === 'limit' ? 'var(--danger,#c0392b)' : 'inherit'}">${a.songs} songs</b>${a.level === 'limit' ? ' (paused)' : ''}</div>${chartAlertSpanHtml_(a)}${deviceMatchHtml_(a.profile_id)}${a.blocked && a.blocked_tries !== undefined ? `<div class="muted" style="font-size:12px;">${blockedTriesText_(a)}</div>` : ''}</div>
-      <button class="btn secondary" style="padding:5px 12px;font-size:12.5px;" onclick="blockUserFromAlert_('${a.profile_id}', ${a.blocked ? 'false' : 'true'})">${a.blocked ? 'Unblock' : 'Block'}</button>
+        <div class="muted" style="font-size:12px;">${escapeHtml(a.email || '')}${a.country ? ' · ' + countryFlag_(a.country) + ' ' + escapeHtml(countryName_(a.country)) : ''} · ${fmtDay(a.day)} · <b style="color:${a.level === 'limit' ? 'var(--danger,#c0392b)' : 'inherit'}">${a.songs} songs</b>${a.level === 'limit' ? (a.unpaused_at ? ' (unpaused)' : ' (paused)') : ''}</div>${chartAlertSpanHtml_(a)}${deviceMatchHtml_(a.profile_id)}${a.blocked && a.blocked_tries !== undefined ? `<div class="muted" style="font-size:12px;">${blockedTriesText_(a)}</div>` : ''}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">${unpauseBtnHtml_(a)}<button class="btn secondary" style="padding:5px 12px;font-size:12.5px;" onclick="blockUserFromAlert_('${a.profile_id}', ${a.blocked ? 'false' : 'true'})">${a.blocked ? 'Unblock' : 'Block'}</button></div>
     </div>`).join('')}
     ${rows.length > shown.length ? `<button class="btn secondary" style="margin-top:6px;padding:5px 12px;font-size:12.5px;" onclick="chartAlertsShowAll=true;renderChartAlertsCard_()">Show all ${rows.length}</button>` : ''}
   </div>`;
@@ -10962,6 +10969,27 @@ function blockedTriesText_(a) {
   const when = d => d ? new Date(d).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
   if (!n) return `Hasn't asked for any songs since being blocked${a.blocked_at ? ' (' + when(a.blocked_at) + ')' : ''}.`;
   return `<b style="color:${n >= 20 ? 'var(--danger,#c0392b)' : 'inherit'}">Asked for songs ${n} time${n === 1 ? '' : 's'} since being blocked</b> · last ${when(a.blocked_last_try)}`;
+}
+// "Unpause": someone paused at the daily limit TODAY gets 200 more songs
+// for the rest of the day (add_unpause.sql).
+function unpauseBtnHtml_(a) {
+  if (a.level !== 'limit' || a.blocked || a.unpaused_at === undefined) return '';
+  const today = new Date().toISOString().slice(0, 10); // days are UTC
+  if (a.day !== today) return '';
+  if (a.unpaused_at) return '<span class="muted" style="font-size:12.5px;">Unpaused ✓</span>';
+  return `<button class="btn" style="padding:5px 12px;font-size:12.5px;" onclick="unpauseUserFromAlert_('${a.profile_id}')">Unpause</button>`;
+}
+async function unpauseUserFromAlert_(profileId) {
+  const a = (chartAlerts || []).find(x => x.profile_id === profileId);
+  const who = a ? (a.name || a.email) : 'this account';
+  const ok = await customConfirmAsync(`Unpause ${who}? They'll be able to open 200 more songs today. Tomorrow the normal limit applies again.`, { title: 'Unpause account', confirmLabel: 'Unpause' });
+  if (!ok) return;
+  api('unpauseUser', { id: profileId }).then(() => {
+    const now = new Date().toISOString();
+    (chartAlerts || []).forEach(x => { if (x.profile_id === profileId && x.level === 'limit') x.unpaused_at = now; });
+    renderChartAlertsCard_();
+    showToast('Unpaused.');
+  }).catch(err => alert(err.message));
 }
 async function blockUserFromAlert_(profileId, block) {
   const a = (chartAlerts || []).find(x => x.profile_id === profileId);
