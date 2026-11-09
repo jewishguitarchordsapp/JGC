@@ -147,6 +147,14 @@
   .chords-used-row .set-known-link{font-size:12.5px;color:var(--accent);white-space:nowrap;cursor:pointer;margin-top:3px;}
   .playback-row{background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin:10px 0;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
   .play-btn{width:34px;height:34px;border-radius:50%;background:var(--teal);display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer;border:none;color:#fff;font-size:13px;}
+  /* Record yourself playing - small grey mic after "5s delay" */
+  .rec-mic{flex:none;width:30px;height:30px;border-radius:50%;border:0;background:transparent;color:#9ca3af;padding:5px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;}
+  .rec-mic svg{width:19px;height:19px;}
+  .rec-mic.on{background:#d93636;color:#fff;animation:recBlink 1s infinite;}
+  @keyframes recBlink{50%{opacity:.45;}}
+  #recBar{position:fixed;left:0;right:0;top:0;z-index:2000;background:#d93636;color:#fff;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 14px;padding-top:calc(8px + env(safe-area-inset-top));font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,.2);}
+  #recBar .dot{display:inline-block;width:10px;height:10px;background:#fff;border-radius:50%;margin-right:8px;animation:recBlink 1s infinite;}
+  #recBar button{background:#fff;color:#d93636;border:0;border-radius:999px;padding:5px 14px;font-weight:700;font-size:13px;cursor:pointer;}
   .adv-toggle{display:flex;align-items:center;gap:3px;font-size:13px;color:var(--teal-dark);font-weight:600;cursor:pointer;margin-left:auto;background:none;border:none;padding:4px;}
   .adv-chevron{display:inline-block;transition:transform .15s;}
   .adv-chevron.open{transform:rotate(90deg);}
@@ -1271,6 +1279,21 @@ Object.assign(HE_UI, {
   "🎵 Request it": "🎵 בקשו אותו",
   "Remove your favorites from offline storage on this device?": "להסיר את המועדפים מהשמירה ללא אינטרנט במכשיר הזה?",
   "Remove offline copy": "הסרת העותק השמור",
+  "Recording": "מקליט",
+  "■ Stop": "■ עצירה",
+  "Recording ready": "ההקלטה מוכנה",
+  "Listen back, then share it or save it to your phone.": "אפשר להאזין, ואז לשתף או לשמור בטלפון.",
+  "Share…": "שיתוף…",
+  "Save to phone": "שמירה בטלפון",
+  "Nothing is saved in the app. Once you close this, the recording only exists where you shared or saved it.": "שום דבר לא נשמר באפליקציה. אחרי הסגירה, ההקלטה קיימת רק איפה ששיתפת או שמרת אותה.",
+  "Delete recording": "מחיקת ההקלטה",
+  "Delete this recording? It can’t be recovered.": "למחוק את ההקלטה? אי אפשר לשחזר אותה.",
+  "Close recording": "סגירת ההקלטה",
+  "Close and delete": "לסגור ולמחוק",
+  "You haven’t shared or saved this recording yet. Close it anyway? It will be deleted.": "עוד לא שיתפת או שמרת את ההקלטה. לסגור בכל זאת? היא תימחק.",
+  "Recording deleted.": "ההקלטה נמחקה.",
+  "Record yourself playing": "הקלטה של עצמך מנגן",
+  "Stop recording": "עצירת ההקלטה",
   "Account paused": "החשבון הושהה",
   "This account has been paused. If you think this is a mistake, send us a message below.": "החשבון הזה הושהה. אם לדעתך זו טעות, אפשר לשלוח לנו הודעה למטה.",
   "This account wasn’t approved. If you think this is a mistake, send us a message below.": "החשבון הזה לא אושר. אם לדעתך זו טעות, אפשר לשלוח לנו הודעה למטה.",
@@ -7496,6 +7519,7 @@ function renderDetail() {
       <button class="play-btn" onclick="togglePlay()">▶</button>
       <div class="group"><button class="icon" onclick="changeSpeed(-0.2)">−</button><span>${playerState.speed.toFixed(1)}x</span><button class="icon" onclick="changeSpeed(0.2)">+</button></div>
       <label style="display:inline-flex;align-items:center;gap:5px;font-size:13px;margin:0;"><input type="checkbox" ${playerState.delay?'checked':''} onchange="playerState.delay=this.checked"> 5s delay</label>
+      ${recordMicHtml_()}
       <button class="adv-toggle" onclick="toggleAdvanced()">Advanced <span class="adv-chevron${playerState.advancedOpen?' open':''}">›</span></button>
     </div>
 
@@ -7814,6 +7838,7 @@ async function acquireWakeLock_() {
   } catch (e) { screenWakeLock = null; startKeepAwakeVideo_(); }
 }
 function releaseWakeLock_() {
+  if (_rec && _rec.recorder && _rec.recorder.state === 'recording') return; // recording keeps the screen on
   try { if (screenWakeLock) screenWakeLock.release(); } catch (e) {}
   screenWakeLock = null;
   stopKeepAwakeVideo_();
@@ -7842,6 +7867,140 @@ function stopPlayMode() {
 // kept in the page-level floatBarPos (not playerState) across the
 // re-renders a speed change triggers, so dragging it once keeps it put for
 // the rest of this playback.
+/* ============================================================
+   RECORD YOURSELF PLAYING
+   ============================================================
+   Records from the microphone while the song page stays usable. Nothing
+   is uploaded or kept by the app: when they stop, they can listen back,
+   share it or save it to their phone, and it's gone from the app after.
+   Only shown on phones/browsers that support recording. */
+let _rec = null; // { recorder, stream, chunks, startedAt, timer, title, mime, blob, url, file, kept }
+const REC_MIC_SVG = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2z"/></svg>';
+function recSupported_() { return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder); }
+function recActive_() { return !!(_rec && _rec.recorder && _rec.recorder.state === 'recording'); }
+function recordMicHtml_() {
+  if (!recSupported_()) return '';
+  return `<button class="rec-mic${recActive_() ? ' on' : ''}" onclick="toggleRecording_()" title="${recActive_() ? 'Stop recording' : 'Record yourself playing'}" aria-label="${recActive_() ? 'Stop recording' : 'Record yourself playing'}">${REC_MIC_SVG}</button>`;
+}
+function recPickMime_() {
+  const types = ['audio/mp4;codecs=mp4a.40.2', 'audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus'];
+  for (const t of types) { try { if (MediaRecorder.isTypeSupported(t)) return t; } catch (e) {} }
+  return '';
+}
+function recExt_(mime) { return /mp4/.test(mime) ? 'm4a' : /ogg/.test(mime) ? 'ogg' : 'webm'; }
+function recFmt_(ms) { const sec = Math.max(0, Math.floor(ms / 1000)); return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0'); }
+function recRefreshUi_() {
+  document.querySelectorAll('.rec-mic').forEach(b => { b.classList.toggle('on', recActive_()); });
+  let bar = document.getElementById('recBar');
+  if (recActive_()) {
+    if (!bar) { bar = document.createElement('div'); bar.id = 'recBar'; document.body.appendChild(bar); }
+    bar.innerHTML = `<span><span class="dot"></span>Recording <b>${recFmt_(Date.now() - _rec.startedAt)}</b></span><button onclick="stopRecording_()">■ Stop</button>`;
+  } else if (bar) bar.remove();
+}
+function toggleRecording_() { recActive_() ? stopRecording_() : startRecording_(); }
+async function startRecording_() {
+  if (recActive_()) return;
+  discardRecording_();
+  const song = songs.find(x => x.id === view.id);
+  let stream;
+  try {
+    // Music, not a phone call: turn off the voice "clean-up" so the guitar sounds natural.
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+  } catch (e) {
+    alert(e && e.name === 'NotAllowedError'
+      ? 'To record, allow the app to use the microphone (in your browser or phone settings), then try again.'
+      : 'Recording isn’t available on this device right now.');
+    return;
+  }
+  const mime = recPickMime_();
+  let recorder;
+  try { recorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream); }
+  catch (e) { stream.getTracks().forEach(t => t.stop()); alert('Recording isn’t available on this device right now.'); return; }
+  _rec = { recorder, stream, chunks: [], startedAt: Date.now(), title: (song && (song.title || song.title_hebrew)) || 'Song', mime: recorder.mimeType || mime || 'audio/webm' };
+  recorder.ondataavailable = e => { if (e.data && e.data.size) _rec.chunks.push(e.data); };
+  recorder.onstop = () => recFinished_();
+  // The phone ended the microphone (app sent to the background, a call...): keep what was recorded.
+  stream.getTracks().forEach(t => t.addEventListener('ended', () => { if (recActive_()) stopRecording_(); }));
+  recorder.start(1000);
+  _rec.timer = setInterval(recRefreshUi_, 1000);
+  acquireWakeLock_();
+  recRefreshUi_();
+}
+function stopRecording_() {
+  if (!recActive_()) return;
+  try { _rec.recorder.stop(); } catch (e) { recFinished_(); }
+}
+function recFinished_() {
+  if (!_rec || _rec.blob) return;
+  clearInterval(_rec.timer);
+  try { _rec.stream.getTracks().forEach(t => t.stop()); } catch (e) {}
+  _rec.duration = Date.now() - _rec.startedAt;
+  const type = String(_rec.mime).split(';')[0] || 'audio/webm';
+  _rec.blob = new Blob(_rec.chunks, { type });
+  _rec.chunks = [];
+  _rec.url = URL.createObjectURL(_rec.blob);
+  const safe = String(_rec.title).replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'Song';
+  _rec.fileName = `${safe} – recording.${recExt_(type)}`;
+  try { _rec.file = new File([_rec.blob], _rec.fileName, { type }); } catch (e) { _rec.file = null; }
+  recRefreshUi_();
+  if (!playerState.playing) releaseWakeLock_();
+  if (!_rec.blob.size) { discardRecording_(); alert('Nothing was recorded - please try again.'); return; }
+  showRecordingResult_();
+}
+function recCanShare_() {
+  try { return !!(_rec && _rec.file && navigator.canShare && navigator.canShare({ files: [_rec.file] })); } catch (e) { return false; }
+}
+function showRecordingResult_() {
+  if (!_rec || !_rec.url) return;
+  openModal(`<h2>Recording ready</h2>
+    <p class="muted" style="margin-top:-4px;">Listen back, then share it or save it to your phone.</p>
+    <audio controls src="${_rec.url}" style="width:100%;margin:6px 0 4px;"></audio>
+    <div class="muted" style="font-size:12.5px;word-break:break-all;margin-bottom:10px;" dir="auto">${escapeHtml(_rec.fileName)} · ${recFmt_(_rec.duration)}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      ${recCanShare_() ? `<button class="btn" style="flex:1;" onclick="shareRecording_()">Share…</button>` : ''}
+      <button class="btn${recCanShare_() ? ' secondary' : ''}" style="flex:1;" onclick="saveRecording_()">Save to phone</button>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;">
+      <button class="btn secondary" style="color:#d93636;border-color:#d93636;" onclick="deleteRecordingAsk_()">Delete</button>
+      <button class="btn secondary" onclick="doneRecording_()">Done</button>
+    </div>
+    <p class="muted" style="font-size:11.5px;text-align:center;margin:12px 0 0;">Nothing is saved in the app. Once you close this, the recording only exists where you shared or saved it.</p>`);
+  // Only the buttons close it - so a stray tap outside doesn't lose the recording.
+  const bd = document.getElementById('modalBackdrop'); if (bd) bd.onclick = null;
+  document.removeEventListener('keydown', modalEscHandler_);
+}
+async function shareRecording_() {
+  if (!_rec || !_rec.file) return;
+  try { await navigator.share({ files: [_rec.file], title: _rec.fileName }); _rec.kept = true; }
+  catch (e) { if (e && e.name !== 'AbortError') alert('Couldn’t share - try “Save to phone” instead.'); }
+}
+function saveRecording_() {
+  if (!_rec || !_rec.url) return;
+  const a = document.createElement('a');
+  a.href = _rec.url; a.download = _rec.fileName; a.style.display = 'none';
+  document.body.appendChild(a); a.click(); setTimeout(() => a.remove(), 1000);
+  _rec.kept = true;
+}
+function discardRecording_() {
+  if (!_rec) return;
+  if (recActive_()) return;
+  try { clearInterval(_rec.timer); } catch (e) {}
+  try { if (_rec.stream) _rec.stream.getTracks().forEach(t => t.stop()); } catch (e) {}
+  try { if (_rec.url) URL.revokeObjectURL(_rec.url); } catch (e) {}
+  _rec = null;
+  recRefreshUi_();
+}
+async function deleteRecordingAsk_() {
+  const ok = await customConfirmAsync('Delete this recording? It can’t be recovered.', { title: 'Delete recording', confirmLabel: 'Delete', danger: true });
+  if (ok) { discardRecording_(); showToast('Recording deleted.'); } else showRecordingResult_();
+}
+async function doneRecording_() {
+  if (_rec && !_rec.kept) {
+    const ok = await customConfirmAsync('You haven’t shared or saved this recording yet. Close it anyway? It will be deleted.', { title: 'Close recording', confirmLabel: 'Close and delete', danger: true });
+    if (!ok) { showRecordingResult_(); return; }
+  }
+  closeModal(); discardRecording_();
+}
 function playFloatBarHtml() {
   const posStyle = floatBarPos ? `left:${floatBarPos.x}px; top:${floatBarPos.y}px; right:auto; bottom:auto; transform:none;` : '';
   return `<div class="play-float-bar" id="playFloatBar" style="${posStyle}">
