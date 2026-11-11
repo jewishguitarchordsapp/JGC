@@ -1605,6 +1605,8 @@ Object.assign(HE_UI, {
     [/^· bass (.+)$/, m => '· בס ' + m[1]],
     [/^React (.+)$/, m => 'תגובה ' + m[1]],
     [/^Could not save offline: (.+)$/, m => 'לא הצלחנו לשמור לשימוש ללא אינטרנט: ' + m[1]],
+    [/^You can keep up to (\d+) songs offline on this device\. You already have (\d+) saved, and this would make (\d+)\. Remove another offline playlist first, or save a smaller one\.$/, m => `אפשר לשמור עד ${m[1]} שירים לשימוש ללא אינטרנט במכשיר הזה. כבר שמורים ${m[2]}, ועם זה יהיו ${m[3]}. צריך להסיר קודם רשימה שמורה אחרת, או לשמור רשימה קטנה יותר.`],
+    [/^You can keep up to (\d+) songs offline on this device, and this has (\d+)\. Try a smaller playlist\.$/, m => `אפשר לשמור עד ${m[1]} שירים לשימוש ללא אינטרנט במכשיר הזה, וכאן יש ${m[2]}. כדאי לנסות רשימה קטנה יותר.`],
     [/^(\d+) songs?$/, m => m[1] === '1' ? 'שיר אחד' : m[1] + ' שירים']
   );
 })();
@@ -4500,7 +4502,25 @@ async function ensureContentFor(ids) {
 // Saves the given songs into IndexedDB under setId/title, available offline
 // from then on. Throws if fetching any song's full text fails (e.g. no
 // connection right now) — the caller shows that as an alert.
+// Most songs one device may keep saved offline, across Favorites and all
+// playlists together (each song counts once).
+const OFFLINE_MAX_SONGS = 250;
+async function offlineRoom_(setId, songIds) {
+  let sets = [];
+  try { sets = await offlineDb.getAllSets(); } catch (e) {}
+  const others = new Set();
+  sets.forEach(st => { if (st.id !== setId) (st.songIds || []).forEach(id => others.add(id)); });
+  const all = new Set(others); songIds.forEach(id => all.add(id));
+  return { ok: all.size <= OFFLINE_MAX_SONGS, others: others.size, total: all.size };
+}
+function offlineFullMsg_(r) {
+  return r.others
+    ? `You can keep up to ${OFFLINE_MAX_SONGS} songs offline on this device. You already have ${r.others} saved, and this would make ${r.total}. Remove another offline playlist first, or save a smaller one.`
+    : `You can keep up to ${OFFLINE_MAX_SONGS} songs offline on this device, and this has ${r.total}. Try a smaller playlist.`;
+}
 async function setOfflineAvailable(setId, title, songIds) {
+  const room = await offlineRoom_(setId, songIds);
+  if (!room.ok) throw new Error(offlineFullMsg_(room));
   await ensureContentFor(songIds);
   const fullSongs = songIds.map(id => songs.find(s => s.id === id)).filter(Boolean).map(s => ({
     id: s.id, title: s.title, title_hebrew: s.title_hebrew || '', artist: s.artist || '', artist_hebrew: s.artist_hebrew || '',
@@ -6859,6 +6879,7 @@ async function toggleFavoritesOffline() {
   } else {
     const ids = effectiveFavorites().slice();
     if (!ids.length) { alert('Favorite a few songs first.'); return; }
+    { const room = await offlineRoom_('favorites', ids); if (!room.ok) { alert(offlineFullMsg_(room)); return; } }
     if (!(await customConfirmAsync('Make favorites available offline on this device?', { title: 'Available Offline', confirmLabel: 'Make Available' }))) return;
     if (btn) btn.disabled = true;
     try {
@@ -8973,6 +8994,7 @@ async function togglePlaylistOffline(playlistId) {
   } else {
     const ids = p ? (p.song_ids || []).slice() : [];
     if (!ids.length) { alert('This playlist has no songs yet.'); return; }
+    { const room = await offlineRoom_(setId, ids); if (!room.ok) { alert(offlineFullMsg_(room)); return; } }
     if (!(await customConfirmAsync(`Make "${playlistName}" available offline on this device?`, { title: 'Available Offline', confirmLabel: 'Make Available' }))) return;
     if (btn) btn.disabled = true;
     try {
