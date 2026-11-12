@@ -204,6 +204,15 @@
   }
   .yt-wrap{position:relative;padding-bottom:56.25%;height:0;margin:16px 0;border-radius:8px;overflow:hidden;}
   .yt-wrap iframe{position:absolute;top:0;left:0;width:100%;height:100%;border:0;}
+  /* The song's YouTube video lives OUTSIDE the re-drawn song page (#ytHost,
+     right after <main>) so it keeps playing when autoscroll starts or the
+     page re-draws. During autoscroll it shrinks to a small player in the
+     corner. */
+  #ytHost{max-width:920px;margin:0 auto;padding:0 18px 90px;}
+  #ytHost:empty{display:none;}
+  #ytHost.yt-mini{position:fixed;left:10px;bottom:calc(74px + env(safe-area-inset-bottom));width:176px;max-width:45vw;margin:0;padding:0;z-index:45;box-shadow:0 6px 18px rgba(0,0,0,.3);border-radius:8px;}
+  #ytHost.yt-mini .yt-wrap{margin:0;background:#000;}
+  main.admin-wide ~ #ytHost{display:none;}
   label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px;}
   form .row{display:flex;gap:12px;flex-wrap:wrap;}
   form .row > div{flex:1;min-width:180px;}
@@ -5781,7 +5790,25 @@ const CHORD_QUALITIES = ['maj13','maj11','maj9','maj7','maj','min13','min11','mi
   '13','11','9','7','6','5','4','2'];
 const CHORD_TOKEN_RE = new RegExp('^[A-G](#|b|♯|♭)?(' + CHORD_QUALITIES.join('|') + ')?(\\/[A-G](#|b|♯|♭)?)?$');
 const CHORD_LINE_SPECIAL_RE = /^(%|-{1,2}|N\.?C\.?|x\d+)$/i;
-function isChordToken(tok) { return CHORD_TOKEN_RE.test(tok) || CHORD_LINE_SPECIAL_RE.test(tok); }
+// Chords typed with no spaces between them, e.g. "EmEmD#mBm" -> Em Em D#m Bm.
+const CHORD_RUN_PART_RE = new RegExp('[A-G](?:#|b|♯|♭)?(?:' + CHORD_QUALITIES.join('|') + ')?(?:\\/[A-G](?:#|b|♯|♭)?)?', 'y');
+function splitChordRun_(tok) {
+  if (!tok || tok.length < 2) return null;
+  const parts = []; let i = 0;
+  while (i < tok.length) {
+    CHORD_RUN_PART_RE.lastIndex = i;
+    const m = CHORD_RUN_PART_RE.exec(tok);
+    if (!m || !m[0]) return null;
+    parts.push(m[0]); i += m[0].length;
+  }
+  return parts.length >= 2 ? parts : null;
+}
+function isChordToken(tok) { return CHORD_TOKEN_RE.test(tok) || CHORD_LINE_SPECIAL_RE.test(tok) || !!splitChordRun_(tok); }
+// Spaces out run-together chords on a chord line so each one is red, can be
+// transposed and tapped: "EmEmD#mBm" -> "Em Em D#m Bm".
+function spaceOutChordRuns_(line) {
+  return line.replace(/\S+/g, t => (CHORD_TOKEN_RE.test(t) || CHORD_LINE_SPECIAL_RE.test(t)) ? t : ((splitChordRun_(t) || [t]).join(' ')));
+}
 function looksLikeChordLine(line) {
   const t = line.trim();
   if (!t) return false;
@@ -5807,8 +5834,10 @@ function buildChordHtmlFromPlainText(text, aligns) {
     const line = lines[i];
     if (line.trim() === '') { out.push('<p class="black">&nbsp;</p>'); continue; }
     if (looksLikeChordLine(line)) {
-      out.push(`<p class="red"${al(i)}>${supChordExtensions_(escapeHtml(line))}</p>`);
-      if (i + 1 < lines.length) {
+      out.push(`<p class="red"${al(i)}>${supChordExtensions_(escapeHtml(spaceOutChordRuns_(line)))}</p>`);
+      // Another chord line right below (an intro / instrumental part): it
+      // gets its own red line instead of being treated as lyrics.
+      if (i + 1 < lines.length && !(lines[i + 1].trim() !== '' && looksLikeChordLine(lines[i + 1]))) {
         const next = lines[i + 1];
         out.push(`<p class="black"${next.trim() === '' ? '' : al(i + 1)}>${next.trim() === '' ? '&nbsp;' : escapeHtml(next)}</p>`);
         i++;
@@ -7580,7 +7609,7 @@ function renderDetail() {
     </div>` : ''}`}
 
     <div id="chartScroll" class="${playerState.showChords ? '' : 'hide-chords'}${playerState.playing ? ' chart-playing' : ''}" style="--chart-step:${playerState.fontSize||0}px;--chart-fw:${playerState.bold?700:400};">${contentReady ? renderChart(song.chords_lyrics, transpose) : (song._contentError ? (song._contentLimited ? `<div class="muted" style="padding:24px 4px">${escapeHtml(CHART_LIMIT_MSG)}</div>` : `<div class="muted" style="padding:24px 4px">Couldn’t load this chart — the connection is slow right now. <button class="btn" onclick="retrySongText_('${escapeHtml(song.id)}')">Try again</button></div>`) : '<div class="muted" style="padding:24px 4px">Loading chart…</div>')}</div>
-    ${playerState.playing ? '' : `${ytId ? `<div class="yt-wrap"><iframe src="https://www.youtube.com/embed/${ytId}" allowfullscreen></iframe></div>` : ''}
+    ${playerState.playing ? '' : `
     <div class="grid-cats" style="margin-top:10px">${tags.map(t=>`<span class="chip">${escapeHtml(t)}</span>`).join('')}${languages.map(l=>`<span class="chip">${escapeHtml(l)}</span>`).join('')}</div>`}
     ${playerState.playing ? playFloatBarHtml() : ''}`;
 
@@ -7599,6 +7628,28 @@ function renderDetail() {
   if (wasScrolling) startScroll(true);
   if (playerState.playing) initPlayFloatBar();
   if (contentReady) fitChordsUsedChips();
+  syncYouTube_(ytId, playerState.playing);
+}
+// Keeps ONE YouTube player per song, outside the re-drawn page, so the
+// music doesn't stop when autoscroll starts (or the page re-draws for
+// favoriting, transposing, etc.). Only class changes after it's created,
+// which never reloads it. Removed when leaving the song.
+function syncYouTube_(ytId, mini) {
+  const app = document.getElementById('app');
+  let host = document.getElementById('ytHost');
+  if (!ytId || view.name !== 'detail') {
+    if (host) { host.innerHTML = ''; host.dataset.yt = ''; host.className = ''; }
+    return;
+  }
+  if (!host) {
+    host = document.createElement('div'); host.id = 'ytHost';
+    if (app && app.parentNode) app.parentNode.insertBefore(host, app.nextSibling); else document.body.appendChild(host);
+  }
+  if (host.dataset.yt !== ytId) {
+    host.innerHTML = `<div class="yt-wrap"><iframe src="https://www.youtube.com/embed/${encodeURIComponent(ytId)}?playsinline=1" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></div>`;
+    host.dataset.yt = ytId;
+  }
+  host.classList.toggle('yt-mini', !!mini);
 }
 
 // Shrinks the "Chords in song: ..." chip row (via the --cu-scale CSS
@@ -11363,6 +11414,7 @@ function renderHeaderTitle() {
 }
 function render() {
   const appEl = document.getElementById('app');
+  if (view.name !== 'detail') syncYouTube_(null);
   if (appEl) appEl.classList.toggle('admin-wide', view.name === 'admin');
   renderHeaderTitle();
   renderNav();
