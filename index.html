@@ -178,6 +178,8 @@
      replaces the normal playback row with a small floating, draggable strip
      (play/pause + speed) so it can be moved out of the way while playing. */
   #chartScroll.chart-playing{max-height:78vh;}
+  /* Room at the end so the last lines can scroll up above the small video player. */
+  #chartScroll.chart-playing.has-yt{padding-bottom:calc(320px + env(safe-area-inset-bottom));}
   .play-float-bar{position:fixed;right:22px;top:50%;transform:translateY(-50%);z-index:40;background:#fff;border:1px solid var(--border);border-radius:999px;box-shadow:0 6px 20px rgba(0,0,0,0.22);padding:16px 6px;display:flex;flex-direction:column;align-items:center;gap:10px;touch-action:none;user-select:none;}
   .play-float-bar .drag-handle{cursor:grab;color:var(--muted);display:flex;align-items:center;justify-content:center;width:34px;height:22px;flex:none;touch-action:none;}
   .play-float-bar .drag-handle:active{cursor:grabbing;}
@@ -210,8 +212,9 @@
      corner. */
   #ytHost{max-width:920px;margin:0 auto;padding:0 18px 90px;}
   #ytHost:empty{display:none;}
-  #ytHost.yt-mini{position:fixed;left:10px;bottom:calc(74px + env(safe-area-inset-bottom));width:176px;max-width:45vw;margin:0;padding:0;z-index:45;box-shadow:0 6px 18px rgba(0,0,0,.3);border-radius:8px;}
-  #ytHost.yt-mini .yt-wrap{margin:0;background:#000;}
+  /* YouTube's embed rules: the player must be at least 200 x 200 px. */
+  #ytHost.yt-mini{position:fixed;left:10px;bottom:calc(74px + env(safe-area-inset-bottom));width:200px;margin:0;padding:0;z-index:45;box-shadow:0 6px 18px rgba(0,0,0,.3);border-radius:8px;}
+  #ytHost.yt-mini .yt-wrap{margin:0;background:#000;padding-bottom:0;height:200px;}
   main.admin-wide ~ #ytHost{display:none;}
   label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px;}
   form .row{display:flex;gap:12px;flex-wrap:wrap;}
@@ -4603,6 +4606,7 @@ window.addEventListener('online', () => setOffline(false));
    ============================================================ */
 const NOTES_SHARP = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 const NOTES_FLAT  = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
+const TRANSPOSE_NAMES = ['C','C#','D','Eb','E','F','F#','G','Ab','A','Bb','B'];
 
 function noteIndex(note) { let i = NOTES_SHARP.indexOf(note); if (i >= 0) return i; return NOTES_FLAT.indexOf(note); }
 
@@ -4634,14 +4638,18 @@ function transposeChord(chord, semitones) {
   let rest = m[3] || ''; let bass = null;
   const slash = rest.match(/^(.*)\/([A-Ga-g])(#|b)?$/);
   if (slash) { rest = slash[1]; bass = slash[2].toUpperCase() + (slash[3] || ''); }
-  const preferFlat = root.indexOf('b') >= 0;
   const idx = noteIndex(root);
   if (idx < 0) return chord;
   const newIdx = ((idx + semitones) % 12 + 12) % 12;
-  let result = (preferFlat ? NOTES_FLAT : NOTES_SHARP)[newIdx] + rest;
+  // Black keys are named the way most players read them (a user request):
+  // C#, Eb, F#, Ab, Bb - except minor chords on G#, which are usually
+  // written G#m rather than Abm.
+  const isMinor = /^m(?!aj)/.test(rest);
+  const name = (isMinor && newIdx === 8) ? 'G#' : TRANSPOSE_NAMES[newIdx];
+  let result = name + rest;
   if (bass) {
     const bIdx = noteIndex(bass);
-    if (bIdx >= 0) { const newBIdx = ((bIdx + semitones) % 12 + 12) % 12; result += '/' + (preferFlat ? NOTES_FLAT : NOTES_SHARP)[newBIdx]; }
+    if (bIdx >= 0) { const newBIdx = ((bIdx + semitones) % 12 + 12) % 12; result += '/' + TRANSPOSE_NAMES[newBIdx]; }
     else result += '/' + bass;
   }
   return result;
@@ -7608,7 +7616,7 @@ function renderDetail() {
       </div>
     </div>` : ''}`}
 
-    <div id="chartScroll" class="${playerState.showChords ? '' : 'hide-chords'}${playerState.playing ? ' chart-playing' : ''}" style="--chart-step:${playerState.fontSize||0}px;--chart-fw:${playerState.bold?700:400};">${contentReady ? renderChart(song.chords_lyrics, transpose) : (song._contentError ? (song._contentLimited ? `<div class="muted" style="padding:24px 4px">${escapeHtml(CHART_LIMIT_MSG)}</div>` : `<div class="muted" style="padding:24px 4px">Couldn’t load this chart — the connection is slow right now. <button class="btn" onclick="retrySongText_('${escapeHtml(song.id)}')">Try again</button></div>`) : '<div class="muted" style="padding:24px 4px">Loading chart…</div>')}</div>
+    <div id="chartScroll" class="${playerState.showChords ? '' : 'hide-chords'}${playerState.playing ? ' chart-playing' : ''}${playerState.playing && ytId ? ' has-yt' : ''}" style="--chart-step:${playerState.fontSize||0}px;--chart-fw:${playerState.bold?700:400};">${contentReady ? renderChart(song.chords_lyrics, transpose) : (song._contentError ? (song._contentLimited ? `<div class="muted" style="padding:24px 4px">${escapeHtml(CHART_LIMIT_MSG)}</div>` : `<div class="muted" style="padding:24px 4px">Couldn’t load this chart — the connection is slow right now. <button class="btn" onclick="retrySongText_('${escapeHtml(song.id)}')">Try again</button></div>`) : '<div class="muted" style="padding:24px 4px">Loading chart…</div>')}</div>
     ${playerState.playing ? '' : `
     <div class="grid-cats" style="margin-top:10px">${tags.map(t=>`<span class="chip">${escapeHtml(t)}</span>`).join('')}${languages.map(l=>`<span class="chip">${escapeHtml(l)}</span>`).join('')}</div>`}
     ${playerState.playing ? playFloatBarHtml() : ''}`;
