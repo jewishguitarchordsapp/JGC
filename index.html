@@ -77,6 +77,14 @@
      scrolling), unlike the plain text .subtabs used elsewhere (admin nav,
      Simple/Advanced, LTR/RTL, Left/Right toggles). */
   .subtabs.song-tabs{overflow-x:visible;}
+  /* Admin second row (Song Requests / Messages / Error Reports, All Users /
+     Lots of Songs Opened / Username Accounts, Overview / Top Songs): pills,
+     like the filter buttons on the Users list. */
+  #adminNav{border-bottom:none;gap:6px;flex-wrap:wrap;overflow-x:visible;}
+  #adminNav:empty{display:none;}
+  #adminNav button{border:1px solid var(--border);border-radius:999px;padding:6px 14px;font-size:13.5px;background:var(--card,#fff);color:var(--teal-dark);}
+  #adminNav button.active{background:var(--teal);border-color:var(--teal);color:#fff;font-weight:600;}
+  @media (max-width:600px){ #adminNav button{padding:5px 11px;font-size:12.5px;} }
   .subtabs.song-tabs button{flex-direction:column;justify-content:flex-start;gap:5px;flex:1 1 0;min-width:0;white-space:normal;text-align:center;font-size:13px;padding:9px 4px;}
   .subtabs.song-tabs button svg{width:18px;height:18px;}
   .song-row{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;background:var(--card);border:none;border-bottom:1px solid var(--border);border-radius:0;margin-bottom:0;cursor:pointer;}
@@ -1834,7 +1842,7 @@ let adminTab = 'requests'; // 'requests' | 'messages' | 'errors' | 'users' | 'to
 let adminSection = 'communication'; // 'communication' | 'users' | 'stats' | 'backup'
 const ADMIN_SECTIONS = {
   communication: { tabs: ['requests', 'messages', 'errors'], default: 'requests' },
-  users:         { tabs: ['users'],                          default: 'users' },
+  users:         { tabs: ['users', 'activity', 'usernames'], default: 'users' },
   stats:         { tabs: ['overview', 'topSongs'],            default: 'overview' },
   // Its own top-level section (not a toolbar living on every tab - see the
   // old renderAdminToolbar()) with one pane, same shape as Users above.
@@ -10003,6 +10011,8 @@ function renderAdmin() {
   else if (adminTab === 'topSongs') renderAdminTopSongs();
   else if (adminTab === 'overview') loadAdminStatsOverview();
   else if (adminTab === 'backup') renderAdminBackup();
+  else if (adminTab === 'activity') { document.getElementById('adminBody').innerHTML = '<div id="chartAlertsCard"><div class="muted">Loading…</div></div>'; loadChartAlerts_(); loadDeviceMatches_(); }
+  else if (adminTab === 'usernames') { document.getElementById('adminBody').innerHTML = '<div id="usernameAccountsCard"><div class="muted">Loading…</div></div>'; loadUsernameAccounts_(); loadDeviceMatches_(); }
   else loadAdminUsers();
   // The unread badge (Messages tab) and the per-user unread dot (Users tab)
   // used to require downloading the ENTIRE messages table — every message
@@ -10053,6 +10063,11 @@ function renderAdminNav() {
       <button class="${adminTab==='requests'?'active':''}" onclick="goAdminTab('requests')">Song Requests${adminTab==='requests' ? '' : tabBadgeHtml(adminBadge.newReq)}</button>
       <button class="${adminTab==='messages'?'active':''}" onclick="goAdminTab('messages')">Messages${tabBadgeHtml(unread)}</button>
       <button class="${adminTab==='errors'?'active':''}" onclick="goAdminTab('errors')">Error Reports</button>`;
+  } else if (adminSection === 'users') {
+    nav.innerHTML = `
+      <button class="${adminTab==='users'?'active':''}" onclick="goAdminTab('users')">All Users</button>
+      <button class="${adminTab==='activity'?'active':''}" onclick="goAdminTab('activity')">Lots of Songs Opened${tabBadgeHtml(adminBadge.heavy || 0)}</button>
+      <button class="${adminTab==='usernames'?'active':''}" onclick="goAdminTab('usernames')">Username Accounts${tabBadgeHtml(adminBadge.pendingAccounts || 0)}</button>`;
   } else if (adminSection === 'stats') {
     nav.innerHTML = `
       <button class="${adminTab==='overview'?'active':''}" onclick="goAdminTab('overview')">Overview</button>
@@ -11141,8 +11156,8 @@ function loadChartAlerts_() {
   api('getChartAlerts', {}).then(d => {
     chartAlerts = d.alerts;
     renderChartAlertsCard_();
-    if (chartAlerts && chartAlerts.some(a => !a.seen)) {
-      api('markChartAlertsSeen', {}).then(() => { adminBadge.heavy = 0; updateBadges_(); try { renderAdminSectionNav(); } catch (e) {} }).catch(() => {});
+    if (adminTab === 'activity' && chartAlerts && chartAlerts.some(a => !a.seen)) {
+      api('markChartAlertsSeen', {}).then(() => { adminBadge.heavy = 0; updateBadges_(); try { renderAdminSectionNav(); renderAdminNav(); } catch (e) {} }).catch(() => {});
     }
   }).catch(() => {});
 }
@@ -11259,7 +11274,7 @@ async function blockUserFromAlert_(profileId, block) {
 }
 let usernameAccounts = null;
 function loadUsernameAccounts_() {
-  api('getUsernameAccounts', {}).then(d => { usernameAccounts = d.accounts; adminBadge.pendingAccounts = (usernameAccounts || []).filter(a => a.pending).length; renderUsernameAccountsCard_(); try { renderUsersList(); } catch (e) {} updateBadges_(); try { renderAdminSectionNav(); } catch (e) {} }).catch(() => {});
+  api('getUsernameAccounts', {}).then(d => { usernameAccounts = d.accounts; adminBadge.pendingAccounts = (usernameAccounts || []).filter(a => a.pending).length; renderUsernameAccountsCard_(); try { renderUsersList(); } catch (e) {} updateBadges_(); try { renderAdminSectionNav(); renderAdminNav(); } catch (e) {} }).catch(() => {});
 }
 function renderUsernameAccountsCard_() {
   const el = document.getElementById('usernameAccountsCard'); if (!el) return;
@@ -11269,13 +11284,13 @@ function renderUsernameAccountsCard_() {
   }
   const list = usernameAccounts || [];
   if (!list.length) {
-    el.innerHTML = `<div class="card"><b>Username accounts</b><div class="muted" style="font-size:12.5px;margin-top:4px;">No one has signed up with a username yet. When someone does, they'll appear here for you to approve.</div></div>`;
+    el.innerHTML = `<div class="card"><b>Username accounts</b><div class="muted" style="font-size:12.5px;margin-top:4px;">There are no username accounts. New username sign-ups are turned off.</div></div>`;
     return;
   }
   const pending = list.filter(a => a.pending);
   el.innerHTML = `<div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><b>Username accounts</b><span class="muted" style="font-size:12.5px;">${pending.length ? `${pending.length} waiting for approval` : 'none waiting'}</span></div>
-    <div class="muted" style="font-size:12px;margin:2px 0 6px;">People who can’t use Google sign-in. New ones can’t use the app until you approve them.</div>
+    <div class="muted" style="font-size:12px;margin:2px 0 6px;">People who can’t use Google sign-in. New username sign-ups are turned off; these are the existing ones.</div>
     <div style="max-height:320px;overflow-y:auto;">${list.map(a => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 2px;border-top:1px solid var(--border);flex-wrap:wrap;">
       <div style="min-width:0;"><div dir="auto"><b>${escapeHtml(a.name || a.username)}</b> ${a.pending ? '<span class="badge pending">Waiting</span>' : a.rejected ? '<span class="badge declined">Rejected</span>' : ''}</div>
         <div class="muted" style="font-size:12px;">@${escapeHtml(a.username)} · ${a.created_at ? new Date(a.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : ''}</div>${a.country || a.ip ? `<div class="muted" style="font-size:12px;">${a.country ? countryFlag_(a.country) + ' ' + escapeHtml(countryName_(a.country)) : ''}${a.country && a.ip ? ' · ' : ''}${a.ip ? 'IP ' + escapeHtml(a.ip) : ''}</div>` : ''}${deviceMatchHtml_(a.id)}</div>
@@ -11304,7 +11319,7 @@ function renderUsersTable() {
   // focus after every single character typed. Building it once here and
   // only ever touching the container below it keeps focus (and cursor
   // position) intact.
-  body.innerHTML = `<div class="users-layout"><div class="users-main"><div style="margin-bottom:10px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+  body.innerHTML = `<div><div style="margin-bottom:10px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
       <input type="text" id="userSearchBox" placeholder="Search by name or email…" value="${escapeHtml(userSearch)}" style="max-width:320px;flex:1;min-width:180px;">
       <select id="userSortSelect" style="max-width:220px;">
         <option value="name" ${userSort==='name'?'selected':''}>Sort: Name (A–Z)</option>
@@ -11314,11 +11329,8 @@ function renderUsersTable() {
       <button class="btn secondary" onclick="refreshAdminUsers_()" title="Download a fresh copy of the users list">↻ Refresh</button>
     </div>
     <div id="userStatusChips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;"></div>
-    <div id="usersListContainer"></div></div>
-    <aside class="users-side"><div id="chartAlertsCard"></div><div id="usernameAccountsCard"></div></aside></div>`;
-  loadUsernameAccounts_();
-  loadChartAlerts_();
-  loadDeviceMatches_();
+    <div id="usersListContainer"></div></div>`;
+  loadUsernameAccounts_(); // keeps the list's username-account filtering + badge current
   loadAccountStatuses_();
   const box = document.getElementById('userSearchBox');
   if (box) box.addEventListener('input', e => { userSearch = e.target.value; usersPage = 0; renderUsersList(); });
