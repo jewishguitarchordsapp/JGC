@@ -1291,6 +1291,9 @@ Object.assign(HE_UI, {
   "🎵 Request it": "🎵 בקשו אותו",
   "Remove your favorites from offline storage on this device?": "להסיר את המועדפים מהשמירה ללא אינטרנט במכשיר הזה?",
   "Remove offline copy": "הסרת העותק השמור",
+  "Have a username account? Sign in here": "יש לך חשבון עם שם משתמש? התחברות כאן",
+  "For existing username accounts only. New accounts can only be made with Google.": "רק לחשבונות קיימים עם שם משתמש. חשבונות חדשים אפשר ליצור רק עם Google.",
+  "New username accounts are no longer available - please sign in with Google.": "כבר אי אפשר ליצור חשבונות חדשים עם שם משתמש — נא להתחבר עם Google.",
   "Recording": "מקליט",
   "■ Stop": "■ עצירה",
   "Recording ready": "ההקלטה מוכנה",
@@ -2158,7 +2161,9 @@ const USERNAME_RE = /^[a-z0-9][a-z0-9._-]{2,29}$/;
 function isUsernameAccount_(email) { return String(email || '').toLowerCase().endsWith('@' + USERNAME_DOMAIN); }
 function usernameOf_(email) { return isUsernameAccount_(email) ? String(email).split('@')[0] : String(email || ''); }
 function openUsernameSignIn_(mode) {
-  const up = mode === 'signup';
+  // New username accounts are no longer offered (Nov 2026) - existing ones
+  // can still sign in.
+  const up = false;
   openModal(`<h2 style="margin-top:0">${up ? 'Create an account' : 'Sign in with a username'}</h2>
     ${up ? `<p class="muted" style="margin-top:-6px;font-size:13px;">For people who can’t use Google sign-in. New accounts are approved by us before they can be used.</p>
     <label>Your name</label><input type="text" id="unName" dir="auto" autocomplete="name">` : ''}
@@ -2170,7 +2175,7 @@ function openUsernameSignIn_(mode) {
     <div class="modal-actions"><span id="unStatus" class="status"></span><button class="btn secondary" onclick="closeModal()">Cancel</button><button class="btn" id="unGo" onclick="${up ? 'usernameSignUp_()' : 'usernameSignIn_()'}">${up ? 'Create account' : 'Sign in'}</button></div>
     <div style="text-align:center;font-size:13px;margin-top:6px;">${up
       ? `Already have an account? <span class="adv-link" onclick="openUsernameSignIn_('signin')">Sign in</span>`
-      : `New here? <span class="adv-link" onclick="openUsernameSignIn_('signup')">Create an account</span><div class="muted" style="font-size:11.5px;margin-top:6px;">Forgot your password? Please get in touch with us and we’ll set a new one.</div>`}</div>`);
+      : `<div class="muted" style="font-size:12px;">For existing username accounts only. New accounts can only be made with Google.</div><div class="muted" style="font-size:11.5px;margin-top:6px;">Forgot your password? Please get in touch with us and we’ll set a new one.</div>`}</div>`);
   const first = document.getElementById(up ? 'unName' : 'unUser'); if (first) first.focus();
   ['unUser', 'unPass', 'unPass2'].forEach(id => { const el = document.getElementById(id); if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); document.getElementById('unGo').click(); } }); });
 }
@@ -2178,6 +2183,7 @@ function usernameErr_(msg) { const st = document.getElementById('unStatus'); if 
 function friendlyAuthError_(err) {
   const m = String((err && err.message) || err || '');
   if (/invalid login credentials/i.test(m)) return 'Wrong username or password.';
+  if (/no longer available/i.test(m)) return 'New username accounts are no longer available - please sign in with Google.';
   if (/already registered|already exists/i.test(m)) return 'That username is taken — please choose another.';
   if (/signups? not allowed|email.*disabled|provider is disabled/i.test(m)) return 'Username accounts aren’t available right now.';
   if (/rate limit|too many/i.test(m)) return 'Too many tries — please wait a few minutes and try again.';
@@ -2209,6 +2215,7 @@ async function usernameSignIn_() {
   } catch (e) { usernameErr_(friendlyAuthError_(e)); }
 }
 async function usernameSignUp_() {
+  usernameErr_('New username accounts are no longer available - please sign in with Google.'); return;
   const name = (document.getElementById('unName').value || '').trim();
   const u = (document.getElementById('unUser').value || '').trim().toLowerCase();
   const pw = document.getElementById('unPass').value || '', pw2 = document.getElementById('unPass2').value || '';
@@ -11442,7 +11449,7 @@ function render() {
         <h2>${t('signin_title')}</h2>
         <p class="muted">${t('signin_sub')}</p>
         <div id="gsiButtonContainerGate" style="display:flex;justify-content:center;margin-top:14px;"></div>
-        <div style="margin-top:18px;font-size:13px;"><span class="adv-link" onclick="openUsernameSignIn_('signin')">Can’t use Google? Sign in with a username</span></div>
+        <div style="margin-top:18px;font-size:13px;"><span class="adv-link" onclick="openUsernameSignIn_('signin')">Have a username account? Sign in here</span></div>
       </div>`;
     mountGateSignInButton();
     return;
