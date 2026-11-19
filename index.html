@@ -11161,6 +11161,19 @@ function loadChartAlerts_() {
     }
   }).catch(() => {});
 }
+// "By day" (one row per person per day) or "By person" (one entry per
+// person with all their days underneath) - remembered on this device.
+let chartAlertsGroup = (() => { try { return localStorage.getItem('jgc_alerts_group') === 'person'; } catch (e) { return false; } })();
+let chartAlertsOpenPeople = {};
+function setChartAlertsGroup_(on) {
+  chartAlertsGroup = !!on; chartAlertsShowAll = false;
+  try { localStorage.setItem('jgc_alerts_group', on ? 'person' : 'day'); } catch (e) {}
+  renderChartAlertsCard_();
+}
+function toggleChartAlertsPerson_(pid) { chartAlertsOpenPeople[pid] = !chartAlertsOpenPeople[pid]; renderChartAlertsCard_(); }
+function chartAlertDayDetailsHtml_(a) {
+  return `${a.level === 'limit' ? (a.unpaused_at ? ' (unpaused)' : a.pause_reason === 'suspicious' ? ' (paused: few opened on screen)' : a.pause_reason === 'ceiling' ? ' (paused: daily maximum)' : ' (paused)') : ''}`;
+}
 function renderChartAlertsCard_() {
   const el = document.getElementById('chartAlertsCard'); if (!el) return;
   if (chartAlerts === null) { el.innerHTML = ''; return; }
@@ -11173,17 +11186,68 @@ function renderChartAlertsCard_() {
   chartAlerts.forEach(a => { const k = a.profile_id + '|' + a.day; if (!byKey[k] || a.level === 'limit') byKey[k] = Object.assign({}, a, { seen: byKey[k] ? (byKey[k].seen && a.seen) : a.seen, auto_blocked: !!((byKey[k] && byKey[k].auto_blocked) || a.auto_blocked) }); });
   const rows = Object.values(byKey).sort((x, y) => String(y.day).localeCompare(String(x.day)) || y.songs - x.songs);
   const days = {}; chartAlerts.forEach(a => { days[a.profile_id] = days[a.profile_id] || new Set(); days[a.profile_id].add(a.day); });
-  const shown = chartAlertsShowAll ? rows : rows.slice(0, 8);
   const fmtDay = d => new Date(d + 'T12:00:00Z').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  const fmtShort = d => new Date(d + 'T12:00:00Z').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const blockBtn = a => `<button class="btn secondary" style="padding:5px 12px;font-size:12.5px;" onclick="event.stopPropagation();blockUserFromAlert_('${a.profile_id}', ${a.blocked ? 'false' : 'true'})">${a.blocked ? 'Unblock' : 'Block'}</button>`;
+  const statusBadges = a => `${a.blocked ? `<span class="badge declined">${a.auto_blocked ? 'Auto-blocked' : 'Blocked'}</span>` : ''}`;
+  // Full row (By day)
+  const dayRow = a => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 2px;border-top:1px solid var(--border);flex-wrap:wrap;">
+      <div style="min-width:0;"><div dir="auto"><b>${escapeHtml(a.name || a.email || '')}</b> ${a.seen ? '' : '<span class="badge pending">New</span>'} ${statusBadges(a)} ${repeatBadgeHtml_(days[a.profile_id], a.day)}</div>
+        <div class="muted" style="font-size:12px;">${escapeHtml(a.email || '')}${a.country ? ' · ' + countryFlag_(a.country) + ' ' + escapeHtml(countryName_(a.country)) : ''} · ${fmtDay(a.day)} · <b style="color:${a.level === 'limit' ? 'var(--danger,#c0392b)' : 'inherit'}">${a.songs} songs</b>${chartAlertDayDetailsHtml_(a)}</div>${chartAlertSpanHtml_(a)}${deviceMatchHtml_(a.profile_id)}${a.blocked && a.blocked_tries !== undefined ? `<div class="muted" style="font-size:12px;">${blockedTriesText_(a)}</div>` : ''}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">${unpauseBtnHtml_(a)}${blockBtn(a)}</div>
+    </div>`;
+  // Short row for one day inside a person (By person)
+  const subRow = a => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0 6px 12px;border-top:1px dashed var(--border);flex-wrap:wrap;">
+      <div style="min-width:0;"><div style="font-size:13px;">${a.seen ? '' : '<span class="badge pending">New</span> '}<b>${fmtDay(a.day)}</b> · <b style="color:${a.level === 'limit' ? 'var(--danger,#c0392b)' : 'inherit'}">${a.songs} songs</b>${chartAlertDayDetailsHtml_(a)}</div>${chartAlertSpanHtml_(a)}</div>
+      <div>${unpauseBtnHtml_(a)}</div>
+    </div>`;
+  const toggle = `<div style="display:flex;gap:6px;margin:6px 0 4px;">
+      <button class="chip" style="cursor:pointer;border:1px solid var(--border);${!chartAlertsGroup ? 'background:var(--teal);color:#fff;border-color:var(--teal);' : ''}" onclick="setChartAlertsGroup_(false)">By day</button>
+      <button class="chip" style="cursor:pointer;border:1px solid var(--border);${chartAlertsGroup ? 'background:var(--teal);color:#fff;border-color:var(--teal);' : ''}" onclick="setChartAlertsGroup_(true)">By person</button>
+    </div>`;
+  let body = '', total = 0, shownCount = 0;
+  if (!chartAlertsGroup) {
+    const shown = chartAlertsShowAll ? rows : rows.slice(0, 8);
+    body = shown.map(dayRow).join(''); total = rows.length; shownCount = shown.length;
+  } else {
+    const groups = {};
+    rows.forEach(a => { (groups[a.profile_id] = groups[a.profile_id] || []).push(a); });
+    // Most days first (the repeat visitors), then most recent.
+    const people = Object.values(groups).sort((x, y) => y.length - x.length || String(y[0].day).localeCompare(String(x[0].day)));
+    const shown = chartAlertsShowAll ? people : people.slice(0, 10);
+    body = shown.map(list => {
+      const a = list[0]; // most recent day
+      const n = list.length;
+      const songsTotal = list.reduce((t, r) => t + (r.songs || 0), 0);
+      const withScreen = list.filter(r => r.on_screen !== undefined && r.on_screen !== null);
+      const screenTotal = withScreen.reduce((t, r) => t + (r.on_screen || 0) + (r.bulk || 0), 0);
+      const screenSongs = withScreen.reduce((t, r) => t + (r.songs || 0), 0);
+      const pct = screenSongs ? Math.min(100, Math.round(screenTotal / screenSongs * 100)) : null;
+      const anyNew = list.some(r => !r.seen);
+      const color = n >= 3 ? 'var(--danger,#c0392b)' : n === 2 ? '#d97706' : '';
+      const open = !!chartAlertsOpenPeople[a.profile_id];
+      return `<div style="padding:9px 2px;border-top:1px solid var(--border);">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;cursor:pointer;" onclick="toggleChartAlertsPerson_('${a.profile_id}')">
+          <div style="min-width:0;">
+            <div dir="auto"><b>${escapeHtml(a.name || a.email || '')}</b> ${anyNew ? '<span class="badge pending">New</span>' : ''} ${statusBadges(a)}
+              ${color ? `<span style="display:inline-block;padding:2px 9px;border-radius:999px;background:${color};color:#fff;font-weight:700;font-size:12.5px;">⚠ ${n} days</span>` : `<span class="muted" style="font-size:12px;">1 day</span>`}</div>
+            <div class="muted" style="font-size:12px;">${escapeHtml(a.email || '')}${a.country ? ' · ' + countryFlag_(a.country) + ' ' + escapeHtml(countryName_(a.country)) : ''}</div>
+            <div class="muted" style="font-size:12px;">${n > 1 ? fmtShort(list[n - 1].day) + ' – ' + fmtShort(a.day) : fmtDay(a.day)} · <b>${songsTotal.toLocaleString()} songs</b> in total${pct !== null ? ` · <span style="${pct < 25 ? 'color:var(--danger,#c0392b);font-weight:600;' : ''}">${pct}% opened on screen / printed</span>` : ''}</div>
+            ${deviceMatchHtml_(a.profile_id)}${a.blocked && a.blocked_tries !== undefined ? `<div class="muted" style="font-size:12px;">${blockedTriesText_(a)}</div>` : ''}
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;">${blockBtn(a)}<span class="adv-chevron${open ? ' open' : ''}" style="font-size:18px;">›</span></div>
+        </div>
+        ${open ? `<div style="margin-top:6px;">${list.map(subRow).join('')}</div>` : ''}
+      </div>`;
+    }).join('');
+    total = people.length; shownCount = shown.length;
+  }
   el.innerHTML = `<div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><b>Lots of songs opened</b><span class="muted" style="font-size:12.5px;">last 60 days</span></div>
     <div class="muted" style="font-size:12px;margin:2px 0 6px;">Accounts that opened 100+ different songs in one day. They're paused at 200 only if they didn't actually open most of them, and everyone is paused at 500. Someone who shows up day after day may be copying.</div>
-    ${shown.map(a => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 2px;border-top:1px solid var(--border);flex-wrap:wrap;">
-      <div style="min-width:0;"><div dir="auto"><b>${escapeHtml(a.name || a.email || '')}</b> ${a.seen ? '' : '<span class="badge pending">New</span>'} ${a.blocked ? `<span class="badge declined">${a.auto_blocked ? 'Auto-blocked' : 'Blocked'}</span>` : ''} ${repeatBadgeHtml_(days[a.profile_id], a.day)}</div>
-        <div class="muted" style="font-size:12px;">${escapeHtml(a.email || '')}${a.country ? ' · ' + countryFlag_(a.country) + ' ' + escapeHtml(countryName_(a.country)) : ''} · ${fmtDay(a.day)} · <b style="color:${a.level === 'limit' ? 'var(--danger,#c0392b)' : 'inherit'}">${a.songs} songs</b>${a.level === 'limit' ? (a.unpaused_at ? ' (unpaused)' : a.pause_reason === 'suspicious' ? ' (paused: few opened on screen)' : a.pause_reason === 'ceiling' ? ' (paused: daily maximum)' : ' (paused)') : ''}</div>${chartAlertSpanHtml_(a)}${deviceMatchHtml_(a.profile_id)}${a.blocked && a.blocked_tries !== undefined ? `<div class="muted" style="font-size:12px;">${blockedTriesText_(a)}</div>` : ''}</div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">${unpauseBtnHtml_(a)}<button class="btn secondary" style="padding:5px 12px;font-size:12.5px;" onclick="blockUserFromAlert_('${a.profile_id}', ${a.blocked ? 'false' : 'true'})">${a.blocked ? 'Unblock' : 'Block'}</button></div>
-    </div>`).join('')}
-    ${rows.length > shown.length ? `<button class="btn secondary" style="margin-top:6px;padding:5px 12px;font-size:12.5px;" onclick="chartAlertsShowAll=true;renderChartAlertsCard_()">Show all ${rows.length}</button>` : ''}
+    ${toggle}
+    ${body}
+    ${total > shownCount ? `<button class="btn secondary" style="margin-top:6px;padding:5px 12px;font-size:12.5px;" onclick="chartAlertsShowAll=true;renderChartAlertsCard_()">Show all ${total}</button>` : ''}
   </div>`;
 }
 // When the songs were opened (add_alert_timespan.sql): first - latest time,
