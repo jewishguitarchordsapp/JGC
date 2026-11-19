@@ -1887,6 +1887,8 @@ let viewAsData = null;     // {favorites,knownChords,playlists,requests,messages
 let usersCache = [];       // admin Users tab cache
 let usersLoaded = false;   // set once usersCache has been populated this admin-panel visit (see loadAdminUsers()/loadAdminStatsOverview())
 let userSearch = '';
+let userStatusFilter = 'all'; // 'all' | 'admin' | 'auto' | 'paused' | 'waiting' | 'rejected' - see accountStatusByEmail_
+let accountStatusByEmail_ = null; // email -> {id, status, since, pause_reason} (add_account_status.sql)
 let usersPage = 0;
 let userSort = 'lastActive';   // 'name' | 'email' | 'lastActive' - see sortUsersList_ (defaults to Last active so the most engaged/recent users surface first)
 let expandedUserEmail = null;  // which row (by email) has its details open, if any
@@ -3334,6 +3336,12 @@ async function supaApi(action, fields) {
     const { data, error } = await getSupa_().rpc('admin_device_matches');
     if (error) return { success: true, matches: null };
     return { success: true, matches: data || [] };
+  }
+  if (action === 'getAccountStatuses') {
+    await supaRequireAdmin_();
+    const { data, error } = await getSupa_().rpc('admin_account_statuses');
+    if (error) return { success: true, statuses: null }; // add_account_status.sql not run yet
+    return { success: true, statuses: data || [] };
   }
   if (action === 'getChartAlerts') {
     await supaRequireAdmin_();
@@ -11142,7 +11150,7 @@ function renderChartAlertsCard_() {
   const el = document.getElementById('chartAlertsCard'); if (!el) return;
   if (chartAlerts === null) { el.innerHTML = ''; return; }
   if (!chartAlerts.length) {
-    el.innerHTML = `<div class="card"><b>Lots of songs opened</b><div class="muted" style="font-size:12.5px;margin-top:4px;">No one has opened an unusual number of songs in the last 60 days. You'll get a badge here if someone opens 100+ different songs in a day (at 200 they're paused until the next day).</div></div>`;
+    el.innerHTML = `<div class="card"><b>Lots of songs opened</b><div class="muted" style="font-size:12.5px;margin-top:4px;">No one has opened an unusual number of songs in the last 60 days. You'll get a badge here if someone opens 100+ different songs in a day.</div></div>`;
     return;
   }
   // One line per account per day (the "limit" alert replaces the "warn" one).
@@ -11305,11 +11313,13 @@ function renderUsersTable() {
       </select>
       <button class="btn secondary" onclick="refreshAdminUsers_()" title="Download a fresh copy of the users list">↻ Refresh</button>
     </div>
+    <div id="userStatusChips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;"></div>
     <div id="usersListContainer"></div></div>
     <aside class="users-side"><div id="chartAlertsCard"></div><div id="usernameAccountsCard"></div></aside></div>`;
   loadUsernameAccounts_();
   loadChartAlerts_();
   loadDeviceMatches_();
+  loadAccountStatuses_();
   const box = document.getElementById('userSearchBox');
   if (box) box.addEventListener('input', e => { userSearch = e.target.value; usersPage = 0; renderUsersList(); });
   const sel = document.getElementById('userSortSelect');
@@ -11344,12 +11354,48 @@ function toggleUserExpanded(email) {
 // errors/level/language) only render for the one row that's expanded, so
 // scanning or sorting the full list doesn't mean scrolling past a wall of
 // per-user detail you didn't ask to see.
+const ACCOUNT_STATUS_INFO = {
+  admin:    { label: 'Blocked by you', chip: 'Blocked by you', bg: '#c0392b', fg: '#fff' },
+  auto:     { label: 'Auto-blocked',   chip: 'Auto-blocked',   bg: '#7f1d1d', fg: '#fff' },
+  rejected: { label: 'Rejected',       chip: 'Rejected sign-ups', bg: '#6b7280', fg: '#fff' },
+  waiting:  { label: 'Waiting for approval', chip: 'Waiting', bg: '#fde68a', fg: '#7a5b00' },
+  paused:   { label: 'Paused today',   chip: 'Paused today',   bg: '#d97706', fg: '#fff' },
+};
+function loadAccountStatuses_() {
+  api('getAccountStatuses', {}).then(d => {
+    if (!d.statuses) { accountStatusByEmail_ = null; renderUserStatusChips_(); return; }
+    accountStatusByEmail_ = {};
+    d.statuses.forEach(x => { accountStatusByEmail_[String(x.email || '').toLowerCase()] = x; });
+    renderUserStatusChips_(); renderUsersList();
+  }).catch(() => {});
+}
+function accountStatusOf_(email) { return accountStatusByEmail_ && accountStatusByEmail_[String(email || '').toLowerCase()] || null; }
+function accountStatusBadgeHtml_(email) {
+  const st = accountStatusOf_(email); if (!st) return '';
+  const info = ACCOUNT_STATUS_INFO[st.status]; if (!info) return '';
+  const extra = st.status === 'paused' && st.pause_reason === 'suspicious' ? ' · few opened' : st.status === 'paused' && st.pause_reason === 'ceiling' ? ' · daily max' : '';
+  return `<span style="display:inline-block;padding:1px 8px;border-radius:999px;font-size:11.5px;font-weight:700;background:${info.bg};color:${info.fg};vertical-align:middle;">${info.label}${extra}</span>`;
+}
+function renderUserStatusChips_() {
+  const el = document.getElementById('userStatusChips'); if (!el) return;
+  if (!accountStatusByEmail_) { el.innerHTML = ''; return; }
+  const counts = {}; Object.values(accountStatusByEmail_).forEach(x => { counts[x.status] = (counts[x.status] || 0) + 1; });
+  const chip = (key, label, n) => `<button class="chip${userStatusFilter === key ? ' active' : ''}" style="cursor:pointer;border:1px solid var(--border);${userStatusFilter === key ? 'background:var(--teal);color:#fff;border-color:var(--teal);' : ''}" onclick="userStatusFilter='${key}';usersPage=0;renderUserStatusChips_();renderUsersList();">${label}${n !== undefined ? ' (' + n + ')' : ''}</button>`;
+  el.innerHTML = chip('all', 'Everyone') + ['admin', 'auto', 'paused', 'waiting', 'rejected']
+    .filter(k => counts[k] || userStatusFilter === k).map(k => chip(k, ACCOUNT_STATUS_INFO[k].chip, counts[k] || 0)).join('');
+}
+async function unblockFromUsers_(email) {
+  const st = accountStatusOf_(email); if (!st || !st.id) return;
+  const ok = await customConfirmAsync(`Unblock ${email}? They'll be able to use the app again.`, { title: 'Unblock account', confirmLabel: 'Unblock' });
+  if (!ok) return;
+  api('blockUser', { id: st.id, block: false }).then(() => { showToast('Unblocked.'); loadAccountStatuses_(); try { loadChartAlerts_(); } catch (e) {} }).catch(err => alert(err.message));
+}
 function renderUsersList() {
   const container = document.getElementById('usersListContainer');
   if (!container) return;
   const q = userSearch.toLowerCase();
   const liveUsernames = Array.isArray(usernameAccounts) ? new Set(usernameAccounts.map(a => a.username)) : null;
-  const list = sortUsersList_(usersCache.filter(u => (!liveUsernames || !isUsernameAccount_(u.email) || liveUsernames.has(usernameOf_(u.email))) && (!q || u.email.toLowerCase().includes(q) || (u.name||'').toLowerCase().includes(q))));
+  const list = sortUsersList_(usersCache.filter(u => (userStatusFilter === 'all' || !accountStatusByEmail_ || ((accountStatusOf_(u.email) || {}).status === userStatusFilter)) && (!liveUsernames || !isUsernameAccount_(u.email) || liveUsernames.has(usernameOf_(u.email))) && (!q || u.email.toLowerCase().includes(q) || (u.name||'').toLowerCase().includes(q))));
   container.innerHTML = `${list.length === 0 ? `<div class="empty">No users found.</div>` : pageSlice(list, usersPage).map(u => {
       const expanded = expandedUserEmail === u.email;
       return `
@@ -11360,6 +11406,7 @@ function renderUsersList() {
             <div style="min-width:0;">
               <div class="title" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${userHasUnreadMessage(u.email) ? '<span class="tab-dot"></span>' : ''}${escapeHtml(u.name||u.email)}</div>
               <div class="muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(u.email)}</div>
+              ${accountStatusBadgeHtml_(u.email) ? `<div style="margin-top:3px;">${accountStatusBadgeHtml_(u.email)}</div>` : ''}
             </div>
           </div>
           <div style="display:flex;align-items:center;gap:10px;flex:none;">
@@ -11375,7 +11422,7 @@ function renderUsersList() {
             ★ ${u.favorites||0} favorites · ${u.knownChords ? 'chords set' : 'no chords set'} · ${u.playlists||0} playlists<br>
             ${u.requests||0} requests · ${u.messages||0} messages · ${u.errors||0} error reports
           </div>
-          <button class="btn secondary" onclick='event.stopPropagation();enterViewAs(${escapeHtml(JSON.stringify(u.email))},${escapeHtml(JSON.stringify(u.name||u.email))})'>View As</button>
+          ${['admin', 'auto'].includes((accountStatusOf_(u.email) || {}).status) ? `<button class="btn secondary" style="margin-right:6px;" onclick='event.stopPropagation();unblockFromUsers_(${escapeHtml(JSON.stringify(u.email))})'>Unblock</button>` : ''}<button class="btn secondary" onclick='event.stopPropagation();enterViewAs(${escapeHtml(JSON.stringify(u.email))},${escapeHtml(JSON.stringify(u.name||u.email))})'>View As</button>
         </div>` : ''}
       </div>`;
     }).join('')}
